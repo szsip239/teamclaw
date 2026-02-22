@@ -1,0 +1,75 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: teamclaw-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_PRIVATE_KEY: "${JWT_PRIVATE_KEY}"
+      JWT_PUBLIC_KEY: "${JWT_PUBLIC_KEY}"
+      JWT_ACCESS_EXPIRY: "${JWT_ACCESS_EXPIRY:-15m}"
+      JWT_REFRESH_EXPIRY: "${JWT_REFRESH_EXPIRY:-7d}"
+      JWT_ISSUER: "${JWT_ISSUER:-teamclaw}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-http://localhost:3000}"
+      NODE_ENV: production
+      DEFAULT_MODEL_PROVIDER: "${DEFAULT_MODEL_PROVIDER:-anthropic}"
+      DEFAULT_MODEL_API_KEY: "${DEFAULT_MODEL_API_KEY:-}"
+      DEFAULT_MODEL_BASE_URL: "${DEFAULT_MODEL_BASE_URL:-https://api.anthropic.com}"
+      DEFAULT_MODEL_API_TYPE: "${DEFAULT_MODEL_API_TYPE:-anthropic-messages}"
+      TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/data/teamclaw}"
+      DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - data-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: teamclaw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teamclaw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamclaw_dev_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - data-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teamclaw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: teamclaw-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - data-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  data-net:
+    driver: bridge

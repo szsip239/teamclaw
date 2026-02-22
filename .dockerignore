@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.claude
+.teamclaw
+.env
+.env.local
+.env.*.local
+data/
+docs/screenshots/
+*.md
+!README.md
+CLAUDE.md
+scripts/debug-*.ts
+coverage/
+.DS_Store

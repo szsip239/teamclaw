@@ -1,0 +1,325 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  SYSTEM_ADMIN
+  DEPT_ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING
+}
+
+enum AgentCategory {
+  DEFAULT      // 所有用户可见
+  DEPARTMENT   // 部门成员可见
+  PERSONAL     // 仅创建者可见
+}
+
+enum SkillCategory {
+  DEFAULT      // 所有用户可见
+  DEPARTMENT   // 部门成员可见
+  PERSONAL     // 仅创建者可见
+}
+
+enum SkillSource {
+  LOCAL        // 平台本地创建
+  CLAWHUB      // 从 ClawHub 拉取
+}
+
+enum ResourceType {
+  MODEL
+  TOOL
+}
+
+enum ResourceStatus {
+  ACTIVE       // 测试通过
+  UNTESTED     // 未测试
+  ERROR        // 测试失败
+}
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  name           String
+  passwordHash   String
+  avatar         String?
+  role           Role          @default(USER)
+  departmentId   String?
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  status         UserStatus    @default(ACTIVE)
+  lastLoginAt    DateTime?
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
+  createdInstances Instance[]    @relation("InstanceCreator")
+  grantedAccess    InstanceAccess[] @relation("AccessGranter")
+  chatSessions     ChatSession[]
+  ownedAgents      AgentMeta[]     @relation("AgentOwner")
+  createdAgents    AgentMeta[]     @relation("AgentMetaCreator")
+  createdSkills    Skill[]         @relation("SkillCreator")
+  publishedVersions SkillVersion[] @relation("VersionPublisher")
+  installedSkills  SkillInstallation[] @relation("SkillInstaller")
+  createdResources Resource[]          @relation("ResourceCreator")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+model Department {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  description     String?
+  users           User[]
+  instanceAccess  InstanceAccess[]
+  agentMetas      AgentMeta[]
+  skills          Skill[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  resource   String
+  resourceId String?
+  details    Json?
+  ipAddress  String
+  userAgent  String?
+  result     String
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([resource, resourceId])
+}
+
+model RefreshToken {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  tokenHash         String   @unique
+  deviceFingerprint String?
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum InstanceStatus {
+  ONLINE
+  OFFLINE
+  DEGRADED
+  ERROR
+}
+
+model Instance {
+  id              String         @id @default(cuid())
+  name            String         @unique
+  description     String?
+
+  // Gateway connection
+  gatewayUrl      String
+  gatewayToken    String         // AES-256-CBC encrypted
+
+  // Docker container
+  containerId     String?
+  containerName   String?
+  imageName       String         @default("alpine/openclaw:latest")
+  dockerConfig    Json?
+
+  // Runtime status
+  status          InstanceStatus @default(OFFLINE)
+  lastHealthCheck DateTime?
+  healthData      Json?
+  version         String?
+
+  // Ownership
+  createdById     String
+  createdBy       User           @relation("InstanceCreator", fields: [createdById], references: [id])
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  accessGrants      InstanceAccess[]
+  chatSessions      ChatSession[]
+  agentMetas        AgentMeta[]
+  skillInstallations SkillInstallation[]
+
+  @@index([status])
+  @@index([createdById])
+}
+
+model InstanceAccess {
+  id            String     @id @default(cuid())
+  departmentId  String
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  instanceId    String
+  instance      Instance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  agentIds      Json?      // string[] | null — null means all agents
+  grantedById   String
+  grantedBy     User       @relation("AccessGranter", fields: [grantedById], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([departmentId, instanceId])
+  @@index([departmentId])
+  @@index([instanceId])
+}
+
+model ChatSession {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instanceId    String
+  instance      Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  agentId       String
+  sessionId     String    // OpenClaw session key, format: agent:<agentId>:tc:<userId>
+  title         String?
+  lastMessageAt DateTime?
+  messageCount  Int       @default(0)
+  isActive      Boolean   @default(true)
+  snapshots     ChatMessageSnapshot[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId, instanceId, agentId])
+  @@index([userId])
+}
+
+model ChatMessageSnapshot {
+  id            String      @id @default(cuid())
+  chatSessionId String
+  chatSession   ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  batchId       String
+  orderIndex    Int
+  role          String      // 'user' | 'assistant'
+  content       String      @db.Text
+  contentBlocks Json?       // ChatContentBlock[] — images and other structured content
+  thinking      String?     @db.Text
+  toolCalls     Json?
+  createdAt     DateTime    @default(now())
+
+  @@index([chatSessionId, batchId])
+}
+
+model AgentMeta {
+  id            String        @id @default(cuid())
+  instanceId    String
+  instance      Instance      @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  agentId       String        // OpenClaw 实例内的 agent ID
+  category      AgentCategory @default(DEFAULT)
+  departmentId  String?       // category=DEPARTMENT 时指向部门
+  department    Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  ownerId       String?       // category=PERSONAL 时指向用户
+  owner         User?         @relation("AgentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdById   String
+  createdBy     User          @relation("AgentMetaCreator", fields: [createdById], references: [id])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([instanceId, agentId])
+  @@index([instanceId])
+  @@index([category])
+  @@index([departmentId])
+  @@index([ownerId])
+}
+
+model Skill {
+  id              String            @id @default(cuid())
+  slug            String            @unique
+  name            String
+  description     String?           @db.Text
+  emoji           String?
+  homepage        String?
+  category        SkillCategory     @default(DEFAULT)
+  source          SkillSource       @default(LOCAL)
+  clawhubSlug     String?
+  version         String            @default("0.1.0")
+  creatorId       String
+  creator         User              @relation("SkillCreator", fields: [creatorId], references: [id])
+  departments     Department[]
+  tags            String[]          @default([])
+  frontmatter     Json?
+  versions        SkillVersion[]
+  installations   SkillInstallation[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([category])
+  @@index([creatorId])
+  @@index([source])
+}
+
+model SkillVersion {
+  id              String   @id @default(cuid())
+  skillId         String
+  skill           Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  version         String
+  changelog       String?  @db.Text
+  publishedById   String
+  publishedBy     User     @relation("VersionPublisher", fields: [publishedById], references: [id])
+  publishedAt     DateTime @default(now())
+
+  @@unique([skillId, version])
+  @@index([skillId])
+}
+
+model SkillInstallation {
+  id               String   @id @default(cuid())
+  skillId          String
+  skill            Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  instanceId       String
+  instance         Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  agentId          String
+  installedVersion String
+  installPath      String   // "workspace" | "global"
+  installedById    String
+  installedBy      User     @relation("SkillInstaller", fields: [installedById], references: [id])
+  installedAt      DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([skillId, instanceId, agentId, installPath])
+  @@index([skillId])
+  @@index([instanceId, agentId])
+}
+
+model Resource {
+  id              String           @id @default(cuid())
+  name            String           // "Anthropic 生产 Key"
+  type            ResourceType
+  provider        String           // Provider ID: "anthropic", "openai", "custom"
+  credentials     String           // AES-256-CBC 加密 JSON: { apiKey: "..." }
+  config          Json?            // 非敏感配置: { baseUrl?, apiType?, envVarName? }
+  status          ResourceStatus   @default(UNTESTED)
+  lastTestedAt    DateTime?
+  lastTestError   String?
+  description     String?          @db.Text
+  isDefault       Boolean          @default(false)
+  createdById     String
+  createdBy       User             @relation("ResourceCreator", fields: [createdById], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([type])
+  @@index([provider])
+  @@index([status])
+}
