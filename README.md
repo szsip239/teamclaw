@@ -16,9 +16,9 @@
 
 ---
 
-<!-- Screenshot placeholder -->
+<!-- Demo GIF -->
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="TeamClaw Dashboard" width="800">
+  <img src="docs/screenshots/teamclaw-demo.gif" alt="TeamClaw Demo" width="800">
 </p>
 
 ---
