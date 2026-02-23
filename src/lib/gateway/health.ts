@@ -41,7 +41,7 @@ async function checkInstance(instanceId: string): Promise<void> {
           status: 'ONLINE',
           lastHealthCheck: new Date(),
           healthData: health as Prisma.InputJsonValue,
-          version: (health.version as string) || undefined,
+          version: (health.version as string) || registry.getServerVersion(instanceId) || undefined,
         },
       }),
       redis.del(failureKey),
