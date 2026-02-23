@@ -4,6 +4,12 @@ import { redis } from '@/lib/redis'
 import { decrypt } from '@/lib/auth/encryption'
 import { registry, ensureRegistryInitialized } from './registry'
 
+/** Return the version string only if it looks like a real release (not "dev", "unknown", etc.). */
+function usableVersion(v: string | null | undefined): string | null {
+  if (!v || v === 'dev' || v === 'unknown') return null
+  return v
+}
+
 const CHECK_INTERVAL_MS = 60_000
 const RECOVERY_INTERVAL_MS = 120_000 // Try to recover ERROR/OFFLINE every 2 min
 const HEALTH_TIMEOUT_MS = 10_000
@@ -41,7 +47,7 @@ async function checkInstance(instanceId: string): Promise<void> {
           status: 'ONLINE',
           lastHealthCheck: new Date(),
           healthData: health as Prisma.InputJsonValue,
-          version: (health.version as string) || registry.getServerVersion(instanceId) || undefined,
+          version: usableVersion(health.version as string) ?? usableVersion(registry.getServerVersion(instanceId)) ?? undefined,
         },
       }),
       redis.del(failureKey),
