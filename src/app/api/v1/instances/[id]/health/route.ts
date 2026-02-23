@@ -29,9 +29,11 @@ export const GET = withAuth(
       const healthData = health as Record<string, unknown>
 
       // Version fallback: healthData → hello-ok → Docker OCI label (one-time backfill)
-      let version = (healthData.version as string) || null
-      if (!version && typeof registry.getServerVersion === 'function') {
-        version = registry.getServerVersion(id)
+      // Skip placeholder values like "dev" or "unknown" from the gateway handshake.
+      const usable = (v: string | null | undefined) => (v && v !== 'dev' && v !== 'unknown') ? v : null
+      let version = usable(healthData.version as string)
+      if (!version) {
+        version = usable(registry.getServerVersion(id))
       }
       if (!version && !instance.version && instance.containerId) {
         try {
