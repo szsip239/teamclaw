@@ -233,7 +233,7 @@ const en: Record<TranslationKey, string> = {
   'agent.createdMsg': 'Agent "{name}" created successfully',
   'agent.deleteTitle': 'Delete Agent',
   'agent.deleteDesc': 'This will remove the Agent from the instance configuration',
-  'agent.deleteConfirmMsg': 'Are you sure you want to delete Agent {name}? Its configuration will be removed from instance {instance}. Files in the workspace will not be deleted.',
+  'agent.deleteConfirmMsg': 'Are you sure you want to delete Agent {name}? Its configuration and workspace directory will be removed from instance {instance}.',
   'agent.deletedMsg': 'Agent "{name}" deleted',
   'agent.noAgents': 'No Agents',
   'agent.noAgentsHint': 'No Agents available. Make sure at least one instance is connected, or click "Create Agent" to add one.',

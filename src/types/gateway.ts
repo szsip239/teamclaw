@@ -152,6 +152,12 @@ export interface GatewayAgent {
   model?: string
 }
 
+/** Result from agents.list including the server-designated default */
+export interface AgentsListResult {
+  agents: GatewayAgent[]
+  defaultId: string | null
+}
+
 export interface GatewaySession {
   id: string
   agentId: string

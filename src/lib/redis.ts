@@ -7,7 +7,7 @@ export const redis =
   (globalForRedis.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379'))
 
 const LOGIN_LOCKOUT_MAX_FAILURES = 5
-const LOGIN_LOCKOUT_WINDOW_SEC = 30 * 60 // 30 minutes
+const LOGIN_LOCKOUT_WINDOW_SEC = 5 * 60 // 5 minutes
 
 export async function checkRateLimit(
   key: string,

@@ -1,14 +1,17 @@
 import type { Prisma } from '@/generated/prisma'
 import { prisma } from '@/lib/db'
 import { redis } from '@/lib/redis'
+import { decrypt } from '@/lib/auth/encryption'
 import { registry, ensureRegistryInitialized } from './registry'
 
 const CHECK_INTERVAL_MS = 60_000
+const RECOVERY_INTERVAL_MS = 120_000 // Try to recover ERROR/OFFLINE every 2 min
 const HEALTH_TIMEOUT_MS = 10_000
 const MAX_CONCURRENT = 5
 const FAILURE_THRESHOLD = 3
 
 let intervalTimer: ReturnType<typeof setInterval> | null = null
+let recoveryTimer: ReturnType<typeof setInterval> | null = null
 let running = false
 
 async function checkInstance(instanceId: string): Promise<void> {
@@ -57,6 +60,45 @@ async function checkInstance(instanceId: string): Promise<void> {
   }
 }
 
+/**
+ * Attempt to reconnect ERROR/OFFLINE instances.
+ * These instances are not checked by `checkAll` because they have no active
+ * WebSocket connection. This function tries to re-establish the connection
+ * and, if successful, runs a health check to bring the instance back ONLINE.
+ */
+async function recoverInstances(): Promise<void> {
+  const instances = await prisma.instance.findMany({
+    where: { status: { in: ['ERROR', 'OFFLINE'] } },
+    select: { id: true, name: true, gatewayUrl: true, gatewayToken: true },
+  })
+
+  if (instances.length === 0) return
+
+  for (let i = 0; i < instances.length; i += MAX_CONCURRENT) {
+    const batch = instances.slice(i, i + MAX_CONCURRENT)
+    await Promise.allSettled(
+      batch.map(async (inst) => {
+        try {
+          // If already connected (e.g. registry init succeeded but DB status
+          // wasn't updated yet), just run the health check directly.
+          if (!registry.isConnected(inst.id)) {
+            // Disconnect stale connection if any
+            if (registry.getStatus(inst.id)) {
+              await registry.disconnect(inst.id)
+            }
+            await registry.connect(inst.id, inst.gatewayUrl, decrypt(inst.gatewayToken))
+          }
+          // Connection succeeded — run health check to update status to ONLINE
+          await checkInstance(inst.id)
+          console.log(`[health] Recovered instance ${inst.name} (${inst.id})`)
+        } catch {
+          // Still unreachable — leave in current state, will retry next cycle
+        }
+      }),
+    )
+  }
+}
+
 async function checkAll(): Promise<void> {
   const instances = await prisma.instance.findMany({
     where: { status: { in: ['ONLINE', 'DEGRADED'] } },
@@ -82,6 +124,13 @@ function startHealthChecks(): void {
   }, CHECK_INTERVAL_MS)
 }
 
+function startRecoveryChecks(): void {
+  if (recoveryTimer) return
+  recoveryTimer = setInterval(() => {
+    recoverInstances().catch(console.error)
+  }, RECOVERY_INTERVAL_MS)
+}
+
 function stopHealthChecks(): void {
   if (intervalTimer) {
     clearInterval(intervalTimer)
@@ -97,12 +146,14 @@ export async function ensureHealthChecks(): Promise<void> {
 
   await ensureRegistryInitialized()
 
-  // Run an initial check
+  // Run initial checks: first regular health, then recover ERROR/OFFLINE
   await checkAll().catch(console.error)
+  await recoverInstances().catch(console.error)
 
   // Start periodic checks
   if (!running) {
     running = true
     startHealthChecks()
+    startRecoveryChecks()
   }
 }

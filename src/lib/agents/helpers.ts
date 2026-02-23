@@ -76,7 +76,35 @@ const KNOWN_AGENT_FIELDS = new Set([
   'models', 'sandbox', 'tools', 'subagents', 'session', 'bindings',
 ])
 
-/** Strip unknown fields from agent entries before sending to config.patch */
+const REDACTED_VALUE = '__OPENCLAW_REDACTED__'
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/**
+ * Recursively strip `__OPENCLAW_REDACTED__` values from an object.
+ * Sending redacted values back to OpenClaw via config.patch causes it to
+ * detect "truncated" redacted arrays and trigger a SIGUSR1 restart.
+ */
+export function stripRedactedValues(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === REDACTED_VALUE) continue
+    if (Array.isArray(value)) {
+      result[key] = value
+        .filter(v => v !== REDACTED_VALUE)
+        .map(v => (isPlainObject(v) ? stripRedactedValues(v as Record<string, unknown>) : v))
+    } else if (isPlainObject(value)) {
+      result[key] = stripRedactedValues(value as Record<string, unknown>)
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+/** Strip unknown fields and redacted values from agent entries before sending to config.patch */
 export function sanitizeAgentEntry(
   entry: AgentConfigEntry | Record<string, unknown>,
 ): Record<string, unknown> {
@@ -86,7 +114,7 @@ export function sanitizeAgentEntry(
       clean[key] = entry[key as keyof typeof entry]
     }
   }
-  return clean
+  return stripRedactedValues(clean)
 }
 
 /** Validate path safety (no traversal) */

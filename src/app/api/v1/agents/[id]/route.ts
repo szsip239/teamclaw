@@ -13,7 +13,8 @@ import {
   sanitizeAgentEntry,
   isAgentVisible,
 } from '@/lib/agents/helpers'
-import type { GatewayAgent } from '@/types/gateway'
+import { dockerManager } from '@/lib/docker/manager'
+import type { GatewayAgent, AgentsListResult } from '@/types/gateway'
 
 // GET /api/v1/agents/[id] — Agent detail (id = instanceId:agentId)
 export const GET = withAuth(
@@ -50,10 +51,11 @@ export const GET = withAuth(
       return NextResponse.json({ error: '实例不存在' }, { status: 404 })
     }
 
-    const [configResult, liveAgents] = await Promise.all([
+    const [configResult, agentsResult] = await Promise.all([
       adapter.getConfig(client),
-      adapter.getAgents(client).catch(() => [] as GatewayAgent[]),
+      adapter.getAgents(client).catch((): AgentsListResult => ({ agents: [], defaultId: null })),
     ])
+    const { agents: liveAgents, defaultId } = agentsResult
 
     const { defaults, list } = extractAgentsConfig(configResult.config)
     const agentConfig = list.find((a) => a.id === agentId)
@@ -92,9 +94,9 @@ export const GET = withAuth(
       id: agentId,
       instanceId,
       instanceName: instance.name,
-      name: agentId,
+      name: live?.name || agentId,
       workspace,
-      isDefault: agentConfig ? agentConfig.default === true : live?.id === 'main',
+      isDefault: defaultId ? agentId === defaultId : (agentConfig ? agentConfig.default === true : false),
       models: agentConfig?.models ?? defaults.models,
       sandbox: agentConfig?.sandbox ?? defaults.sandbox,
       config: agentConfig || { id: agentId },
@@ -154,9 +156,13 @@ export const PUT = withAuth(
       const updatedList = [...list]
       updatedList[agentIdx] = updated
 
-      // Patch config (arrays replace entirely)
+      // OpenClaw merges agents.list arrays (union, not replace) in config.patch.
+      // Two-step: null the key to clear it, then re-fetch hash and set the new list.
+      // sanitizeAgentEntry strips __OPENCLAW_REDACTED__ values to prevent crash.
       try {
-        await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, hash)
+        await adapter.patchConfig(client, { agents: { list: null } }, hash)
+        const freshConfig = await adapter.getConfig(client)
+        await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, freshConfig.hash)
       } catch (err) {
         return NextResponse.json(
           { error: `配置更新失败: ${(err as Error).message}` },
@@ -198,7 +204,7 @@ export const DELETE = withAuth(
     }
 
     const { config, hash } = await adapter.getConfig(client)
-    const { list } = extractAgentsConfig(config)
+    const { defaults, list } = extractAgentsConfig(config)
 
     const agentIdx = list.findIndex((a) => a.id === agentId)
     if (agentIdx === -1) {
@@ -210,14 +216,32 @@ export const DELETE = withAuth(
       return NextResponse.json({ error: '不能删除默认 Agent' }, { status: 400 })
     }
 
+    // Resolve workspace path before removing from config
+    const agentWorkspace = resolveWorkspacePath(list[agentIdx], defaults)
+    const defaultWorkspace = (defaults as Record<string, unknown>).workspace as string || '~/.openclaw/workspace'
+
     const updatedList = list.filter((a) => a.id !== agentId)
     try {
-      await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, hash)
+      // OpenClaw merges agents.list arrays (union, not replace) in config.patch.
+      // Two-step: null the key to clear it, then re-fetch hash and set the new list.
+      await adapter.patchConfig(client, { agents: { list: null } }, hash)
+      const freshConfig = await adapter.getConfig(client)
+      await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, freshConfig.hash)
     } catch (err) {
       return NextResponse.json(
         { error: `配置更新失败: ${(err as Error).message}` },
         { status: 500 },
       )
+    }
+
+
+    // Delete agent workspace directory (only if agent-specific, not the shared default)
+    // Best-effort: don't fail the overall deletion if workspace cleanup fails
+    const instance = await getInstanceWithContainer(instanceId)
+    if (instance?.containerId && agentWorkspace !== defaultWorkspace) {
+      await dockerManager.removeContainerDir(instance.containerId, agentWorkspace).catch((err) => {
+        console.warn(`[agents:delete] Failed to remove workspace ${agentWorkspace}:`, (err as Error).message)
+      })
     }
 
     // Delete associated AgentMeta

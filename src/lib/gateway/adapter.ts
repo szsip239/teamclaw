@@ -1,6 +1,7 @@
 // Server-side only -- OpenClaw Gateway protocol version adapter
 import type {
   GatewayAgent,
+  AgentsListResult,
   GatewaySession,
   HealthStatus,
   ChatOptions,
@@ -19,7 +20,7 @@ export interface GatewayAdapter {
   readonly protocolVersion: string
 
   // Agent operations
-  getAgents(client: GatewayClient): Promise<GatewayAgent[]>
+  getAgents(client: GatewayClient): Promise<AgentsListResult>
   getAgent(client: GatewayClient, agentId: string): Promise<GatewayAgent>
 
   // Session operations
@@ -58,11 +59,18 @@ export interface GatewayAdapter {
 export class GatewayV1Adapter implements GatewayAdapter {
   readonly protocolVersion = '1.0'
 
-  async getAgents(client: GatewayClient): Promise<GatewayAgent[]> {
-    const result = (await client.request('agents.list')) as { agents?: GatewayAgent[] } | GatewayAgent[]
-    // agents.list returns { defaultId, agents: [...] } — extract the array
-    if (Array.isArray(result)) return result
-    return (result as { agents?: GatewayAgent[] }).agents ?? []
+  async getAgents(client: GatewayClient): Promise<AgentsListResult> {
+    const result = (await client.request('agents.list')) as
+      | { defaultId?: string; agents?: GatewayAgent[] }
+      | GatewayAgent[]
+    // agents.list returns { defaultId, agents: [...] } — preserve defaultId
+    if (Array.isArray(result)) {
+      return { agents: result, defaultId: null }
+    }
+    return {
+      agents: result.agents ?? [],
+      defaultId: result.defaultId ?? null,
+    }
   }
 
   async getAgent(client: GatewayClient, agentId: string): Promise<GatewayAgent> {

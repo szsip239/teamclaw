@@ -16,7 +16,7 @@ import {
   canCreateWithCategory,
 } from '@/lib/agents/helpers'
 import type { AgentOverview, AgentCategory } from '@/types/agent'
-import type { GatewayAgent } from '@/types/gateway'
+import type { GatewayAgent, AgentsListResult } from '@/types/gateway'
 
 // GET /api/v1/agents — List all agents across connected instances
 export const GET = withAuth(
@@ -56,10 +56,11 @@ export const GET = withAuth(
           }
 
           // Fetch config and live agents in parallel
-          const [configResult, liveAgents] = await Promise.all([
+          const [configResult, agentsResult] = await Promise.all([
             adapter.getConfig(client),
-            adapter.getAgents(client).catch(() => [] as GatewayAgent[]),
+            adapter.getAgents(client).catch((): AgentsListResult => ({ agents: [], defaultId: null })),
           ])
+          const { agents: liveAgents, defaultId } = agentsResult
 
           const { defaults, list } = extractAgentsConfig(configResult.config)
           const configIds = new Set(list.map((a) => a.id))
@@ -68,6 +69,9 @@ export const GET = withAuth(
           const allAgentIds = new Set<string>()
           for (const entry of list) allAgentIds.add(entry.id)
           for (const live of liveAgents) allAgentIds.add(live.id)
+
+          // Build name map from live agents (id → display name)
+          const liveNameMap = new Map(liveAgents.map(a => [a.id, a.name]))
 
           // Auto-register unknown agents as DEFAULT
           await autoRegisterAgents(instanceId, [...allAgentIds], user.id)
@@ -92,9 +96,9 @@ export const GET = withAuth(
               id: entry.id,
               instanceId,
               instanceName: nameMap.get(instanceId) || instanceId,
-              name: entry.id,
+              name: liveNameMap.get(entry.id) || entry.id,
               workspace: resolveWorkspacePath(entry, defaults),
-              isDefault: entry.default === true,
+              isDefault: defaultId ? entry.id === defaultId : entry.default === true,
               models: entry.models ?? defaults.models,
               sandbox: entry.sandbox ?? defaults.sandbox,
               category: meta?.category as AgentCategory | undefined,
@@ -114,9 +118,9 @@ export const GET = withAuth(
                 id: live.id,
                 instanceId,
                 instanceName: nameMap.get(instanceId) || instanceId,
-                name: live.id,
+                name: live.name || live.id,
                 workspace: live.workspace || (defaults as Record<string, unknown>).workspace as string || '~/.openclaw/workspace',
-                isDefault: live.id === 'main',
+                isDefault: defaultId ? live.id === defaultId : live.id === 'main',
                 models: defaults.models,
                 sandbox: defaults.sandbox,
                 category: meta?.category as AgentCategory | undefined,
@@ -207,10 +211,11 @@ export const POST = withAuth(
       if (models) newAgent.models = models
       if (sandbox) newAgent.sandbox = sandbox
 
-      // Patch config — arrays replace entirely, so pass the full list
-      const updatedList = [...list, newAgent]
+      // config.patch does union merge for arrays — sending only the new entry
+      // adds it to the existing list. Avoids sending back redacted values from
+      // existing entries which would crash OpenClaw (SIGUSR1 on "truncated" detection).
       try {
-        await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, hash)
+        await adapter.patchConfig(client, { agents: { list: [sanitizeAgentEntry(newAgent)] } }, hash)
       } catch (err) {
         return NextResponse.json(
           { error: `配置更新失败: ${(err as Error).message}` },
