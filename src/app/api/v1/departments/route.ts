@@ -35,7 +35,7 @@ export const GET = withAuth(
     } catch (err) {
       console.error('GET /api/v1/departments error:', err)
       return NextResponse.json(
-        { error: '获取部门列表失败', detail: String(err) },
+        { error: '获取部门列表失败' },
         { status: 500 },
       )
     }

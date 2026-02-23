@@ -234,18 +234,7 @@ export class DockerManager {
       const chunks: Buffer[] = []
       stream.on('data', (chunk: Buffer) => chunks.push(chunk))
       stream.on('end', () => {
-        const raw = Buffer.concat(chunks).toString('utf8')
-        // Docker multiplexed stream: strip 8-byte header from each frame
-        const lines = raw.split('\n').map((line) => {
-          if (line.length >= 8) {
-            const firstByte = line.charCodeAt(0)
-            if (firstByte === 1 || firstByte === 2) {
-              return line.substring(8)
-            }
-          }
-          return line
-        })
-        resolve(lines.join('\n').trim())
+        resolve(demuxDockerStream(Buffer.concat(chunks)).trim())
       })
       stream.on('error', reject)
     })
@@ -299,15 +288,7 @@ export class DockerManager {
       const chunks: Buffer[] = []
       stream.on('data', (chunk: Buffer) => chunks.push(chunk))
       stream.on('end', () => {
-        const raw = Buffer.concat(chunks).toString('utf8')
-        const lines = raw.split('\n').map((line) => {
-          if (line.length >= 8) {
-            const firstByte = line.charCodeAt(0)
-            if (firstByte === 1 || firstByte === 2) return line.substring(8)
-          }
-          return line
-        })
-        resolve(lines.join('\n').trim())
+        resolve(demuxDockerStream(Buffer.concat(chunks)).trim())
       })
       stream.on('error', reject)
     })
