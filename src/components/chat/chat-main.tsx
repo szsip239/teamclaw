@@ -16,6 +16,7 @@ export function ChatMain() {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
   const messagesLength = useChatStore((s) => s.messages.length)
+  const isStreaming = useChatStore((s) => s.isStreaming)
 
   // Find existing active session for the selected agent
   const { data: sessions } = useChatSessions()
@@ -32,11 +33,12 @@ export function ChatMain() {
     : null
 
   // Fetch history when we have a matching session
-  const { data: historyData, isLoading: isLoadingHistoryQuery } =
+  const { data: historyData, isLoading: isLoadingHistoryQuery, dataUpdatedAt } =
     useChatHistory(matchingSession?.id ?? null)
 
-  // Track which session's history we've already loaded to avoid re-applying
-  const loadedSessionRef = useRef<string | null>(null)
+  // Track which session + data version we've already loaded to avoid
+  // redundant re-applies while still picking up background refetch results.
+  const loadedRef = useRef<{ sessionId: string; updatedAt: number } | null>(null)
 
   useEffect(() => {
     setLoadingHistory(isLoadingHistoryQuery)
@@ -49,19 +51,23 @@ export function ChatMain() {
     }
   }, [matchingSession, activeSessionId, setActiveSessionId])
 
-  // When history data arrives, assemble the full message list with separators.
-  // Also reload when messages were cleared (messagesLength === 0) to handle
-  // switching back to a previously viewed conversation.
+  // When history data arrives or updates, assemble the full message list.
+  // Skip during streaming to avoid overwriting real-time content.
+  // Re-apply when: session changes, data refreshes (dataUpdatedAt), or messages cleared.
   useEffect(() => {
     if (!matchingSession) {
-      loadedSessionRef.current = null
+      loadedRef.current = null
       return
     }
-    if (!historyData) return
-    const needsLoad =
-      matchingSession.id !== loadedSessionRef.current || messagesLength === 0
-    if (needsLoad) {
-      loadedSessionRef.current = matchingSession.id
+    if (!historyData || !dataUpdatedAt || isStreaming) return
+
+    const alreadyLoaded =
+      loadedRef.current?.sessionId === matchingSession.id &&
+      loadedRef.current?.updatedAt === dataUpdatedAt &&
+      messagesLength > 0
+
+    if (!alreadyLoaded) {
+      loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
       const assembled = assembleMessages(
         historyData.snapshots,
         historyData.currentMessages,
@@ -69,7 +75,7 @@ export function ChatMain() {
       )
       setMessages(assembled)
     }
-  }, [historyData, matchingSession, setMessages, messagesLength])
+  }, [historyData, matchingSession, setMessages, messagesLength, dataUpdatedAt, isStreaming])
 
   if (!selectedAgent) {
     return (
