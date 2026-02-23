@@ -12,7 +12,10 @@ interface ManagedInstance {
   status: ConnectionStatus
 }
 
-const globalForRegistry = globalThis as unknown as { gatewayRegistry: GatewayRegistry }
+const globalForRegistry = globalThis as unknown as {
+  gatewayRegistry: GatewayRegistry
+  registryInitialized?: boolean
+}
 
 export class GatewayRegistry {
   private instances = new Map<string, ManagedInstance>()
@@ -140,10 +143,9 @@ export const registry =
 // Lazy initialization: restore connections for all non-DISABLED instances.
 // ERROR/OFFLINE instances are included because the container may have restarted
 // since the status was set — skipping them would leave them stuck forever.
-let initialized = false
 export async function ensureRegistryInitialized(): Promise<void> {
-  if (initialized) return
-  initialized = true
+  if (globalForRegistry.registryInitialized) return
+  globalForRegistry.registryInitialized = true
 
   try {
     const instances = await prisma.instance.findMany()

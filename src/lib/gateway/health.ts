@@ -10,9 +10,12 @@ const HEALTH_TIMEOUT_MS = 10_000
 const MAX_CONCURRENT = 5
 const FAILURE_THRESHOLD = 3
 
-let intervalTimer: ReturnType<typeof setInterval> | null = null
-let recoveryTimer: ReturnType<typeof setInterval> | null = null
-let running = false
+const globalForHealth = globalThis as unknown as {
+  healthIntervalTimer?: ReturnType<typeof setInterval> | null
+  healthRecoveryTimer?: ReturnType<typeof setInterval> | null
+  healthRunning?: boolean
+  healthEnsured?: boolean
+}
 
 async function checkInstance(instanceId: string): Promise<void> {
   const failureKey = `health_failures:${instanceId}`
@@ -107,6 +110,8 @@ async function checkAll(): Promise<void> {
 
   if (instances.length === 0) {
     stopHealthChecks()
+    stopRecoveryChecks()
+    globalForHealth.healthRunning = false
     return
   }
 
@@ -118,31 +123,36 @@ async function checkAll(): Promise<void> {
 }
 
 function startHealthChecks(): void {
-  if (intervalTimer) return
-  intervalTimer = setInterval(() => {
+  if (globalForHealth.healthIntervalTimer) return
+  globalForHealth.healthIntervalTimer = setInterval(() => {
     checkAll().catch(console.error)
   }, CHECK_INTERVAL_MS)
 }
 
 function startRecoveryChecks(): void {
-  if (recoveryTimer) return
-  recoveryTimer = setInterval(() => {
+  if (globalForHealth.healthRecoveryTimer) return
+  globalForHealth.healthRecoveryTimer = setInterval(() => {
     recoverInstances().catch(console.error)
   }, RECOVERY_INTERVAL_MS)
 }
 
 function stopHealthChecks(): void {
-  if (intervalTimer) {
-    clearInterval(intervalTimer)
-    intervalTimer = null
+  if (globalForHealth.healthIntervalTimer) {
+    clearInterval(globalForHealth.healthIntervalTimer)
+    globalForHealth.healthIntervalTimer = null
   }
 }
 
-let ensured = false
+function stopRecoveryChecks(): void {
+  if (globalForHealth.healthRecoveryTimer) {
+    clearInterval(globalForHealth.healthRecoveryTimer)
+    globalForHealth.healthRecoveryTimer = null
+  }
+}
 
 export async function ensureHealthChecks(): Promise<void> {
-  if (ensured) return
-  ensured = true
+  if (globalForHealth.healthEnsured) return
+  globalForHealth.healthEnsured = true
 
   await ensureRegistryInitialized()
 
@@ -151,8 +161,8 @@ export async function ensureHealthChecks(): Promise<void> {
   await recoverInstances().catch(console.error)
 
   // Start periodic checks
-  if (!running) {
-    running = true
+  if (!globalForHealth.healthRunning) {
+    globalForHealth.healthRunning = true
     startHealthChecks()
     startRecoveryChecks()
   }

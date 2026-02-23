@@ -18,6 +18,9 @@ import type { InstanceStatus, Prisma } from '@/generated/prisma'
 const GATEWAY_PORT = 18789          // Container-internal gateway port (fixed)
 const BASE_HOST_PORT = 18800        // Host port range starts here (avoids conflict with local OpenClaw on 18789)
 
+// Simple mutex to prevent port race conditions during concurrent instance creation
+let portLock: Promise<void> = Promise.resolve()
+
 const instanceSelectFields = {
   id: true,
   name: true,
@@ -38,25 +41,36 @@ const instanceSelectFields = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-/** Find the next available host port for gateway binding. */
+/** Find the next available host port for gateway binding (serialized to prevent races). */
 async function findNextAvailablePort(): Promise<number> {
-  const instances = await prisma.instance.findMany({
-    where: { containerId: { not: null } },
-    select: { gatewayUrl: true },
-  })
+  // Serialize access: wait for any in-flight port allocation, then hold the lock
+  // until our DB record is created (caller must resolve the lock).
+  let release!: () => void
+  const prev = portLock
+  portLock = new Promise<void>((r) => { release = r })
+  await prev
 
-  let maxPort = BASE_HOST_PORT - 1
-  for (const inst of instances) {
-    try {
-      const url = new URL(inst.gatewayUrl.replace(/^ws/, 'http'))
-      const port = parseInt(url.port, 10)
-      if (port > maxPort) maxPort = port
-    } catch {
-      // skip invalid URLs
+  try {
+    const instances = await prisma.instance.findMany({
+      where: { containerId: { not: null } },
+      select: { gatewayUrl: true },
+    })
+
+    let maxPort = BASE_HOST_PORT - 1
+    for (const inst of instances) {
+      try {
+        const url = new URL(inst.gatewayUrl.replace(/^ws/, 'http'))
+        const port = parseInt(url.port, 10)
+        if (port > maxPort) maxPort = port
+      } catch {
+        // skip invalid URLs
+      }
     }
-  }
 
-  return maxPort + 1
+    return maxPort + 1
+  } finally {
+    release()
+  }
 }
 
 /** Resolve model provider from request body or environment defaults. */
