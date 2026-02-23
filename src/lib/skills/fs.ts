@@ -82,11 +82,19 @@ export async function listSkillFiles(
   }
 }
 
+/** Throw if path escapes the skill directory (defense-in-depth). */
+function assertSafePath(slug: string, filePath: string): void {
+  if (!isSkillPathSafe(slug, filePath)) {
+    throw new Error(`Unsafe file path: ${filePath}`)
+  }
+}
+
 /** Read a file from a skill directory */
 export async function readSkillFile(
   slug: string,
   filePath: string,
 ): Promise<string> {
+  assertSafePath(slug, filePath)
   const fullPath = join(getSkillDir(slug), filePath)
   return readFile(fullPath, 'utf-8')
 }
@@ -97,6 +105,7 @@ export async function writeSkillFile(
   filePath: string,
   content: string,
 ): Promise<void> {
+  assertSafePath(slug, filePath)
   const fullPath = join(getSkillDir(slug), filePath)
   const dir = join(fullPath, '..')
   await mkdir(dir, { recursive: true })
@@ -108,6 +117,7 @@ export async function deleteSkillFile(
   slug: string,
   filePath: string,
 ): Promise<void> {
+  assertSafePath(slug, filePath)
   const fullPath = join(getSkillDir(slug), filePath)
   await rm(fullPath, { recursive: true })
 }

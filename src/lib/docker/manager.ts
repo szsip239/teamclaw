@@ -403,5 +403,6 @@ export class DockerManager {
   }
 }
 
-export const dockerManager = globalForDocker.dockerManager || new DockerManager()
-if (process.env.NODE_ENV !== 'production') globalForDocker.dockerManager = dockerManager
+export const dockerManager =
+  globalForDocker.dockerManager ||
+  (globalForDocker.dockerManager = new DockerManager())

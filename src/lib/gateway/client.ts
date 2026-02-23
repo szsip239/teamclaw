@@ -79,6 +79,15 @@ export class GatewayClient {
         this.connected = false
         this.stopTickWatch()
         this.onStatusChange?.('disconnected')
+
+        // Reject any pending connect() promise so the caller doesn't hang.
+        // handleReconnect() will create a fresh connect() call with its own promise.
+        if (this.connectReject) {
+          this.connectReject(new Error('WebSocket closed before handshake completed'))
+          this.connectResolve = null
+          this.connectReject = null
+        }
+
         if (!this.intentionalDisconnect) {
           this.handleReconnect()
         }
