@@ -56,8 +56,9 @@ DEVELOPMENT.md
 docs/PRD.md
 docs/DEVELOPMENT.md
 
-# debug scripts (may contain tokens)
+# debug/test scripts (may contain tokens or local env data)
 scripts/debug-*.ts
+scripts/rebuild-test-data.ts
 
 # Claude Code private config
 CLAUDE.md

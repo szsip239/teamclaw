@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { clawHubPullSchema } from '@/lib/validations/skill'
-import { pullClawHubSkill, parseClawHubSlug, parseClawHubFullPath } from '@/lib/skills/clawhub'
+import { pullClawHubSkill, parseClawHubSlug, parseClawHubFullPath, getClawHubInfo } from '@/lib/skills/clawhub'
 import { ensureSkillDir, readSkillFile, parseFrontmatter } from '@/lib/skills/fs'
 import { auditLog } from '@/lib/audit'
 import type { Prisma } from '@/generated/prisma'
@@ -23,7 +23,7 @@ export const POST = withAuth(
       const slug = parseClawHubSlug(rawInput)
 
       // Extract full path (owner/slug) for link construction
-      const fullPath = parseClawHubFullPath(rawInput)
+      let fullPath = parseClawHubFullPath(rawInput)
 
       // Derive homepage URL from user input
       let homepage: string | null = null
@@ -86,6 +86,20 @@ export const POST = withAuth(
       const connectDepts = skillCategory === 'DEPARTMENT' && departmentIds
         ? { connect: departmentIds.map((id: string) => ({ id })) }
         : undefined
+
+      // Backfill clawhubSlug (owner/name) and homepage from ClawHub API
+      // so the ClawHub link displays immediately without requiring a manual update check
+      if (!fullPath || !homepage) {
+        const info = await getClawHubInfo(slug).catch(() => null)
+        if (info) {
+          if (!fullPath && info.ownerHandle) {
+            fullPath = `${info.ownerHandle}/${info.slug}`
+          }
+          if (!homepage) {
+            homepage = info.homepage
+          }
+        }
+      }
 
       // Create Skill DB record
       const skill = await prisma.skill.create({
