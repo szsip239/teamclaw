@@ -34,24 +34,19 @@ import { useT } from "@/stores/language-store"
 import type { InstanceResponse } from "@/types/instance"
 
 async function openDashboard(instanceId: string, errorMsg: string) {
+  // Open window synchronously to avoid popup blocker (must be in user click context)
+  const win = window.open("about:blank", "_blank")
   try {
     const data = await api.get<{ dashboardUrl: string; token: string }>(
       `/api/v1/instances/${instanceId}/dashboard`
     )
-    // Open via hidden form POST to avoid exposing token in URL
-    const form = document.createElement("form")
-    form.method = "POST"
-    form.action = data.dashboardUrl + "/"
-    form.target = "_blank"
-    const input = document.createElement("input")
-    input.type = "hidden"
-    input.name = "token"
-    input.value = data.token
-    form.appendChild(input)
-    document.body.appendChild(form)
-    form.submit()
-    document.body.removeChild(form)
+    // Navigate to dashboard with token in hash params — not sent to server
+    // Control UI reads: new URLSearchParams(hash.slice(1)).get("token")
+    if (win) {
+      win.location.href = `${data.dashboardUrl}/#token=${encodeURIComponent(data.token)}`
+    }
   } catch {
+    win?.close()
     toast.error(errorMsg)
   }
 }

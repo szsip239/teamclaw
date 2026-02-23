@@ -42,10 +42,11 @@ export const POST = withAuth(
         return NextResponse.json({ error: '源实例未连接' }, { status: 400 })
       }
 
-      const [srcConfigResult, srcLiveAgents] = await Promise.all([
+      const [srcConfigResult, srcAgentsResult] = await Promise.all([
         srcAdapter.getConfig(srcClient),
-        srcAdapter.getAgents(srcClient).catch(() => [] as GatewayAgent[]),
+        srcAdapter.getAgents(srcClient).catch((): { agents: GatewayAgent[]; defaultId: string | null } => ({ agents: [], defaultId: null })),
       ])
+      const srcLiveAgents = srcAgentsResult.agents
       const { defaults: srcDefaults, list: srcList } = extractAgentsConfig(srcConfigResult.config)
 
       // Find source agent in config or live agents
@@ -88,11 +89,12 @@ export const POST = withAuth(
       }
 
       // 5. Phase 1: Patch config to add agent to target
-      const updatedList = [...tgtList, newAgent]
+      // config.patch does union merge for arrays — sending only the new entry
+      // adds it without sending back redacted values from existing entries.
       try {
         await tgtAdapter.patchConfig(
           tgtClient,
-          { agents: { list: updatedList.map(sanitizeAgentEntry) } },
+          { agents: { list: [sanitizeAgentEntry(newAgent)] } },
           tgtConfigResult.hash,
         )
       } catch (err) {
@@ -139,14 +141,17 @@ export const POST = withAuth(
             filesCopied = true
           } catch (copyErr) {
             // Phase 2 failed — rollback Phase 1 (remove agent from target config)
+            // Two-step null-then-set to handle union merge + redacted values
             try {
               const freshConfig = await tgtAdapter.getConfig(tgtClient)
               const { list: freshList } = extractAgentsConfig(freshConfig.config)
               const rolledBackList = freshList.filter((a) => a.id !== newAgentId)
+              await tgtAdapter.patchConfig(tgtClient, { agents: { list: null } }, freshConfig.hash)
+              const afterNull = await tgtAdapter.getConfig(tgtClient)
               await tgtAdapter.patchConfig(
                 tgtClient,
                 { agents: { list: rolledBackList.map(sanitizeAgentEntry) } },
-                freshConfig.hash,
+                afterNull.hash,
               )
             } catch {
               // Rollback failed — log but don't hide original error

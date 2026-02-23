@@ -51,7 +51,7 @@ export const GET = withAuth(
         if (!adapter || !client) return
 
         try {
-          const liveAgents = await adapter.getAgents(client)
+          const { agents: liveAgents } = await adapter.getAgents(client)
           const agentIds = liveAgents.map((a) => a.id)
 
           // Auto-register unknown agents

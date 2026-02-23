@@ -137,31 +137,47 @@ export const registry =
   globalForRegistry.gatewayRegistry ||
   (globalForRegistry.gatewayRegistry = new GatewayRegistry())
 
-// Lazy initialization: restore connections for ONLINE/DEGRADED instances
+// Lazy initialization: restore connections for all non-DISABLED instances.
+// ERROR/OFFLINE instances are included because the container may have restarted
+// since the status was set — skipping them would leave them stuck forever.
 let initialized = false
 export async function ensureRegistryInitialized(): Promise<void> {
   if (initialized) return
   initialized = true
 
   try {
-    const instances = await prisma.instance.findMany({
-      where: { status: { in: ['ONLINE', 'DEGRADED'] } },
-    })
+    const instances = await prisma.instance.findMany()
 
     await Promise.allSettled(
       instances.map(async (inst) => {
         try {
           await registry.connect(inst.id, inst.gatewayUrl, decrypt(inst.gatewayToken))
+          // Connection succeeded — if instance was ERROR/OFFLINE, mark as DEGRADED
+          // so the health check cycle can promote it to ONLINE on next success.
+          if (inst.status === 'ERROR' || inst.status === 'OFFLINE') {
+            await prisma.instance.update({
+              where: { id: inst.id },
+              data: { status: 'DEGRADED' },
+            }).catch(console.error)
+          }
         } catch (err) {
           console.error(`Failed to restore connection for instance ${inst.id}:`, err)
-          await prisma.instance.update({
-            where: { id: inst.id },
-            data: { status: 'ERROR' },
-          }).catch(console.error)
+          // Only downgrade ONLINE/DEGRADED → ERROR; leave ERROR/OFFLINE as-is
+          if (inst.status === 'ONLINE' || inst.status === 'DEGRADED') {
+            await prisma.instance.update({
+              where: { id: inst.id },
+              data: { status: 'ERROR' },
+            }).catch(console.error)
+          }
         }
       })
     )
   } catch (err) {
     console.error('Failed to initialize gateway registry:', err)
   }
+
+  // Start health checks + recovery in background (lazy import to avoid circular deps)
+  import('./health').then(({ ensureHealthChecks }) =>
+    ensureHealthChecks().catch(console.error),
+  )
 }

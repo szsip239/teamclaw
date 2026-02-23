@@ -231,7 +231,7 @@ const zhCN = {
   'agent.createdMsg': 'Agent "{name}" 创建成功',
   'agent.deleteTitle': '删除 Agent',
   'agent.deleteDesc': '此操作将从实例配置中移除该 Agent',
-  'agent.deleteConfirmMsg': '确定要删除 Agent {name} 吗？该 Agent 的配置将从实例 {instance} 中移除。工作目录中的文件不会被删除。',
+  'agent.deleteConfirmMsg': '确定要删除 Agent {name} 吗？该 Agent 的配置和工作目录将从实例 {instance} 中移除。',
   'agent.deletedMsg': 'Agent "{name}" 已删除',
   'agent.noAgents': '暂无 Agent',
   'agent.noAgentsHint': '当前没有可用的 Agent。请确保至少有一个实例已连接，或点击上方「创建 Agent」添加新的 Agent。',

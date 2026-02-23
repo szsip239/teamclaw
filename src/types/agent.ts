@@ -17,7 +17,7 @@ export interface AgentOverview {
   id: string               // gateway agent ID
   instanceId: string
   instanceName: string
-  name: string             // = id
+  name: string             // display name from gateway, fallback to id
   workspace: string
   isDefault: boolean
   models?: AgentModelConfig
