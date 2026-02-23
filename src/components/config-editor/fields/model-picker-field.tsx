@@ -156,6 +156,7 @@ export function ModelPickerField({
                   {customMode ? (
                     <div className="flex gap-1.5 px-2 py-1.5">
                       <Input
+                        autoComplete="off"
                         value={customValue}
                         onChange={(e) => setCustomValue(e.target.value)}
                         placeholder="provider/model"
@@ -360,6 +361,7 @@ export function MultiModelPickerField({
                   {customMode ? (
                     <div className="flex gap-1.5 px-2 py-1.5">
                       <Input
+                        autoComplete="off"
                         value={customValue}
                         onChange={(e) => setCustomValue(e.target.value)}
                         placeholder="provider/model"
