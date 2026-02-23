@@ -13,6 +13,18 @@ fi
 ERROR=0
 
 # --- 1. Block private files ---
+# Allowlist: files that look like they match but are safe to commit
+ALLOWED_FILES=".env.example"
+
+is_allowed() {
+  for allowed in $ALLOWED_FILES; do
+    if [ "$1" = "$allowed" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 PRIVATE_PATTERNS="
 CLAUDE.md
 .claude/
@@ -30,11 +42,16 @@ openclaw*.md
 for pattern in $PRIVATE_PATTERNS; do
   MATCHED=$(echo "$STAGED" | grep -F "$pattern" || true)
   if [ -n "$MATCHED" ]; then
-    echo "❌ BLOCKED: private file staged for commit:"
-    echo "   $MATCHED"
-    echo "   This file is for local development only and must not be pushed."
-    echo ""
-    ERROR=1
+    for file in $MATCHED; do
+      if is_allowed "$file"; then
+        continue
+      fi
+      echo "❌ BLOCKED: private file staged for commit:"
+      echo "   $file"
+      echo "   This file is for local development only and must not be pushed."
+      echo ""
+      ERROR=1
+    done
   fi
 done
 
