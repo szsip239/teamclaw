@@ -1,0 +1,82 @@
+#!/bin/sh
+
+# ============================================================
+# Pre-commit guard: block private files and secrets
+# ============================================================
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+ERROR=0
+
+# --- 1. Block private files ---
+PRIVATE_PATTERNS="
+CLAUDE.md
+.claude/
+PRD.md
+DEVELOPMENT.md
+docs/PRD.md
+docs/DEVELOPMENT.md
+scripts/debug-
+.env
+.env.local
+.env.*.local
+openclaw*.md
+"
+
+for pattern in $PRIVATE_PATTERNS; do
+  MATCHED=$(echo "$STAGED" | grep -F "$pattern" || true)
+  if [ -n "$MATCHED" ]; then
+    echo "❌ BLOCKED: private file staged for commit:"
+    echo "   $MATCHED"
+    echo "   This file is for local development only and must not be pushed."
+    echo ""
+    ERROR=1
+  fi
+done
+
+# --- 2. Scan for hardcoded secrets ---
+SECRETS_REGEX='(PRIVATE_KEY|SECRET_KEY|ENCRYPTION_KEY|API_KEY|ACCESS_TOKEN|sk-[a-zA-Z0-9]{20,}|-----BEGIN\s*(RSA\s*)?PRIVATE\s*KEY)'
+
+for file in $STAGED; do
+  # Skip the hook file itself to avoid self-detection
+  case "$file" in .husky/*) continue ;; esac
+  if [ -f "$file" ]; then
+    MATCH=$(git diff --cached -- "$file" | grep -E "^\+" | grep -iE "$SECRETS_REGEX" | head -3 || true)
+    if [ -n "$MATCH" ]; then
+      echo "❌ BLOCKED: possible secret in $file:"
+      echo "$MATCH" | head -3
+      echo ""
+      ERROR=1
+    fi
+  fi
+done
+
+# --- 3. Check for hardcoded Chinese in components (i18n rule) ---
+for file in $STAGED; do
+  case "$file" in
+    src/components/*|src/app/*)
+      if [ -f "$file" ]; then
+        CHINESE=$(git diff --cached -- "$file" | grep -E "^\+" | grep -P '[\x{4e00}-\x{9fff}]' | grep -v "// " | grep -v "import " | head -3 || true)
+        if [ -n "$CHINESE" ]; then
+          echo "⚠️  WARNING: hardcoded Chinese text in $file:"
+          echo "$CHINESE" | head -3
+          echo "   Use t('key') from useT() instead."
+          echo ""
+          ERROR=1
+        fi
+      fi
+      ;;
+  esac
+done
+
+if [ $ERROR -ne 0 ]; then
+  echo "==========================================="
+  echo "Commit blocked. Fix the issues above."
+  echo "If intentional, use: git commit --no-verify"
+  echo "==========================================="
+  exit 1
+fi
