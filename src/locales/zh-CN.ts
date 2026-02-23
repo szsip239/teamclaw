@@ -587,6 +587,7 @@ const zhCN = {
   'config.multimodal': '多模态',
   'config.verified': '已验证',
   'config.untested': '未测试',
+  'config.legacy': '旧版',
   'config.connectionError': '连接错误',
   'config.minimum': '最小: {n}',
   'config.maximum': '最大: {n}',

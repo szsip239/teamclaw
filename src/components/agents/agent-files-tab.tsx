@@ -14,27 +14,28 @@ import {
 } from "lucide-react"
 import { useAgentFiles, useAgentFileContent, useSaveAgentFile } from "@/hooks/use-agents"
 import { AgentFileEditor } from "./agent-file-editor"
-import { useT } from "@/stores/language-store"
+import { useT, useLanguageStore } from "@/stores/language-store"
 import { toast } from "sonner"
 
 interface AgentFilesTabProps {
   compositeId: string
 }
 
-/** Well-known workspace files with quick-create templates */
+/** Well-known workspace files with quick-create templates (bilingual) */
 const QUICK_FILES = [
-  { name: "AGENTS.md", descKey: "agent.fileAgentsMd" as const, template: "# Agent Instructions\n\n<!-- 定义此 Agent 的操作指令和行为规则 -->\n\n## 指令\n\n- \n\n## 约束\n\n- \n" },
-  { name: "SOUL.md", descKey: "agent.fileSoulMd" as const, template: "# Soul\n\n<!-- 定义 Agent 的人格和交流风格 -->\n\n## 人格\n\n\n## 语气\n\n\n## 边界\n\n" },
-  { name: "MEMORY.md", descKey: "agent.fileMemoryMd" as const, template: "# Memory\n\n<!-- Agent 的长期记忆存储 -->\n\n" },
-  { name: "IDENTITY.md", descKey: "agent.fileIdentityMd" as const, template: "# Identity\n\n## 名称\n\n\n## 风格\n\n" },
-  { name: "USER.md", descKey: "agent.fileUserMd" as const, template: "# User Preferences\n\n" },
-  { name: "TOOLS.md", descKey: "agent.fileToolsMd" as const, template: "# Tools Documentation\n\n" },
-  { name: "HEARTBEAT.md", descKey: "agent.fileHeartbeatMd" as const, template: "# Heartbeat Checklist\n\n- [ ] \n" },
-  { name: "BOOT.md", descKey: "agent.fileBootMd" as const, template: "# Boot Sequence\n\n- [ ] \n" },
+  { name: "AGENTS.md", descKey: "agent.fileAgentsMd" as const, en: "# Agent Instructions\n\n## Instructions\n\n- \n\n## Constraints\n\n- \n", zh: "# Agent Instructions\n\n## 指令\n\n- \n\n## 约束\n\n- \n" },
+  { name: "SOUL.md", descKey: "agent.fileSoulMd" as const, en: "# Soul\n\n## Personality\n\n\n## Tone\n\n\n## Boundaries\n\n", zh: "# Soul\n\n## 人格\n\n\n## 语气\n\n\n## 边界\n\n" },
+  { name: "MEMORY.md", descKey: "agent.fileMemoryMd" as const, en: "# Memory\n\n", zh: "# Memory\n\n" },
+  { name: "IDENTITY.md", descKey: "agent.fileIdentityMd" as const, en: "# Identity\n\n## Name\n\n\n## Style\n\n", zh: "# Identity\n\n## 名称\n\n\n## 风格\n\n" },
+  { name: "USER.md", descKey: "agent.fileUserMd" as const, en: "# User Preferences\n\n", zh: "# User Preferences\n\n" },
+  { name: "TOOLS.md", descKey: "agent.fileToolsMd" as const, en: "# Tools Documentation\n\n", zh: "# Tools Documentation\n\n" },
+  { name: "HEARTBEAT.md", descKey: "agent.fileHeartbeatMd" as const, en: "# Heartbeat Checklist\n\n- [ ] \n", zh: "# Heartbeat Checklist\n\n- [ ] \n" },
+  { name: "BOOT.md", descKey: "agent.fileBootMd" as const, en: "# Boot Sequence\n\n- [ ] \n", zh: "# Boot Sequence\n\n- [ ] \n" },
 ] as const
 
 export function AgentFilesTab({ compositeId }: AgentFilesTabProps) {
   const t = useT()
+  const locale = useLanguageStore((s) => s.language)
   const [currentDir, setCurrentDir] = useState<string | undefined>(undefined)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
@@ -71,9 +72,10 @@ export function AgentFilesTab({ compositeId }: AgentFilesTabProps) {
     setSelectedFile(null)
   }
 
-  async function handleQuickCreate(name: string, template: string) {
+  async function handleQuickCreate(name: string, template: { en: string; zh: string }) {
+    const content = locale === 'zh-CN' ? template.zh : template.en
     try {
-      await saveFile.mutateAsync({ path: name, content: template })
+      await saveFile.mutateAsync({ path: name, content })
       toast.success(t('agent.fileCreatedMsg', { name }))
       setSelectedFile(name)
     } catch (err) {
@@ -147,7 +149,7 @@ export function AgentFilesTab({ compositeId }: AgentFilesTabProps) {
               variant="ghost"
               size="sm"
               className="h-auto justify-start gap-2 px-2.5 py-2 text-left"
-              onClick={() => handleQuickCreate(f.name, f.template)}
+              onClick={() => handleQuickCreate(f.name, { en: f.en, zh: f.zh })}
               disabled={saveFile.isPending}
             >
               <FileText className="size-3.5 shrink-0 text-muted-foreground" />

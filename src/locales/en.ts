@@ -589,6 +589,7 @@ const en: Record<TranslationKey, string> = {
   'config.multimodal': 'Multimodal',
   'config.verified': 'Verified',
   'config.untested': 'Untested',
+  'config.legacy': 'legacy',
   'config.connectionError': 'Connection Error',
   'config.minimum': 'Min: {n}',
   'config.maximum': 'Max: {n}',

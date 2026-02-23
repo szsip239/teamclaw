@@ -90,7 +90,7 @@ export function EnumField({ path, value, schema, onChange }: EnumFieldProps) {
                   {optStr}
                   {isDeprecated && (
                     <span className="ml-1.5 text-[10px] font-sans text-muted-foreground/70 font-normal">
-                      {locale === 'en' ? 'legacy' : '旧版'}
+                      {t('config.legacy')}
                     </span>
                   )}
                 </span>
@@ -131,7 +131,7 @@ export function EnumField({ path, value, schema, onChange }: EnumFieldProps) {
             {optStr}
             {isDeprecated && (
               <span className="ml-1 text-[10px] font-sans opacity-70">
-                {locale === 'en' ? 'legacy' : '旧'}
+                {t('config.legacy')}
               </span>
             )}
           </button>
