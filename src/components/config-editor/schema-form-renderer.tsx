@@ -741,6 +741,7 @@ function DynamicKVEditor({
                 />
               ) : (
                 <Input
+                  autoComplete="off"
                   value={String(value[key] ?? "")}
                   onChange={(e) => onChange(`${path}.${key}`, e.target.value)}
                   className="h-8 text-sm font-mono"
@@ -752,6 +753,7 @@ function DynamicKVEditor({
           {/* Add new key */}
           <div className="flex gap-2">
             <Input
+              autoComplete="off"
               value={newKey}
               onChange={(e) => setNewKey(e.target.value)}
               placeholder={t('config.newKeyPlaceholder')}
@@ -1002,6 +1004,7 @@ function PrimitiveArrayInput({
         ))}
       </div>
       <Input
+        autoComplete="off"
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={(e) => {
@@ -1095,6 +1098,7 @@ function ModuleLevelKVEditor({
               />
             ) : (
               <Input
+                autoComplete="off"
                 value={String(value[key] ?? "")}
                 onChange={(e) => onChange(`${path}.${key}`, e.target.value)}
                 className="h-8 text-sm font-mono"
@@ -1106,6 +1110,7 @@ function ModuleLevelKVEditor({
 
       <div className="flex gap-2">
         <Input
+          autoComplete="off"
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
           placeholder={t('config.channelNamePlaceholder')}
@@ -1172,6 +1177,7 @@ function UnionFieldRenderer({
       <div className="space-y-1.5">
         <FieldLabel label={label} help={help} path={path} />
         <Input
+          autoComplete="off"
           value={typeof value === 'string' ? value : JSON.stringify(value ?? "")}
           onChange={(e) => {
             try {
@@ -1252,6 +1258,7 @@ function UnionFieldRenderer({
             />
           ) : (
             <Input
+              autoComplete="off"
               value={JSON.stringify(value ?? {})}
               onChange={(e) => {
                 try { onChange(path, JSON.parse(e.target.value)) } catch { /* ignore */ }

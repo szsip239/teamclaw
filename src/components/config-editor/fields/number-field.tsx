@@ -19,6 +19,7 @@ export function NumberField({ value, schema, uiHint, onChange }: NumberFieldProp
     <div>
       <Input
         type="number"
+        autoComplete="off"
         value={value ?? ""}
         onChange={(e) => {
           const v = e.target.value

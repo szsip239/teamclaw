@@ -26,6 +26,7 @@ export function StringField({ value, uiHint, onChange }: StringFieldProps) {
     <div className="relative">
       <Input
         type={isSensitive && !showValue ? "password" : "text"}
+        autoComplete={isSensitive ? "new-password" : "off"}
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
         placeholder={uiHint?.placeholder ?? ""}
