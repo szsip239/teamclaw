@@ -1,4 +1,19 @@
 services:
+  init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: init
+    container_name: teamclaw-init
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data-net
+    restart: "no"
+
   app:
     build:
       context: .
@@ -6,7 +21,7 @@ services:
     container_name: teamclaw-app
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-3000}:3000"
+      - "${APP_PORT:-3100}:3100"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
       REDIS_URL: "redis://redis:6379"
@@ -16,7 +31,7 @@ services:
       JWT_REFRESH_EXPIRY: "${JWT_REFRESH_EXPIRY:-7d}"
       JWT_ISSUER: "${JWT_ISSUER:-teamclaw}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
-      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-http://localhost:3000}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-http://localhost:3100}"
       NODE_ENV: production
       DEFAULT_MODEL_PROVIDER: "${DEFAULT_MODEL_PROVIDER:-anthropic}"
       DEFAULT_MODEL_API_KEY: "${DEFAULT_MODEL_API_KEY:-}"
@@ -25,6 +40,8 @@ services:
       TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/data/teamclaw}"
       DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
     depends_on:
+      init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

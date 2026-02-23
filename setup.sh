@@ -7,7 +7,8 @@ set -euo pipefail
 #   1. Create .env from .env.example
 #   2. Generate JWT RS256 key pair + encryption key
 #   3. Start all services via Docker Compose
-#   4. Wait for DB → run migrations + seed
+#      (init container handles DB migration + seed automatically)
+#   4. Verify the app is running
 #   5. Print access info
 
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -36,11 +37,11 @@ else
     exit 1
   fi
   cp "$ENV_EXAMPLE" "$ENV_FILE"
-  echo -e "${GREEN}[1/5] Created .env from .env.example${NC}"
+  echo -e "${GREEN}[1/4] Created .env from .env.example${NC}"
 fi
 
 # ── Step 2: Generate secrets ─────────────────────────────
-echo -e "${CYAN}[2/5] Generating cryptographic keys...${NC}"
+echo -e "${CYAN}[2/4] Generating cryptographic keys...${NC}"
 
 # Generate RS256 key pair
 PRIVATE_KEY=$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null)
@@ -67,33 +68,41 @@ echo -e "${GREEN}  -> JWT RS256 key pair generated${NC}"
 echo -e "${GREEN}  -> AES-256-CBC encryption key generated${NC}"
 
 # ── Step 3: Start Docker services ────────────────────────
-echo -e "${CYAN}[3/5] Starting Docker services...${NC}"
-docker compose -f "$COMPOSE_FILE" up -d --build
+# The init container automatically runs DB migration + seed
+# before the app starts (via depends_on + service_completed_successfully)
+echo -e "${CYAN}[3/4] Starting Docker services (build + migrate + seed)...${NC}"
+if ! docker compose -f "$COMPOSE_FILE" up -d --build 2>&1; then
+  echo -e "${RED}[ERROR] Docker Compose failed to start services${NC}"
+  echo -e "${YELLOW}Check logs: docker compose -f $COMPOSE_FILE logs${NC}"
+  exit 1
+fi
 
-# ── Step 4: Wait for DB + migrate + seed ─────────────────
-echo -e "${CYAN}[4/5] Waiting for database to be ready...${NC}"
-MAX_RETRIES=30
+# Verify init container completed successfully
+INIT_EXIT=$(docker inspect teamclaw-init --format='{{.State.ExitCode}}' 2>/dev/null || echo "unknown")
+if [ "$INIT_EXIT" != "0" ]; then
+  echo -e "${RED}[ERROR] Database initialization failed (exit code: $INIT_EXIT)${NC}"
+  echo -e "${YELLOW}Check init logs: docker compose -f $COMPOSE_FILE logs init${NC}"
+  exit 1
+fi
+echo -e "${GREEN}  -> Database migrated and seeded${NC}"
+
+# ── Step 4: Verify app is running ────────────────────────
+echo -e "${CYAN}[4/4] Verifying app is running...${NC}"
+MAX_RETRIES=15
 RETRY=0
-until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U teamclaw > /dev/null 2>&1; do
+until curl -sf -o /dev/null http://localhost:${APP_PORT:-3100}; do
   RETRY=$((RETRY + 1))
   if [ $RETRY -ge $MAX_RETRIES ]; then
-    echo -e "${RED}[ERROR] Database failed to start after ${MAX_RETRIES} attempts${NC}"
+    echo -e "${RED}[ERROR] App failed to respond after ${MAX_RETRIES} attempts${NC}"
+    echo -e "${YELLOW}Check logs: docker compose -f $COMPOSE_FILE logs app${NC}"
     exit 1
   fi
   sleep 2
 done
-echo -e "${GREEN}  -> Database is ready${NC}"
+echo -e "${GREEN}  -> App is running${NC}"
 
-echo -e "${CYAN}  Running database migrations...${NC}"
-docker compose -f "$COMPOSE_FILE" exec -T app npx prisma db push --skip-generate 2>/dev/null || true
-echo -e "${GREEN}  -> Migrations applied${NC}"
-
-echo -e "${CYAN}  Seeding database...${NC}"
-docker compose -f "$COMPOSE_FILE" exec -T app npx tsx prisma/seed.ts 2>/dev/null || true
-echo -e "${GREEN}  -> Database seeded${NC}"
-
-# ── Step 5: Print access info ────────────────────────────
-APP_PORT="${APP_PORT:-3000}"
+# ── Print access info ────────────────────────────────────
+APP_PORT="${APP_PORT:-3100}"
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║           Setup Complete!                        ║${NC}"
