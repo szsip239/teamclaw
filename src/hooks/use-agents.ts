@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { api } from "@/lib/api-client"
+import { chatKeys } from "./use-chat"
 import type { AgentListResponse, AgentDetail, AgentDefaultsResponse, FileContentResponse } from "@/types/agent"
 import type { WorkspaceFileEntry } from "@/types/gateway"
 import type { CreateAgentInput, UpdateAgentConfigInput, UpdateAgentDefaultsInput, CloneAgentInput, ClassifyAgentInput } from "@/lib/validations/agent"
@@ -99,6 +100,7 @@ export function useCreateAgent() {
       api.post<{ status: string; agentId: string }>("/api/v1/agents", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.lists() })
+      qc.invalidateQueries({ queryKey: chatKeys.agents() })
     },
   })
 }
@@ -114,6 +116,7 @@ export function useUpdateAgentConfig(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.lists() })
       qc.invalidateQueries({ queryKey: agentKeys.detail(id) })
+      qc.invalidateQueries({ queryKey: chatKeys.agents() })
     },
   })
 }
@@ -127,6 +130,7 @@ export function useDeleteAgent() {
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.lists() })
+      qc.invalidateQueries({ queryKey: chatKeys.agents() })
     },
   })
 }
@@ -156,6 +160,7 @@ export function useCloneAgent() {
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.lists() })
+      qc.invalidateQueries({ queryKey: chatKeys.agents() })
     },
   })
 }
@@ -171,6 +176,7 @@ export function useClassifyAgent(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.lists() })
       qc.invalidateQueries({ queryKey: agentKeys.detail(id) })
+      qc.invalidateQueries({ queryKey: chatKeys.agents() })
     },
   })
 }
