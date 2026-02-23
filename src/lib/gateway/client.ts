@@ -226,8 +226,9 @@ export class GatewayClient {
 
         const payload = helloOk as Record<string, unknown> | undefined
 
-        // Extract server version from hello-ok payload
-        const version = payload?.version ?? payload?.serverVersion
+        // Extract server version from hello-ok payload (nested under server.version)
+        const server = payload?.server as Record<string, unknown> | undefined
+        const version = server?.version
         if (typeof version === 'string' && version) {
           this.serverVersion = version
         }
