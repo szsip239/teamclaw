@@ -208,7 +208,7 @@ graph TB
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/agents.png" width="400"><br><b>Agent 管理</b></td>
-    <td align="center"><img src="docs/screenshots/skills.png" width="400"><br><b>Skills 市场</b></td>
+    <td align="center"><img src="docs/screenshots/users.png" width="400"><br><b>用户管理</b></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/instances.png" width="400"><br><b>实例管理</b></td>
@@ -413,7 +413,7 @@ Configure via `.env` or per-instance in the dashboard.
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/agents.png" width="400"><br><b>Agent Management</b></td>
-    <td align="center"><img src="docs/screenshots/skills.png" width="400"><br><b>Skills Marketplace</b></td>
+    <td align="center"><img src="docs/screenshots/users.png" width="400"><br><b>User Management</b></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/instances.png" width="400"><br><b>Instance Management</b></td>
