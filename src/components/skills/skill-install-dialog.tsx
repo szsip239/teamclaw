@@ -43,7 +43,7 @@ export function SkillInstallDialog({ open, onOpenChange, skill }: SkillInstallDi
   const { data: agentsData } = useAgents(instanceId || undefined)
 
   const instances = instancesData?.instances ?? []
-  const agents = agentsData?.agents ?? []
+  const agents = instanceId ? (agentsData?.agents ?? []) : []
 
   function reset() {
     setInstanceId("")
@@ -121,7 +121,7 @@ export function SkillInstallDialog({ open, onOpenChange, skill }: SkillInstallDi
               </SelectTrigger>
               <SelectContent>
                 {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
+                  <SelectItem key={`${agent.instanceId}:${agent.id}`} value={agent.id}>
                     {agent.name}
                   </SelectItem>
                 ))}

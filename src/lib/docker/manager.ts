@@ -4,13 +4,14 @@ import type { ContainerCreateOptions, ContainerInfo } from './types'
 const NETWORK_NAME = 'gateway-net'
 
 /**
- * Validate container file/directory path to prevent shell injection.
- * Rejects paths with shell metacharacters that could escape quoting.
- * Only allows alphanumeric, slashes, dots, hyphens, underscores, and spaces.
+ * Validate container file/directory path to prevent path traversal.
+ * Rejects empty paths, path traversal (..), and null bytes.
+ * Allows Unicode characters (e.g. CJK filenames) since all exec commands
+ * pass paths as positional arguments (not shell-expanded).
  */
 function isContainerPathSafe(p: string): boolean {
-  if (!p || p.includes('..')) return false
-  return /^[a-zA-Z0-9/_.\-\s@]+$/.test(p)
+  if (!p || p.includes('..') || p.includes('\0')) return false
+  return true
 }
 
 /**
