@@ -95,7 +95,7 @@ bash setup.sh
 2. 通过 Docker Compose 启动 PostgreSQL、Redis 和 TeamClaw
 3. 初始化数据库并创建默认管理员账号
 
-访问 `http://localhost:3000` — 账号：`admin@teamclaw.local` / `Admin@123456`
+访问 `http://localhost:3100` — 账号：`admin@teamclaw.local` / `Admin@123456`
 
 ### 方式三：本地开发
 
@@ -121,17 +121,50 @@ npx tsx prisma/seed.ts
 npm run dev
 ```
 
-## 模型配置
+## 首次使用指南
+
+部署完成后，按以下步骤开始你的第一次 AI 对话：
+
+### 1. 登录管理面板
+
+访问 `http://localhost:3100`，使用默认管理员账号登录：
+
+- 邮箱：`admin@teamclaw.local`
+- 密码：`Admin@123456`
+
+> 建议首次登录后立即修改默认密码。
+
+### 2. 配置模型 API 密钥
+
+进入 **资源管理** 页面，创建模型资源：
 
 | 提供商 | API 类型 | 说明 |
 |--------|----------|------|
 | Anthropic | `anthropic-messages` | 默认提供商 |
-| OpenAI | `openai` | 设置 `DEFAULT_MODEL_BASE_URL` |
+| OpenAI | `openai` | 设置自定义 Base URL |
 | MiniMax | `openai` | 兼容 OpenAI API |
 | Groq | `openai` | 兼容 OpenAI API |
 | 本地 (Ollama) | `openai` | 指向本地端点 |
 
-通过 `.env` 文件或在面板中按实例配置。
+点击 **创建资源** → 选择提供商 → 填入 API Key → 保存。可勾选"设为默认"供所有实例使用。
+
+### 3. 部署 OpenClaw 实例
+
+进入 **实例管理** 页面，选择以下任一方式：
+
+**Docker 容器（推荐）** — 点击"创建实例"，选择 Docker 模式，填写实例名称，选择镜像（默认 `alpine/openclaw:latest`），点击创建即可自动部署。
+
+**外部网关** — 如果已有运行中的 OpenClaw，选择外部网关模式，填入 WebSocket URL 和 Token 即可连接。
+
+等待实例状态变为 🟢 **ONLINE**（通常 5-10 秒）。
+
+### 4. 开始对话
+
+进入 **AI 对话** 页面 — 实例上线后，默认 Agent 会自动出现在左侧栏。点击 Agent 即可开始对话。
+
+```
+✅ 登录 → 配置 API Key → 创建实例 → 开始对话（约 3 分钟）
+```
 
 ## 系统架构
 
@@ -312,7 +345,7 @@ This will:
 2. Start PostgreSQL, Redis, and TeamClaw via Docker Compose
 3. Initialize the database with default admin account
 
-Visit `http://localhost:3000` — Login: `admin@teamclaw.local` / `Admin@123456`
+Visit `http://localhost:3100` — Login: `admin@teamclaw.local` / `Admin@123456`
 
 ### Option 3: Local Development
 
@@ -418,19 +451,50 @@ graph TB
 | Dashboard | 1 | Instance/session/user/skill metrics |
 | Other | 5 | Resource keys, instance access |
 
-## Model Providers
+## Getting Started Guide
 
-TeamClaw supports any model provider compatible with OpenClaw:
+After deployment, follow these steps to start your first AI conversation:
 
-| Provider | API Type | Configuration |
-|----------|----------|---------------|
+### 1. Login
+
+Visit `http://localhost:3100` and sign in with the default admin account:
+
+- Email: `admin@teamclaw.local`
+- Password: `Admin@123456`
+
+> Recommended: Change the default password after first login.
+
+### 2. Configure Model API Key
+
+Navigate to the **Resources** page to create a model resource:
+
+| Provider | API Type | Notes |
+|----------|----------|-------|
 | Anthropic | `anthropic-messages` | Default provider |
-| OpenAI | `openai` | Set `DEFAULT_MODEL_BASE_URL` |
-| MiniMax | `openai` | Compatible API endpoint |
-| Groq | `openai` | Compatible API endpoint |
+| OpenAI | `openai` | Custom base URL supported |
+| MiniMax | `openai` | OpenAI-compatible endpoint |
+| Groq | `openai` | OpenAI-compatible endpoint |
 | Local (Ollama) | `openai` | Point to local endpoint |
 
-Configure via `.env` or per-instance in the dashboard.
+Click **Create Resource** → Select provider → Enter API key → Save. Toggle "Set as default" to use this key for all instances.
+
+### 3. Deploy an OpenClaw Instance
+
+Navigate to the **Instances** page and choose one of:
+
+**Docker Container (Recommended)** — Click "Create Instance", select Docker mode, enter a name, choose an image (default: `alpine/openclaw:latest`), and create. The container deploys automatically.
+
+**External Gateway** — If you already have a running OpenClaw, select external gateway mode, enter the WebSocket URL and token to connect.
+
+Wait for instance status to become 🟢 **ONLINE** (typically 5-10 seconds).
+
+### 4. Start Chatting
+
+Navigate to the **Chat** page — once the instance is online, default agents appear in the left sidebar. Click an agent to start your conversation.
+
+```
+✅ Login → Configure API Key → Create Instance → Start Chatting (~3 minutes)
+```
 
 ## Screenshots
 
