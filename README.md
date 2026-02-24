@@ -138,13 +138,17 @@ npm run dev
 
 进入 **资源管理** 页面，创建模型资源：
 
-| 提供商 | API 类型 | 说明 |
+| 提供商 | API 协议 | 说明 |
 |--------|----------|------|
-| Anthropic | `anthropic-messages` | 默认提供商 |
-| OpenAI | `openai` | 设置自定义 Base URL |
-| MiniMax | `openai` | 兼容 OpenAI API |
-| Groq | `openai` | 兼容 OpenAI API |
-| 本地 (Ollama) | `openai` | 指向本地端点 |
+| Anthropic | `anthropic-messages` | Claude 系列，默认提供商 |
+| OpenAI | `openai-completions` | GPT / o 系列 |
+| Google | `google-generative-ai` | Gemini 系列 |
+| DeepSeek | `openai-completions` | DeepSeek V3 / R1 |
+| MiniMax | `anthropic-messages` | Anthropic 兼容协议 |
+| Groq / xAI / Mistral | `openai-completions` | OpenAI 兼容协议 |
+| Ollama / vLLM | `ollama` / `openai-completions` | 本地部署 |
+
+> 完整支持 20+ 提供商（智谱、豆包、千帆、Moonshot 等），详见资源管理页面。
 
 点击 **创建资源** → 选择提供商 → 填入 API Key → 保存。可勾选"设为默认"供所有实例使用。
 
@@ -468,13 +472,17 @@ Visit `http://localhost:3100` and sign in with the default admin account:
 
 Navigate to the **Resources** page to create a model resource:
 
-| Provider | API Type | Notes |
-|----------|----------|-------|
-| Anthropic | `anthropic-messages` | Default provider |
-| OpenAI | `openai` | Custom base URL supported |
-| MiniMax | `openai` | OpenAI-compatible endpoint |
-| Groq | `openai` | OpenAI-compatible endpoint |
-| Local (Ollama) | `openai` | Point to local endpoint |
+| Provider | API Protocol | Notes |
+|----------|-------------|-------|
+| Anthropic | `anthropic-messages` | Claude models, default provider |
+| OpenAI | `openai-completions` | GPT / o series |
+| Google | `google-generative-ai` | Gemini series |
+| DeepSeek | `openai-completions` | DeepSeek V3 / R1 |
+| MiniMax | `anthropic-messages` | Anthropic-compatible protocol |
+| Groq / xAI / Mistral | `openai-completions` | OpenAI-compatible protocol |
+| Ollama / vLLM | `ollama` / `openai-completions` | Local deployment |
+
+> 20+ providers supported (OpenRouter, Together, HuggingFace, etc.). See the Resources page for the full list.
 
 Click **Create Resource** → Select provider → Enter API key → Save. Toggle "Set as default" to use this key for all instances.
 
