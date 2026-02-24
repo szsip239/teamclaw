@@ -27,7 +27,7 @@
 
 ## TeamClaw 是什么？
 
-TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（开源 AI Agent 网关）构建的全功能管理平台，提供 OpenClaw 原生面板不具备的企业级能力。
+TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）构建的全功能管理平台，提供 OpenClaw 目前不具备的企业级能力。
 
 ### 核心功能
 
@@ -244,7 +244,7 @@ graph TB
 
 ## What is TeamClaw?
 
-TeamClaw is a full-featured management platform built on top of [OpenClaw](https://github.com/anthropics/openclaw) — the open-source AI Agent gateway. It provides enterprise-grade capabilities that OpenClaw's native dashboard doesn't offer.
+TeamClaw is a full-featured management platform built on top of [OpenClaw](https://github.com/anthropics/openclaw) — 🦞the open-source AI Agent gateway🦞. It provides enterprise-grade capabilities that OpenClaw's native dashboard doesn't offer.
 
 ### Core Features
 
