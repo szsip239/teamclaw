@@ -52,10 +52,27 @@ export const POST = withAuth(
       }
     }
 
-    // Auto-merge multimodal detection into config.models
+    // Auto-save or merge detected models into config.models
     if (result.ok && result.details?.detectedModels?.length) {
       const existingModels = config?.models ?? []
-      if (existingModels.length > 0) {
+
+      if (existingModels.length === 0) {
+        // No existing models — save detected models as ModelDefinitions
+        const newModels: ModelDefinition[] = result.details.detectedModels.map((dm) => ({
+          id: dm.id,
+          name: dm.id,
+          reasoning: false,
+          input: dm.multimodal ? ['text', 'image'] : ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        }))
+        updateData.config = {
+          ...config,
+          models: newModels,
+        } as unknown as Prisma.InputJsonValue
+      } else {
+        // Merge multimodal detection into existing models
         const detectedMap = new Map(
           result.details.detectedModels
             .filter((dm) => dm.multimodal !== undefined)

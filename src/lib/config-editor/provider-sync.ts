@@ -24,8 +24,10 @@ interface ProviderEntry {
  * OpenClaw schema requires: { baseUrl (required), models (required), apiKey, api, ... }
  *
  * For each provider ID, picks the best Resource (isDefault > ACTIVE > newest).
+ * Models are resolved from: registry defaultModels → resource config.models
+ * (the latter supports custom/opencode providers whose models come from DB).
  * Skips ollama (no API key needed), providers without baseUrl, and those
- * without known models (defaultModels in registry).
+ * without any resolvable models.
  */
 export async function buildProviderEntries(
   providerIds: string[],
@@ -72,9 +74,14 @@ export async function buildProviderEntries(
     const baseUrl = (resourceConfig?.baseUrl as string) || providerDef?.baseUrl
     if (!baseUrl) continue
 
-    // models array is required by OpenClaw schema — use registry defaultModels
-    const defaultModels = providerDef?.defaultModels
-    if (!defaultModels || defaultModels.length === 0) continue
+    // models array is required by OpenClaw schema
+    // Priority: registry defaultModels → resource config models (custom/opencode providers)
+    const registryModels = providerDef?.defaultModels
+    const resourceModels = resourceConfig?.models as ProviderModelEntry[] | undefined
+    const models = (registryModels && registryModels.length > 0)
+      ? registryModels
+      : (resourceModels && resourceModels.length > 0 ? resourceModels : null)
+    if (!models) continue
 
     // Decrypt API key
     let apiKey: string
@@ -87,12 +94,14 @@ export async function buildProviderEntries(
     const entry: ProviderEntry = {
       baseUrl,
       apiKey,
-      models: defaultModels.map(m => ({ id: m.id, name: m.name })),
+      models: models.map(m => ({ id: m.id, name: m.name })),
     }
 
-    // Set api type only when it differs from OpenClaw's default
+    // Set api type — always include for custom/unknown providers (OpenClaw can't infer),
+    // omit only for well-known providers using the default type
     const apiType = (resourceConfig?.apiType as string) || providerDef?.apiType
-    if (apiType && apiType !== DEFAULT_API_TYPE) {
+    const isWellKnown = providerDef && providerDef.id !== 'custom' && providerDef.id !== 'opencode'
+    if (apiType && (!isWellKnown || apiType !== DEFAULT_API_TYPE)) {
       entry.api = apiType
     }
 

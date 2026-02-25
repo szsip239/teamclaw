@@ -1,4 +1,6 @@
 import Docker from 'dockerode'
+import tar from 'tar-stream'
+import { createGzip } from 'zlib'
 import type { ContainerCreateOptions, ContainerInfo } from './types'
 
 const NETWORK_NAME = 'gateway-net'
@@ -345,6 +347,107 @@ export class DockerManager {
     const container = this.docker.getContainer(containerId)
     const exec = await container.exec({
       Cmd: ['rm', '-rf', '--', dirPath],
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+    const stream = await exec.start({ Detach: false })
+    return new Promise((resolve, reject) => {
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+      stream.resume()
+    })
+  }
+
+  // Binary file operations (via Docker archive API)
+  async uploadFileToContainer(
+    containerId: string,
+    containerDir: string,
+    fileName: string,
+    content: Buffer,
+  ): Promise<void> {
+    if (!isContainerPathSafe(containerDir) || !isContainerPathSafe(fileName)) {
+      throw new Error(`Unsafe container path: ${containerDir}/${fileName}`)
+    }
+    await this.ensureContainerDir(containerId, containerDir)
+    const container = this.docker.getContainer(containerId)
+
+    const pack = tar.pack()
+    pack.entry({ name: fileName, size: content.length }, content)
+    pack.finalize()
+
+    await container.putArchive(pack, { path: containerDir })
+  }
+
+  async downloadFileFromContainer(containerId: string, filePath: string): Promise<Buffer> {
+    if (!isContainerPathSafe(filePath)) {
+      throw new Error(`Unsafe container file path: ${filePath}`)
+    }
+    const container = this.docker.getContainer(containerId)
+    const archiveStream = await container.getArchive({ path: filePath })
+
+    return new Promise<Buffer>((resolve, reject) => {
+      const extract = tar.extract()
+      const chunks: Buffer[] = []
+
+      extract.on('entry', (_header, stream, next) => {
+        stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+        stream.on('end', next)
+        stream.on('error', reject)
+      })
+
+      extract.on('finish', () => {
+        resolve(Buffer.concat(chunks))
+      })
+
+      extract.on('error', reject)
+      archiveStream.pipe(extract)
+    })
+  }
+
+  async downloadDirAsArchive(
+    containerId: string,
+    dirPath: string,
+  ): Promise<NodeJS.ReadableStream> {
+    if (!isContainerPathSafe(dirPath)) {
+      throw new Error(`Unsafe container directory path: ${dirPath}`)
+    }
+    const container = this.docker.getContainer(containerId)
+    // Append '/.' to get contents of the directory, not the directory itself
+    const archiveStream = await container.getArchive({ path: dirPath + '/.' })
+    const gzip = createGzip()
+    archiveStream.pipe(gzip)
+    return gzip
+  }
+
+  async removeContainerFile(containerId: string, filePath: string): Promise<void> {
+    if (!isContainerPathSafe(filePath)) {
+      throw new Error(`Unsafe container file path: ${filePath}`)
+    }
+    const container = this.docker.getContainer(containerId)
+    const exec = await container.exec({
+      Cmd: ['rm', '-f', '--', filePath],
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+    const stream = await exec.start({ Detach: false })
+    return new Promise((resolve, reject) => {
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+      stream.resume()
+    })
+  }
+
+  async moveContainerPath(
+    containerId: string,
+    source: string,
+    target: string,
+  ): Promise<void> {
+    if (!isContainerPathSafe(source) || !isContainerPathSafe(target)) {
+      throw new Error(`Unsafe container path: ${source} → ${target}`)
+    }
+    const container = this.docker.getContainer(containerId)
+    const exec = await container.exec({
+      Cmd: ['mv', '--', source, target],
       AttachStdout: true,
       AttachStderr: true,
     })
