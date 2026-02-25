@@ -221,6 +221,11 @@ export function ResourceCreateDialog({
                     {t('resource.apiUrlDefault', { url: providerInfo.baseUrl })}
                   </p>
                 )}
+                {providerInfo?.baseUrlHint && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {t(`resource.baseUrlHint.${providerInfo.baseUrlHint}` as 'resource.baseUrlHint.zai')}
+                  </p>
+                )}
               </div>
 
               {/* Env Var Name (conditional — only for custom providers) */}

@@ -6,6 +6,8 @@ import { prisma } from '@/lib/db'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
+import { dockerManager } from '@/lib/docker/manager'
+import { buildSessionInputPath, buildSessionOutputPath, formatFileSize } from '@/lib/session-files/helpers'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type { ChatToolCall } from '@/types/chat'
@@ -739,11 +741,107 @@ export async function POST(req: NextRequest) {
     await close()
   }
 
-  const mappedAttachments = attachments?.map(a => ({ fileName: a.name, mimeType: a.mimeType, content: a.content }))
+  // --- Build session file context (non-blocking) ---
+  let finalMessage = message
+  const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
+  const SESSION_IMAGE_EXTS: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+  }
+  const SESSION_IMAGE_MAX = 5 * 1024 * 1024 // 5MB per image for attachment
+  try {
+    const activeSession = existingSession ?? await prisma.chatSession.findFirst({
+      where: { userId: user.id, instanceId, agentId, isActive: true },
+    })
+    if (activeSession) {
+      const instance = await prisma.instance.findUnique({
+        where: { id: instanceId },
+        select: { containerId: true },
+      })
+      if (instance?.containerId) {
+        const inputPath = buildSessionInputPath(agentId, user.id, activeSession.id)
+        const outputPath = buildSessionOutputPath(agentId, user.id, activeSession.id)
+
+        let inputFiles: { name: string; path: string; type: string; size: number }[] = []
+        let outputFiles: { name: string; size: number }[] = []
+
+        try { inputFiles = await dockerManager.listContainerDir(instance.containerId, inputPath) } catch {}
+        try { outputFiles = await dockerManager.listContainerDir(instance.containerId, outputPath) } catch {}
+
+        // Auto-attach images from input/ as base64 attachments so the model can see them
+        for (const f of inputFiles) {
+          if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
+          const ext = ('.' + f.name.split('.').pop()!).toLowerCase()
+          const mime = SESSION_IMAGE_EXTS[ext]
+          if (!mime) continue
+          try {
+            const filePath = `${inputPath}${f.name}`
+            const buf = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
+            sessionFileAttachments.push({
+              fileName: f.name,
+              mimeType: mime,
+              content: buf.toString('base64'),
+            })
+          } catch {
+            // Skip unreadable images
+          }
+        }
+
+        // Build text context for non-image files and output listing
+        const nonImageInputFiles = inputFiles.filter(f => {
+          const ext = ('.' + f.name.split('.').pop()!).toLowerCase()
+          return !SESSION_IMAGE_EXTS[ext]
+        })
+
+        if (nonImageInputFiles.length > 0 || outputFiles.length > 0) {
+          const lines: string[] = ['[Session Files]']
+          if (nonImageInputFiles.length > 0) {
+            lines.push(`Input: ${inputPath}`)
+            for (const f of nonImageInputFiles) {
+              lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
+            }
+          }
+          if (sessionFileAttachments.length > 0) {
+            lines.push(`Images: ${sessionFileAttachments.length} image(s) attached to this message`)
+          }
+          if (outputFiles.length > 0) {
+            lines.push(`Output: ${outputPath}`)
+            for (const f of outputFiles) {
+              lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
+            }
+          }
+          lines.push('Rules: Read data from Input dir, write results to Output dir.')
+          lines.push('---')
+          finalMessage = lines.join('\n') + '\n' + message
+        } else if (sessionFileAttachments.length > 0) {
+          // Only images, no text files — still add a brief context
+          const lines: string[] = ['[Session Files]']
+          lines.push(`Images: ${sessionFileAttachments.length} image(s) attached to this message`)
+          if (outputFiles.length > 0) {
+            lines.push(`Output: ${outputPath}`)
+            for (const f of outputFiles) {
+              lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
+            }
+          }
+          lines.push(`Output dir: ${outputPath}`)
+          lines.push('Rules: Write generated files to Output dir.')
+          lines.push('---')
+          finalMessage = lines.join('\n') + '\n' + message
+        }
+      }
+    }
+  } catch {
+    // Non-blocking: skip on any error
+  }
+
+  const mappedAttachments = [
+    ...(attachments?.map(a => ({ fileName: a.name, mimeType: a.mimeType, content: a.content })) ?? []),
+    ...sessionFileAttachments,
+  ]
 
   adapter
-    .sendMessage(client, sessionKey, message, idempotencyKey, {
-      attachments: mappedAttachments,
+    .sendMessage(client, sessionKey, finalMessage, idempotencyKey, {
+      attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
     })
     .catch((err: Error) => {
       write({ type: 'error', error: err.message || '发送消息失败' })

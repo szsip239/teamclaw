@@ -101,8 +101,8 @@ async function executeTest(
       const data = await response.json() as Record<string, unknown>
       const { models, detectedModels } = extractModelsWithCapabilities(data)
       if (models.length > 0) {
-        details.models = models.slice(0, 20)
-        details.detectedModels = detectedModels.slice(0, 20)
+        details.models = models
+        details.detectedModels = detectedModels
       }
     } catch {
       // Response might not be JSON — that's fine

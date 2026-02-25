@@ -408,11 +408,12 @@ const modelProviders: ProviderDef[] = [
     authMethod: 'API_KEY',
     envVarName: 'ZAI_API_KEY',
     apiType: 'openai-completions',
-    baseUrl: 'https://api.z.ai/api/paas/v4',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
     icon: 'zai',
     description: 'GLM 系列模型（智谱清言）',
+    baseUrlHint: 'zai',
     configFields: [
-      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.z.ai/api/paas/v4 或 /api/coding/paas/v4', required: false },
+      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.z.ai/api/coding/paas/v4', required: false },
     ],
     defaultModels: [
       { id: 'glm-5', name: 'GLM-5', reasoning: true, input: ['text', 'image'], contextWindow: 205000, maxTokens: 16000 },
@@ -475,10 +476,10 @@ const modelProviders: ProviderDef[] = [
     icon: 'opencode',
     description: 'OpenCode 兼容模型',
     configFields: [
-      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://your-api.example.com', required: true },
+      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://your-api.example.com/v1', required: true },
     ],
     testEndpoint: {
-      url: (baseUrl: string) => `${baseUrl}/v1/models`,
+      url: (baseUrl: string) => `${baseUrl}/models`,
       method: 'GET',
       headers: bearerAuth,
     },
@@ -492,11 +493,11 @@ const modelProviders: ProviderDef[] = [
     description: '自定义 OpenAI 兼容 API',
     apiType: 'openai-completions',
     configFields: [
-      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://your-api.example.com', required: true },
+      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://your-api.example.com/v1', required: true },
       { key: 'envVarName', label: '环境变量名', placeholder: 'CUSTOM_API_KEY', required: false },
     ],
     testEndpoint: {
-      url: (baseUrl: string) => `${baseUrl}/v1/models`,
+      url: (baseUrl: string) => `${baseUrl}/models`,
       method: 'GET',
       headers: bearerAuth,
     },

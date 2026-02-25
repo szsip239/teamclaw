@@ -25,7 +25,8 @@ import { useUpdateResource } from "@/hooks/use-resources"
 import { API_TYPES } from "@/lib/resources/providers"
 import { useT } from "@/stores/language-store"
 import { toast } from "sonner"
-import type { ResourceDetail, ResourceConfig } from "@/types/resource"
+import type { ResourceDetail, ResourceConfig, ProviderInfo } from "@/types/resource"
+import { useProviders } from "@/hooks/use-resources"
 
 interface ResourceEditDialogProps {
   open: boolean
@@ -40,6 +41,10 @@ export function ResourceEditDialog({
 }: ResourceEditDialogProps) {
   const t = useT()
   const updateMutation = useUpdateResource(resource.id)
+  const { data: providersData } = useProviders()
+  const providerInfo: ProviderInfo | undefined = providersData?.providers?.find(
+    (p) => p.id === resource.provider,
+  )
   const config = resource.config as ResourceConfig | null
   const isModelType = resource.type === "MODEL"
 
@@ -156,11 +161,19 @@ export function ResourceEditDialog({
             <Label htmlFor="edit-base-url">{t('resource.apiUrlOptional')}</Label>
             <Input
               id="edit-base-url"
-              placeholder="https://..."
+              placeholder={
+                providerInfo?.configFields?.find((f) => f.key === "baseUrl")
+                  ?.placeholder ?? "https://..."
+              }
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               className="font-mono text-sm"
             />
+            {providerInfo?.baseUrlHint && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                {t(`resource.baseUrlHint.${providerInfo.baseUrlHint}` as 'resource.baseUrlHint.zai')}
+              </p>
+            )}
           </div>
 
           {/* Description */}

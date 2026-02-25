@@ -87,6 +87,7 @@ export interface ProviderInfo {
   description: string
   configFields?: { key: string; label: string; placeholder?: string; required: boolean }[]
   defaultModels?: ModelDefinition[]
+  baseUrlHint?: string
 }
 
 /** Providers list API response */
