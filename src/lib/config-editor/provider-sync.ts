@@ -8,6 +8,11 @@ const DEFAULT_API_TYPE = 'openai-completions'
 interface ProviderModelEntry {
   id: string
   name: string
+  reasoning?: boolean
+  input?: string[]
+  cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
+  contextWindow?: number
+  maxTokens?: number
 }
 
 interface ProviderEntry {
@@ -94,7 +99,15 @@ export async function buildProviderEntries(
     const entry: ProviderEntry = {
       baseUrl,
       apiKey,
-      models: models.map(m => ({ id: m.id, name: m.name })),
+      models: models.map(m => {
+        const entry: ProviderModelEntry = { id: m.id, name: m.name }
+        if (m.reasoning !== undefined) entry.reasoning = m.reasoning
+        if (m.input) entry.input = m.input
+        if (m.cost) entry.cost = m.cost
+        if (m.contextWindow !== undefined) entry.contextWindow = m.contextWindow
+        if (m.maxTokens !== undefined) entry.maxTokens = m.maxTokens
+        return entry
+      }),
     }
 
     // Set api type — always include for custom/unknown providers (OpenClaw can't infer),
