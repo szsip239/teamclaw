@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
+import { dockerManager } from '@/lib/docker/manager'
+import { buildSessionBasePath } from '@/lib/session-files/helpers'
 
 // DELETE /api/v1/chat/sessions/[id] — delete a chat session
 export const DELETE = withAuth(
@@ -33,6 +35,20 @@ export const DELETE = withAuth(
       }
     } catch {
       // Gateway might be offline — continue with DB deletion
+    }
+
+    // Clean up session files in the container (best-effort)
+    try {
+      const instance = await prisma.instance.findUnique({
+        where: { id: session.instanceId },
+        select: { containerId: true },
+      })
+      if (instance?.containerId) {
+        const sessionDir = buildSessionBasePath(session.agentId, session.userId, session.id)
+        await dockerManager.removeContainerDir(instance.containerId, sessionDir)
+      }
+    } catch {
+      // Container might be stopped — not fatal
     }
 
     await prisma.chatSession.delete({ where: { id } })

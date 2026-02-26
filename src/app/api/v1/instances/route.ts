@@ -263,9 +263,12 @@ async function createDockerInstance(
     )
   }
 
-  // 8. Start container + initialize sandbox support
+  // 8. Start container + initialize environment & sandbox support
   try {
     await dockerManager.startContainer(containerId)
+
+    // Fix common env issues (pip3 PATH, etc.) — always runs, independent of sandbox.
+    await dockerManager.initContainerEnv(containerId).catch(() => {})
 
     // Install Docker CLI and set up permissions for sandbox mode (Docker-in-Docker).
     // Must run after start (needs running container) and requires restart for group changes.

@@ -3,6 +3,7 @@
 import {
   useQuery,
   useMutation,
+  useQueryClient,
 } from "@tanstack/react-query"
 import { api } from "@/lib/api-client"
 import type { ConfigEditorInitResponse, ConfigPatchInput } from "@/types/config-editor"
@@ -32,14 +33,22 @@ export function useConfigEditorInit(instanceId: string) {
 // ─── Patch Mutation ─────────────────────────────────────────────────
 
 export function usePatchConfig(instanceId: string) {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (data: ConfigPatchInput) =>
       api.post<{ status: string; hash: string; config: Record<string, unknown> }>(
         `/api/v1/instances/${instanceId}/config-patch`,
         data,
       ),
-    // No onSuccess invalidation — applyPatchResult() already updates store
-    // with fresh config+hash from patch response. Invalidation would trigger
-    // re-initialization, resetting selectedModule to first module.
+    onSuccess: (result) => {
+      // Sync query cache with fresh config+hash from save response.
+      // Without this, navigating away and back re-initializes the store
+      // with stale cached data (old hash), causing HASH_CONFLICT on next save.
+      queryClient.setQueryData(
+        configEditorKeys.init(instanceId),
+        (old: ConfigEditorInitResponse | undefined) =>
+          old ? { ...old, config: result.config, hash: result.hash } : old,
+      )
+    },
   })
 }

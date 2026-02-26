@@ -7,7 +7,7 @@ import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
-import { buildSessionInputPath, buildSessionOutputPath, formatFileSize } from '@/lib/session-files/helpers'
+import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget } from '@/lib/session-files/helpers'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type { ChatToolCall } from '@/types/chat'
@@ -741,8 +741,8 @@ export async function POST(req: NextRequest) {
     await close()
   }
 
-  // --- Build session file context (non-blocking) ---
-  let finalMessage = message
+  // --- Auto-attach session images as base64 (non-blocking, no text injection) ---
+  const finalMessage = message
   const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
   const SESSION_IMAGE_EXTS: Record<string, string> = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -760,15 +760,29 @@ export async function POST(req: NextRequest) {
       })
       if (instance?.containerId) {
         const inputPath = buildSessionInputPath(agentId, user.id, activeSession.id)
-        const outputPath = buildSessionOutputPath(agentId, user.id, activeSession.id)
+
+        // Update `current-session` symlink so the agent can find files via
+        // `current-session/input/` without needing injected paths.
+        // Also ensure output/ directory exists so the agent can write results.
+        try {
+          const linkPath = buildCurrentSessionLinkPath(agentId)
+          const target = buildCurrentSessionTarget(user.id, activeSession.id)
+          const outputPath = buildSessionOutputPath(agentId, user.id, activeSession.id)
+          await Promise.all([
+            dockerManager.execInContainer(instance.containerId, [
+              'ln', '-sfn', '--', target, linkPath,
+            ]),
+            dockerManager.ensureContainerDir(instance.containerId, outputPath),
+          ])
+        } catch {
+          // Non-fatal: symlink/mkdir failure doesn't block chat
+        }
 
         let inputFiles: { name: string; path: string; type: string; size: number }[] = []
-        let outputFiles: { name: string; size: number }[] = []
-
         try { inputFiles = await dockerManager.listContainerDir(instance.containerId, inputPath) } catch {}
-        try { outputFiles = await dockerManager.listContainerDir(instance.containerId, outputPath) } catch {}
 
-        // Auto-attach images from input/ as base64 attachments so the model can see them
+        // Auto-attach images from input/ as base64 attachments so the model can see them.
+        // No text injection — session file rules and discovery are handled by AGENTS.md.
         for (const f of inputFiles) {
           if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
           const ext = ('.' + f.name.split('.').pop()!).toLowerCase()
@@ -785,29 +799,6 @@ export async function POST(req: NextRequest) {
           } catch {
             // Skip unreadable images
           }
-        }
-
-        // Build text context listing ALL files (including images) as directory entries.
-        // Images are also best-effort attached as base64, but we don't claim
-        // "images attached" in the text — the model may not receive attachments
-        // depending on the API type, which would cause hallucination.
-        if (inputFiles.length > 0 || outputFiles.length > 0) {
-          const lines: string[] = ['[Session Files]']
-          if (inputFiles.length > 0) {
-            lines.push(`Input: ${inputPath}`)
-            for (const f of inputFiles) {
-              lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
-            }
-          }
-          if (outputFiles.length > 0) {
-            lines.push(`Output: ${outputPath}`)
-            for (const f of outputFiles) {
-              lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
-            }
-          }
-          lines.push('Rules: Read data from Input dir, write results to Output dir.')
-          lines.push('---')
-          finalMessage = lines.join('\n') + '\n' + message
         }
       }
     }

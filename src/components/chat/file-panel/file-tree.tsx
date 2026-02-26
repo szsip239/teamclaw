@@ -207,38 +207,46 @@ export function FileTree({ zone, sessionId }: FileTreeProps) {
 /**
  * Build a flat list of visible entries based on expanded directories.
  * Files are assumed to be a flat list with `path` indicating hierarchy (e.g. "dir/file.txt").
- * Group entries by parent directory and only show children of expanded dirs.
+ * Children are grouped under their parent directory in tree order.
  */
 function buildVisibleEntries(
   files: SessionFileEntry[],
   expandedDirs: Set<string>
 ): { entry: SessionFileEntry; depth: number }[] {
-  // Sort: directories first, then alphabetical
-  const sorted = [...files].sort((a, b) => {
-    if (a.type !== b.type) return a.type === "directory" ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
+  // Group entries by their parent directory
+  const byParent = new Map<string, SessionFileEntry[]>()
+  for (const entry of files) {
+    const lastSlash = entry.path.lastIndexOf("/")
+    const parent = lastSlash === -1 ? "" : entry.path.substring(0, lastSlash)
+    let group = byParent.get(parent)
+    if (!group) {
+      group = []
+      byParent.set(parent, group)
+    }
+    group.push(entry)
+  }
 
+  // Sort each group: directories first, then alphabetical by name
+  for (const group of byParent.values()) {
+    group.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  // DFS traversal: root children, then recurse into expanded dirs
   const result: { entry: SessionFileEntry; depth: number }[] = []
-
-  for (const entry of sorted) {
-    const parts = entry.path.split("/")
-    const depth = parts.length - 1
-
-    // Check if all parent directories are expanded
-    let visible = true
-    for (let i = 1; i < parts.length; i++) {
-      const parentPath = parts.slice(0, i).join("/")
-      if (!expandedDirs.has(parentPath)) {
-        visible = false
-        break
+  function walk(parentPath: string, depth: number) {
+    const children = byParent.get(parentPath)
+    if (!children) return
+    for (const entry of children) {
+      result.push({ entry, depth })
+      if (entry.type === "directory" && expandedDirs.has(entry.path)) {
+        walk(entry.path, depth + 1)
       }
     }
-
-    if (visible) {
-      result.push({ entry, depth })
-    }
   }
+  walk("", 0)
 
   return result
 }
