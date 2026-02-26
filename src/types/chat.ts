@@ -110,6 +110,11 @@ export interface ChatStreamDoneEvent {
   type: 'done'
 }
 
+export interface ChatStreamSessionEvent {
+  type: 'session'
+  sessionId: string
+}
+
 export type ChatStreamEvent =
   | ChatStreamTextEvent
   | ChatStreamThinkingEvent
@@ -118,3 +123,4 @@ export type ChatStreamEvent =
   | ChatStreamErrorEvent
   | ChatStreamImageEvent
   | ChatStreamDoneEvent
+  | ChatStreamSessionEvent

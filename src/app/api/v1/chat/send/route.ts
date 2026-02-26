@@ -508,7 +508,9 @@ export async function POST(req: NextRequest) {
     where: { userId: user.id, instanceId, agentId, isActive: true },
   })
 
+  let chatSessionId: string
   if (existingSession) {
+    chatSessionId = existingSession.id
     await prisma.chatSession.update({
       where: { id: existingSession.id },
       data: {
@@ -518,7 +520,7 @@ export async function POST(req: NextRequest) {
       },
     })
   } else {
-    await prisma.chatSession.create({
+    const created = await prisma.chatSession.create({
       data: {
         userId: user.id,
         instanceId,
@@ -529,6 +531,7 @@ export async function POST(req: NextRequest) {
         isActive: true,
       },
     })
+    chatSessionId = created.id
   }
 
   // --- SSE Stream ---
@@ -548,6 +551,9 @@ export async function POST(req: NextRequest) {
       closed = true
     })
   }
+
+  // Send session ID as the first event so the frontend can track this session
+  write({ type: 'session', sessionId: chatSessionId })
 
   async function close() {
     if (closed) return

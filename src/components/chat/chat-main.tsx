@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useChatStore } from "@/stores/chat-store"
-import { useChatSessions, useChatHistory } from "@/hooks/use-chat"
+import { chatKeys, useChatSessions, useChatHistory } from "@/hooks/use-chat"
 import { ChatHeader } from "./chat-header"
 import { ChatMessageList } from "./chat-message-list"
 import { ChatInput } from "./chat-input"
@@ -17,6 +18,7 @@ export function ChatMain() {
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
   const messagesLength = useChatStore((s) => s.messages.length)
   const isStreaming = useChatStore((s) => s.isStreaming)
+  const qc = useQueryClient()
 
   // Find existing active session for the selected agent
   const { data: sessions } = useChatSessions()
@@ -50,6 +52,14 @@ export function ChatMain() {
       setActiveSessionId(matchingSession.id)
     }
   }, [matchingSession, activeSessionId, setActiveSessionId])
+
+  // When activeSessionId is set (e.g. by session SSE event) but the sessions
+  // query doesn't include it yet, refetch the sessions list
+  useEffect(() => {
+    if (activeSessionId && sessions && !sessions.find((s) => s.id === activeSessionId)) {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions() })
+    }
+  }, [activeSessionId, sessions, qc])
 
   // When history data arrives or updates, assemble the full message list.
   // Skip during streaming to avoid overwriting real-time content.
