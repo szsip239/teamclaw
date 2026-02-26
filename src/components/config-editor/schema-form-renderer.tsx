@@ -820,6 +820,23 @@ function ArrayFieldRenderer({
     )
   }
 
+  // Enum array → toggleable buttons (anyOf with const values, e.g. input: ["text", "image"])
+  const enumConstants = itemSchema?.anyOf
+    ?.filter((s: JsonSchema) => 'const' in s)
+    ?.map((s: JsonSchema) => s.const as string)
+  if (enumConstants && enumConstants.length > 0) {
+    return (
+      <div className="space-y-1.5">
+        <FieldLabel label={label} help={help} path={path} />
+        <EnumArrayInput
+          options={enumConstants}
+          value={value as string[]}
+          onChange={(v) => onChange(path, v)}
+        />
+      </div>
+    )
+  }
+
   // Primitive array → chip/tag input
   if (!itemSchema || itemSchema.type === 'string' || itemSchema.type === 'number') {
     return (
@@ -1016,6 +1033,47 @@ function PrimitiveArrayInput({
         placeholder={t('config.enterToAdd')}
         className="h-8 text-sm"
       />
+    </div>
+  )
+}
+
+// ─── Enum Array (Toggleable Buttons) ────────────────────────────────
+
+function EnumArrayInput({
+  options,
+  value,
+  onChange,
+}: {
+  options: string[]
+  value: string[]
+  onChange: (value: string[]) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((option) => {
+        const active = value.includes(option)
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => {
+              if (active) {
+                onChange(value.filter((v) => v !== option))
+              } else {
+                onChange([...value, option])
+              }
+            }}
+            className={cn(
+              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+              active
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-background text-muted-foreground hover:bg-muted/50",
+            )}
+          >
+            {option}
+          </button>
+        )
+      })}
     </div>
   )
 }
