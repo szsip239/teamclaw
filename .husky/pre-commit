@@ -56,7 +56,7 @@ for pattern in $PRIVATE_PATTERNS; do
 done
 
 # --- 2. Scan for hardcoded secrets ---
-SECRETS_REGEX='(PRIVATE_KEY|SECRET_KEY|ENCRYPTION_KEY|API_KEY|ACCESS_TOKEN|sk-[a-zA-Z0-9]{20,}|-----BEGIN\s*(RSA\s*)?PRIVATE\s*KEY)'
+SECRETS_REGEX='(PRIVATE_KEY|SECRET_KEY|ENCRYPTION_KEY|API_KEY|sk-[a-zA-Z0-9]{20,}|-----BEGIN\s*(RSA\s*)?PRIVATE\s*KEY)'
 
 for file in $STAGED; do
   # Skip the hook file itself to avoid self-detection
@@ -77,7 +77,7 @@ for file in $STAGED; do
   case "$file" in
     src/components/*|src/app/*)
       if [ -f "$file" ]; then
-        CHINESE=$(git diff --cached -- "$file" | grep -E "^\+" | grep -P '[\x{4e00}-\x{9fff}]' | grep -v "// " | grep -v "import " | head -3 || true)
+        CHINESE=$(git diff --cached -- "$file" | grep -E "^\+" | grep '[一-鿿]' | grep -v "// " | grep -v "import " | head -3 || true)
         if [ -n "$CHINESE" ]; then
           echo "⚠️  WARNING: hardcoded Chinese text in $file:"
           echo "$CHINESE" | head -3

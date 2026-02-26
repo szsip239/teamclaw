@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useCallback } from "react"
+import { useEffect, useRef, useCallback } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useChatStore } from "@/stores/chat-store"
 import { useFilePanelStore } from "@/stores/file-panel-store"
 import { useT } from "@/stores/language-store"
+import { sessionFileKeys, useFileWatch } from "@/hooks/use-session-files"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { FolderOpen, Download } from "lucide-react"
@@ -14,12 +16,26 @@ import { FileDetail } from "./file-detail"
 export function ChatFilePanel() {
   const t = useT()
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const isStreaming = useChatStore((s) => s.isStreaming)
   const reset = useFilePanelStore((s) => s.reset)
+  const qc = useQueryClient()
 
   // Reset file panel state when session changes
   useEffect(() => {
     reset()
   }, [activeSessionId, reset])
+
+  // Layer 1: Invalidate file queries when streaming ends
+  const wasStreamingRef = useRef(false)
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      qc.invalidateQueries({ queryKey: sessionFileKeys.lists() })
+    }
+    wasStreamingRef.current = isStreaming
+  }, [isStreaming, qc])
+
+  // Layer 2: SSE watch for background file changes
+  useFileWatch(activeSessionId)
 
   const handleDownloadAll = useCallback(() => {
     if (!activeSessionId) return

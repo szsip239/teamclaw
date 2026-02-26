@@ -27,7 +27,7 @@ export const GET = withAuth(
     }
 
     const outputPath = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, 'output',
+      session.agentId, session.id, 'output',
     )
 
     try {

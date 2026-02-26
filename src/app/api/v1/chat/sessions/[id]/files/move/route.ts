@@ -48,10 +48,10 @@ export const POST = withAuth(
     }
 
     const sourceFull = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, 'input', result.data.source,
+      session.agentId, session.id, 'input', result.data.source,
     )
     const targetFull = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, 'input', result.data.target,
+      session.agentId, session.id, 'input', result.data.target,
     )
 
     try {

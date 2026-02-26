@@ -31,6 +31,24 @@ export type AuthHandler = (
 ) => Promise<NextResponse>
 
 /**
+ * Extract user ID from request headers or JWT token.
+ * Used by both `withAuth` wrapper and standalone SSE routes that need
+ * inline auth before constructing a streaming response.
+ */
+export async function resolveRequestUserId(req: NextRequest): Promise<string | null> {
+  const headerUserId = req.headers.get('x-user-id')
+  if (headerUserId) return headerUserId
+
+  const authHeader = req.headers.get('authorization')
+  const cookieToken = req.cookies.get('access_token')?.value
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken
+  if (!token) return null
+
+  const payload = await verifyAccessToken(token)
+  return payload?.userId ?? null
+}
+
+/**
  * Wraps a route handler with authentication.
  * Reads user from middleware-injected headers, falling back to JWT verification.
  * Returns a standard Next.js route handler function.
@@ -40,24 +58,10 @@ export function withAuth(handler: AuthHandler) {
     req: NextRequest,
     segmentData?: { params?: Promise<RouteParams> },
   ) => {
-    let userId = req.headers.get('x-user-id')
+    const userId = await resolveRequestUserId(req)
 
-    // Fallback: verify JWT from Authorization header or cookie
     if (!userId) {
-      const authHeader = req.headers.get('authorization')
-      const cookieToken = req.cookies.get('access_token')?.value
-      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken
-
-      if (!token) {
-        return NextResponse.json({ error: '未授权访问' }, { status: 401 })
-      }
-
-      const payload = await verifyAccessToken(token)
-      if (!payload) {
-        return NextResponse.json({ error: '无效或过期的令牌' }, { status: 401 })
-      }
-
-      userId = payload.userId
+      return NextResponse.json({ error: '未授权访问' }, { status: 401 })
     }
 
     const user = await prisma.user.findUnique({

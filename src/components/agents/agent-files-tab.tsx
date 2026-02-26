@@ -205,7 +205,7 @@ export function AgentFilesTab({ compositeId }: AgentFilesTabProps) {
           <div className="space-y-0.5">
             {files.map((file, i) => (
               <motion.button
-                key={file.name}
+                key={`${file.type}:${file.path}`}
                 initial={{ opacity: 0, x: -4 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.15, delay: i * 0.02 }}

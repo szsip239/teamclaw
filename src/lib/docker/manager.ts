@@ -387,7 +387,7 @@ export class DockerManager {
       Cmd: [
         'sh',
         '-c',
-        'cd "$1" 2>/dev/null && find . -not -name \'.\' -printf \'%y %s %P\\n\' 2>/dev/null || ls -la "$1" 2>/dev/null || echo \'\'',
+        'cd "$1" 2>/dev/null && find . -maxdepth 1 -not -name \'.\' -printf \'%y %s %P\\n\' 2>/dev/null || ls -la "$1" 2>/dev/null || echo \'\'',
         '--',
         dirPath,
       ],
@@ -424,7 +424,18 @@ export class DockerManager {
       }
     }
 
-    return entries.sort((a, b) => {
+    // Deduplicate by type:name — if find returns nested entries (e.g. cached
+    // results from before -maxdepth 1 fix), keep only the shallowest path.
+    const seen = new Map<string, (typeof entries)[0]>()
+    for (const entry of entries) {
+      const key = `${entry.type}:${entry.name}`
+      const existing = seen.get(key)
+      if (!existing || entry.path.length < existing.path.length) {
+        seen.set(key, entry)
+      }
+    }
+
+    return [...seen.values()].sort((a, b) => {
       if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
       return a.name.localeCompare(b.name)
     })
@@ -443,6 +454,25 @@ export class DockerManager {
       stream.on('end', () => resolve())
       stream.on('error', reject)
       stream.resume()
+    })
+  }
+
+  /** Run a command inside a container and return stdout as a string. */
+  async execWithOutput(containerId: string, cmd: string[]): Promise<string> {
+    const container = this.docker.getContainer(containerId)
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+    const stream = await exec.start({ Detach: false })
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = []
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+      stream.on('end', () => {
+        resolve(demuxDockerStream(Buffer.concat(chunks)).trim())
+      })
+      stream.on('error', reject)
     })
   }
 

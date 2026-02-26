@@ -50,7 +50,7 @@ export const POST = withAuth(
     }
 
     const containerDir = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, 'input', dir || undefined,
+      session.agentId, session.id, 'input', dir || undefined,
     )
 
     const buffer = Buffer.from(await file.arrayBuffer())
