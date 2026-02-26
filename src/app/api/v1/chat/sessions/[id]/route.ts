@@ -44,7 +44,7 @@ export const DELETE = withAuth(
         select: { containerId: true },
       })
       if (instance?.containerId) {
-        const sessionDir = buildSessionBasePath(session.agentId, session.userId, session.id)
+        const sessionDir = buildSessionBasePath(session.agentId, session.id)
         await dockerManager.removeContainerDir(instance.containerId, sessionDir)
       }
     } catch {

@@ -759,19 +759,20 @@ export async function POST(req: NextRequest) {
         select: { containerId: true },
       })
       if (instance?.containerId) {
-        const inputPath = buildSessionInputPath(agentId, user.id, activeSession.id)
+        const inputPath = buildSessionInputPath(agentId, activeSession.id)
 
         // Update `current-session` symlink so the agent can find files via
         // `current-session/input/` without needing injected paths.
-        // Also ensure output/ directory exists so the agent can write results.
+        // Pre-create both input/ and output/ so agent sees them immediately.
         try {
           const linkPath = buildCurrentSessionLinkPath(agentId)
-          const target = buildCurrentSessionTarget(user.id, activeSession.id)
-          const outputPath = buildSessionOutputPath(agentId, user.id, activeSession.id)
+          const target = buildCurrentSessionTarget(activeSession.id)
+          const outputPath = buildSessionOutputPath(agentId, activeSession.id)
           await Promise.all([
             dockerManager.execInContainer(instance.containerId, [
               'ln', '-sfn', '--', target, linkPath,
             ]),
+            dockerManager.ensureContainerDir(instance.containerId, inputPath),
             dockerManager.ensureContainerDir(instance.containerId, outputPath),
           ])
         } catch {

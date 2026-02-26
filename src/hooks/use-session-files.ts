@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useCallback } from "react"
 import {
   useQuery,
   useMutation,
@@ -34,8 +35,84 @@ export function useSessionFiles(
         `/api/v1/chat/sessions/${sessionId}/files?${params}`,
       ),
     enabled: !!sessionId,
-    refetchInterval: 30_000,
   })
+}
+
+// ─── File Watch (SSE) ───────────────────────────────────────────────
+
+const MAX_BACKOFF_MS = 30_000
+
+export function useFileWatch(sessionId: string | null) {
+  const qc = useQueryClient()
+  const backoffRef = useRef(1_000)
+
+  const invalidateFiles = useCallback(() => {
+    qc.invalidateQueries({ queryKey: sessionFileKeys.lists() })
+  }, [qc])
+
+  useEffect(() => {
+    if (!sessionId) return
+
+    let aborted = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    backoffRef.current = 1_000
+
+    async function connect() {
+      if (aborted) return
+      try {
+        const res = await fetch(
+          `/api/v1/chat/sessions/${sessionId}/files/watch`,
+          { credentials: "include" },
+        )
+        if (!res.ok || !res.body) return
+
+        // Reset backoff on successful connection
+        backoffRef.current = 1_000
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+
+        while (!aborted) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          // Process complete SSE lines
+          const lines = buffer.split("\n")
+          buffer = lines.pop() ?? ""
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue
+            try {
+              const evt = JSON.parse(line.slice(6)) as { type: string }
+              if (evt.type === "files-changed") {
+                invalidateFiles()
+              }
+            } catch {
+              // Ignore malformed lines
+            }
+          }
+        }
+      } catch {
+        // Network error — will reconnect below
+      }
+
+      // Reconnect with exponential backoff
+      if (!aborted) {
+        reconnectTimer = setTimeout(() => {
+          backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF_MS)
+          connect()
+        }, backoffRef.current)
+      }
+    }
+
+    connect()
+
+    return () => {
+      aborted = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+    }
+  }, [sessionId, invalidateFiles])
 }
 
 // ─── Upload File ─────────────────────────────────────────────────────

@@ -56,7 +56,22 @@ export const GET = withAuth(
     const targetPath = dir ? `${containerPath}/${dir}` : containerPath
 
     try {
-      const files = await dockerManager.listContainerDir(instance.containerId, targetPath)
+      const rawFiles = await dockerManager.listContainerDir(instance.containerId, targetPath)
+
+      // Only keep direct children — listContainerDir may return recursive
+      // results if the container's find lacks -maxdepth support or the
+      // globalThis-cached DockerManager instance has a stale method body.
+      const seen = new Map<string, (typeof rawFiles)[0]>()
+      for (const f of rawFiles) {
+        if (f.path.includes('/')) continue // skip nested entries
+        const key = `${f.type}:${f.name}`
+        if (!seen.has(key)) seen.set(key, f)
+      }
+      const files = [...seen.values()].sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+
       return NextResponse.json({ files, workspace, dir })
     } catch (err) {
       return NextResponse.json(

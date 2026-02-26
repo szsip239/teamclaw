@@ -48,7 +48,7 @@ export const POST = withAuth(
     }
 
     const fullPath = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, 'input', result.data.dir,
+      session.agentId, session.id, 'input', result.data.dir,
     )
 
     await dockerManager.ensureContainerDir(instance.containerId, fullPath)

@@ -1,27 +1,26 @@
 export type SessionFileZone = 'input' | 'output'
 
-export function buildSessionBasePath(agentId: string, userId: string, chatSessionId: string): string {
-  return `/workspace/${agentId}/users/${userId}/sessions/${chatSessionId}/`
+export function buildSessionBasePath(agentId: string, chatSessionId: string): string {
+  return `/workspace/${agentId}/sessions/${chatSessionId}/`
 }
 
-export function buildSessionInputPath(agentId: string, userId: string, chatSessionId: string): string {
-  return `${buildSessionBasePath(agentId, userId, chatSessionId)}input/`
+export function buildSessionInputPath(agentId: string, chatSessionId: string): string {
+  return `${buildSessionBasePath(agentId, chatSessionId)}input/`
 }
 
-export function buildSessionOutputPath(agentId: string, userId: string, chatSessionId: string): string {
-  return `${buildSessionBasePath(agentId, userId, chatSessionId)}output/`
+export function buildSessionOutputPath(agentId: string, chatSessionId: string): string {
+  return `${buildSessionBasePath(agentId, chatSessionId)}output/`
 }
 
 export function resolveSessionFilePath(
   agentId: string,
-  userId: string,
   chatSessionId: string,
   zone: SessionFileZone,
   relativePath?: string,
 ): string {
   const base = zone === 'input'
-    ? buildSessionInputPath(agentId, userId, chatSessionId)
-    : buildSessionOutputPath(agentId, userId, chatSessionId)
+    ? buildSessionInputPath(agentId, chatSessionId)
+    : buildSessionOutputPath(agentId, chatSessionId)
   if (!relativePath) return base
   return `${base}${relativePath}`
 }
@@ -39,8 +38,8 @@ export function buildCurrentSessionLinkPath(agentId: string): string {
  * Build the relative target for the `current-session` symlink.
  * Relative to the agent workspace so it works inside the container.
  */
-export function buildCurrentSessionTarget(userId: string, chatSessionId: string): string {
-  return `users/${userId}/sessions/${chatSessionId}`
+export function buildCurrentSessionTarget(chatSessionId: string): string {
+  return `sessions/${chatSessionId}`
 }
 
 export function isSessionPathSafe(relativePath: string): boolean {

@@ -42,7 +42,7 @@ export const GET = withAuth(
     }
 
     const filePath = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, zone, relativePath,
+      session.agentId, session.id, zone, relativePath,
     )
 
     try {
@@ -98,7 +98,7 @@ export const DELETE = withAuth(
     }
 
     const filePath = resolveSessionFilePath(
-      session.agentId, session.userId, session.id, 'input', relativePath,
+      session.agentId, session.id, 'input', relativePath,
     )
 
     try {

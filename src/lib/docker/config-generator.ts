@@ -84,7 +84,6 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
     commands: {
       native: 'auto',
       nativeSkills: 'auto',
-      ownerDisplay: 'raw', // Deliver user messages without metadata decoration (requires OpenClaw >= 2026.2.21)
     },
   }
 
@@ -173,16 +172,22 @@ export async function initializeInstanceFiles(config: InstanceConfig): Promise<{
   const agentsMdContent = [
     '# Agent Instructions',
     '',
-    '## Session Files',
+    '## Session Files (MANDATORY)',
     '',
     'Users may upload files for you to process.',
-    'A `current-session` symlink in your workspace always points to the active session:',
+    'A `current-session` symlink in your workspace always points to the active session directory.',
     '',
-    '- `current-session/input/`  — user-uploaded data files (read from here)',
-    '- `current-session/output/` — write your generated files here (reports, charts, exports)',
+    '### Rules',
     '',
-    'Always use `current-session/input/` and `current-session/output/`.',
-    'Do NOT explore `users/` directly.',
+    '1. **Read** user-uploaded files from `current-session/input/`',
+    '2. **Write** all generated files (reports, charts, exports, code) to `current-session/output/`',
+    '3. **NEVER** write files to the workspace root directory or any location outside `current-session/output/`',
+    '4. **NEVER** explore or reference `sessions/` directories directly — always use the `current-session` symlink',
+    '',
+    'Example paths:',
+    '- Read: `current-session/input/data.csv`',
+    '- Write: `current-session/output/report.pdf`',
+    '- Sub-folder: `current-session/output/charts/figure1.png`',
     '',
   ].join('\n')
 
