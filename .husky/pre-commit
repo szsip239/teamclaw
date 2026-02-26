@@ -77,7 +77,7 @@ for file in $STAGED; do
   case "$file" in
     src/components/*|src/app/*)
       if [ -f "$file" ]; then
-        CHINESE=$(git diff --cached -- "$file" | grep -E "^\+" | grep '[一-鿿]' | grep -v "// " | grep -v "import " | head -3 || true)
+        CHINESE=$(git diff --cached -- "$file" | grep -E "^\+" | LC_ALL=en_US.UTF-8 grep -E '[⺀-⿿㇀-㇯㐀-䶵一-鿿豈-頻並-龎]' | grep -v "// " | grep -v "import " | head -3 || true)
         if [ -n "$CHINESE" ]; then
           echo "⚠️  WARNING: hardcoded Chinese text in $file:"
           echo "$CHINESE" | head -3
