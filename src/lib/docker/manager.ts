@@ -299,6 +299,36 @@ export class DockerManager {
     })
   }
 
+  /**
+   * Fix common container environment issues for the agent user.
+   * - Install python3-venv so agents can create proper virtual environments
+   * - Symlink user-installed Python tools (pip3, etc.) into /usr/local/bin
+   *   so they are accessible from the default PATH.
+   * Called once after container start, independent of sandbox mode.
+   */
+  async initContainerEnv(containerId: string): Promise<void> {
+    const container = this.docker.getContainer(containerId)
+    const script = [
+      // Ensure python3 venv works properly (ensurepip + pip in venv)
+      'apt-get update -qq',
+      'apt-get install -y -qq python3-venv > /dev/null 2>&1 || true',
+      // Symlink user-installed Python tools into PATH
+      'for f in /home/node/.local/bin/*; do [ -x "$f" ] && ln -sf "$f" /usr/local/bin/ 2>/dev/null; done',
+    ].join(' && ')
+    const exec = await container.exec({
+      Cmd: ['sh', '-c', script],
+      AttachStdout: true,
+      AttachStderr: true,
+      User: 'root',
+    })
+    const stream = await exec.start({ Detach: false })
+    await new Promise<void>((resolve) => {
+      stream.on('end', () => resolve())
+      stream.on('error', () => resolve()) // non-fatal
+      stream.resume()
+    })
+  }
+
   // Container file operations (via docker exec)
   async readContainerFile(containerId: string, filePath: string): Promise<string> {
     if (!isContainerPathSafe(filePath)) {
@@ -357,7 +387,7 @@ export class DockerManager {
       Cmd: [
         'sh',
         '-c',
-        'cd "$1" 2>/dev/null && find . -maxdepth 1 -not -name \'.\' -printf \'%y %s %f\\n\' 2>/dev/null || ls -la "$1" 2>/dev/null || echo \'\'',
+        'cd "$1" 2>/dev/null && find . -not -name \'.\' -printf \'%y %s %P\\n\' 2>/dev/null || ls -la "$1" 2>/dev/null || echo \'\'',
         '--',
         dirPath,
       ],
@@ -379,12 +409,12 @@ export class DockerManager {
     const entries: { name: string; path: string; type: 'file' | 'directory'; size: number }[] = []
     for (const line of output.split('\n')) {
       if (!line.trim()) continue
-      // find -printf format: "type size name"  (type: f=file, d=directory)
+      // find -printf format: "type size relPath"  (type: f=file, d=directory, relPath from %P)
       const match = line.match(/^([fd])\s+(\d+)\s+(.+)$/)
       if (match) {
-        const [, typeChar, sizeStr, name] = match
-        if (name === '.' || name === '..') continue
-        const relPath = dirPath === '.' || dirPath === '' ? name : name
+        const [, typeChar, sizeStr, relPath] = match
+        if (!relPath || relPath === '.' || relPath === '..') continue
+        const name = relPath.split('/').pop() ?? relPath
         entries.push({
           name,
           path: relPath,
@@ -400,15 +430,33 @@ export class DockerManager {
     })
   }
 
+  /** Run an arbitrary command inside a container (fire-and-forget style). */
+  async execInContainer(containerId: string, cmd: string[]): Promise<void> {
+    const container = this.docker.getContainer(containerId)
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+    const stream = await exec.start({ Detach: false })
+    return new Promise((resolve, reject) => {
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+      stream.resume()
+    })
+  }
+
   async ensureContainerDir(containerId: string, dirPath: string): Promise<void> {
     if (!isContainerPathSafe(dirPath)) {
       throw new Error(`Unsafe container directory path: ${dirPath}`)
     }
     const container = this.docker.getContainer(containerId)
+    // Run as root so we can create dirs anywhere, then chown to node (1000)
     const exec = await container.exec({
-      Cmd: ['mkdir', '-p', '--', dirPath],
+      Cmd: ['sh', '-c', 'mkdir -p -- "$1" && chown -R 1000:1000 "$1"', '--', dirPath],
       AttachStdout: true,
       AttachStderr: true,
+      User: 'root',
     })
     const stream = await exec.start({ Detach: false })
     return new Promise((resolve, reject) => {
@@ -450,7 +498,8 @@ export class DockerManager {
     const container = this.docker.getContainer(containerId)
 
     const pack = tar.pack()
-    pack.entry({ name: fileName, size: content.length }, content)
+    // Set uid/gid to 1000 (node) so the agent can read/write the file
+    pack.entry({ name: fileName, size: content.length, uid: 1000, gid: 1000 }, content)
     pack.finalize()
 
     await container.putArchive(pack, { path: containerDir })
@@ -503,7 +552,7 @@ export class DockerManager {
     }
     const container = this.docker.getContainer(containerId)
     const exec = await container.exec({
-      Cmd: ['rm', '-f', '--', filePath],
+      Cmd: ['rm', '-rf', '--', filePath],
       AttachStdout: true,
       AttachStderr: true,
     })

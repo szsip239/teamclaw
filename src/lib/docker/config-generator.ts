@@ -167,6 +167,30 @@ export async function initializeInstanceFiles(config: InstanceConfig): Promise<{
     'utf-8',
   )
 
+  // Write default AGENTS.md with session file rules for each agent workspace.
+  // OpenClaw loads AGENTS.md automatically as agent system instructions,
+  // so session file conventions are taught once here instead of injected per-message.
+  const agentsMdContent = [
+    '# Agent Instructions',
+    '',
+    '## Session Files',
+    '',
+    'Users may upload files for you to process.',
+    'A `current-session` symlink in your workspace always points to the active session:',
+    '',
+    '- `current-session/input/`  — user-uploaded data files (read from here)',
+    '- `current-session/output/` — write your generated files here (reports, charts, exports)',
+    '',
+    'Always use `current-session/input/` and `current-session/output/`.',
+    'Do NOT explore `users/` directly.',
+    '',
+  ].join('\n')
+
+  for (const dir of ['default', agentId]) {
+    const mdPath = path.join(dataDir, 'workspace', dir, 'AGENTS.md')
+    await fs.writeFile(mdPath, agentsMdContent, 'utf-8')
+  }
+
   return { dataDir, gatewayToken, configJson }
 }
 

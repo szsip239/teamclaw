@@ -4,7 +4,7 @@ import { useCallback } from "react"
 import type { SessionFileEntry } from "@/types/session-files"
 import type { SessionFileZone } from "@/stores/file-panel-store"
 import { useFilePanelStore } from "@/stores/file-panel-store"
-import { useMoveSessionFile } from "@/hooks/use-session-files"
+import { useMoveSessionFile, useUploadSessionFile } from "@/hooks/use-session-files"
 import { useT } from "@/stores/language-store"
 import { cn } from "@/lib/utils"
 import { File, Folder, FolderOpen, FileText, Image } from "lucide-react"
@@ -56,6 +56,7 @@ export function FileTreeNode({
   const expandedDirs = useFilePanelStore((s) => s.expandedDirs)
   const toggleDir = useFilePanelStore((s) => s.toggleDir)
   const moveMutation = useMoveSessionFile(sessionId)
+  const uploadMutation = useUploadSessionFile(sessionId)
 
   const isSelected =
     selectedFile?.entry.path === entry.path && selectedFile?.zone === zone
@@ -81,9 +82,15 @@ export function FileTreeNode({
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
       if (!isDir || zone !== "input") return
-      if (e.dataTransfer.types.includes("application/x-file-path")) {
+      // Accept both internal file moves and OS file drops
+      if (
+        e.dataTransfer.types.includes("application/x-file-path") ||
+        e.dataTransfer.types.includes("Files")
+      ) {
         e.preventDefault()
-        e.dataTransfer.dropEffect = "move"
+        e.dataTransfer.dropEffect = e.dataTransfer.types.includes("Files")
+          ? "copy"
+          : "move"
       }
     },
     [isDir, zone]
@@ -92,9 +99,26 @@ export function FileTreeNode({
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       if (!isDir || zone !== "input") return
+      e.preventDefault()
+      e.stopPropagation() // prevent FileUploadZone from also handling this
+
+      // OS file drop → upload to this folder
+      if (e.dataTransfer.files.length > 0) {
+        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+          uploadMutation.mutate(
+            { file: e.dataTransfer.files[i], dir: entry.path },
+            {
+              onSuccess: () => toast.success(t("filePanel.uploadSuccess")),
+              onError: () => toast.error(t("filePanel.uploadFailed")),
+            }
+          )
+        }
+        return
+      }
+
+      // Internal drag → move file into this folder
       const sourcePath = e.dataTransfer.getData("application/x-file-path")
       if (!sourcePath || sourcePath === entry.path) return
-      e.preventDefault()
 
       const fileName = sourcePath.split("/").pop() ?? sourcePath
       const targetPath = entry.path
@@ -109,7 +133,7 @@ export function FileTreeNode({
         }
       )
     },
-    [isDir, zone, entry.path, moveMutation, t]
+    [isDir, zone, entry.path, moveMutation, uploadMutation, t]
   )
 
   const node = (
