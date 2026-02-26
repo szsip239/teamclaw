@@ -8,6 +8,7 @@ import { auditLog } from '@/lib/audit'
 import {
   extractAgentsConfig,
   resolveWorkspacePath,
+  resolveWorkspaceForInstance,
   buildAgentId,
   sanitizeAgentEntry,
   isAgentVisible,
@@ -207,7 +208,7 @@ export const POST = withAuth(
 
       // Build new agent entry
       const newAgent: Record<string, unknown> = { id: agentId }
-      if (workspace) newAgent.workspace = workspace
+      if (workspace) newAgent.workspace = await resolveWorkspaceForInstance(instanceId, workspace)
       if (models) newAgent.models = models
       if (sandbox) newAgent.sandbox = sandbox
 

@@ -99,6 +99,9 @@ export class DockerManager {
         binds.push(`${hostPath}:${containerPath}`)
       }
     }
+    if (options.extraBinds) {
+      binds.push(...options.extraBinds)
+    }
 
     const env = options.env
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
@@ -219,6 +222,81 @@ export class DockerManager {
     } catch {
       return false
     }
+  }
+
+  // Sandbox support initialization (Docker-in-Docker)
+  /**
+   * Install Docker CLI and configure permissions inside a container.
+   * Required for OpenClaw sandbox mode which uses `docker` CLI to create sandbox containers.
+   *
+   * Steps:
+   * 1. Download Docker static binary (compatible with the host Docker daemon)
+   * 2. Create docker group and add the container's default user to it
+   * 3. Fix Docker socket permissions
+   *
+   * After calling this, the container MUST be restarted for group changes to take effect.
+   */
+  async initSandboxSupport(containerId: string): Promise<void> {
+    const container = this.docker.getContainer(containerId)
+
+    // Detect architecture for the correct Docker binary
+    const archExec = await container.exec({
+      Cmd: ['uname', '-m'],
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+    const archStream = await archExec.start({ Detach: false })
+    const arch = await new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      archStream.on('data', (chunk: Buffer) => chunks.push(chunk))
+      archStream.on('end', () => resolve(demuxDockerStream(Buffer.concat(chunks)).trim()))
+      archStream.on('error', reject)
+    })
+
+    // Map to Docker's download architecture name
+    const archMap: Record<string, string> = {
+      'x86_64': 'x86_64',
+      'aarch64': 'aarch64',
+      'arm64': 'aarch64',
+    }
+    const dockerArch = archMap[arch] || 'x86_64'
+
+    // Install Docker CLI + setup permissions in a single root exec
+    const initScript = [
+      // Download and install Docker static binary
+      `curl -fsSL https://download.docker.com/linux/static/stable/${dockerArch}/docker-28.0.1.tgz -o /tmp/docker.tgz`,
+      'tar xzf /tmp/docker.tgz -C /tmp',
+      'cp /tmp/docker/docker /usr/local/bin/docker',
+      'chmod +x /usr/local/bin/docker',
+      'rm -rf /tmp/docker /tmp/docker.tgz',
+      // Setup docker group and permissions
+      'groupadd -f docker',
+      'usermod -aG docker node',
+      'chmod 660 /var/run/docker.sock',
+      'chgrp docker /var/run/docker.sock',
+    ].join(' && ')
+
+    const exec = await container.exec({
+      Cmd: ['bash', '-c', initScript],
+      AttachStdout: true,
+      AttachStderr: true,
+      User: 'root',
+    })
+    const stream = await exec.start({ Detach: false })
+    await new Promise<void>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+      stream.on('end', async () => {
+        const info = await exec.inspect()
+        if (info.ExitCode !== 0) {
+          const output = demuxDockerStream(Buffer.concat(chunks))
+          reject(new Error(`Sandbox init failed (exit ${info.ExitCode}): ${output}`))
+        } else {
+          resolve()
+        }
+      })
+      stream.on('error', reject)
+    })
   }
 
   // Container file operations (via docker exec)

@@ -192,6 +192,7 @@ async function createDockerInstance(
       modelProvider,
       defaultAgentId: body.defaultAgentId || 'main',
       env: body.docker?.env,
+      hostDataDir: 'resolve', // resolved to dataDir inside initializeInstanceFiles
     })
     dataDir = result.dataDir
   } catch (err) {
@@ -228,13 +229,22 @@ async function createDockerInstance(
   const containerName = `teamclaw-${name}`
   let containerId: string
   try {
+    const workspaceHostPath = path.join(dataDir, 'workspace')
     containerId = await dockerManager.createContainer({
       name: containerName,
       imageName,
       volumes: {
         [dataDir]: '/home/node/.openclaw',
-        [path.join(dataDir, 'workspace')]: '/workspace',
+        [workspaceHostPath]: '/workspace',
       },
+      // Extra binds for sandbox support (Docker-in-Docker):
+      // 1. Mount workspace at its host path so OpenClaw sandbox can bind-mount
+      //    workspace into sandbox containers using host-resolvable paths.
+      // 2. Mount Docker socket for sandbox container management.
+      extraBinds: [
+        `${workspaceHostPath}:${workspaceHostPath}`,
+        '/var/run/docker.sock:/var/run/docker.sock',
+      ],
       portBindings: {
         [`${GATEWAY_PORT}`]: String(hostPort),
       },
@@ -253,9 +263,19 @@ async function createDockerInstance(
     )
   }
 
-  // 8. Start container
+  // 8. Start container + initialize sandbox support
   try {
     await dockerManager.startContainer(containerId)
+
+    // Install Docker CLI and set up permissions for sandbox mode (Docker-in-Docker).
+    // Must run after start (needs running container) and requires restart for group changes.
+    try {
+      await dockerManager.initSandboxSupport(containerId)
+      await dockerManager.restartContainer(containerId)
+    } catch (sandboxErr) {
+      // Non-fatal: instance works without sandbox, log and continue
+      console.warn(`[instance:create] Sandbox init failed for ${name}:`, (sandboxErr as Error).message)
+    }
   } catch (err) {
     // Keep container for debugging — create DB record with ERROR status
     const gatewayUrl = `ws://127.0.0.1:${hostPort}`
