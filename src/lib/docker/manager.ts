@@ -300,20 +300,29 @@ export class DockerManager {
   }
 
   /**
-   * Fix common container environment issues for the agent user.
-   * - Install python3-venv so agents can create proper virtual environments
-   * - Symlink user-installed Python tools (pip3, etc.) into /usr/local/bin
-   *   so they are accessible from the default PATH.
+   * Bootstrap the Python toolchain inside the container so skills/agents
+   * can install and run Python packages (pandas, etc.) without friction.
+   *
+   * Steps (all run as root, non-fatal on failure):
+   *  1. apt: python3-pip, python3-venv (ensures pip3 + venv available)
+   *  2. pip3 install uv → OpenClaw's preferred Python package manager
+   *  3. Symlink everything in ~/.local/bin into /usr/local/bin
+   *     so pip3/uv/etc. are on the default PATH for the node user.
+   *
    * Called once after container start, independent of sandbox mode.
    */
   async initContainerEnv(containerId: string): Promise<void> {
     const container = this.docker.getContainer(containerId)
     const script = [
-      // Ensure python3 venv works properly (ensurepip + pip in venv)
       'apt-get update -qq',
-      'apt-get install -y -qq python3-venv > /dev/null 2>&1 || true',
-      // Symlink user-installed Python tools into PATH
+      // Install pip3 + venv (Debian/Ubuntu)
+      'apt-get install -y -qq python3-pip python3-venv > /dev/null 2>&1 || true',
+      // Install uv via pip (fast Python package manager used by OpenClaw skills)
+      'pip3 install --break-system-packages -q uv 2>/dev/null || pip3 install -q uv 2>/dev/null || true',
+      // Symlink all user-installed Python tools into system PATH
       'for f in /home/node/.local/bin/*; do [ -x "$f" ] && ln -sf "$f" /usr/local/bin/ 2>/dev/null; done',
+      // Also symlink root-installed tools (pip3 install as root lands here)
+      'for f in /usr/local/lib/python3*/dist-packages/bin/* /usr/lib/python3*/dist-packages/bin/*; do [ -x "$f" ] && ln -sf "$f" /usr/local/bin/ 2>/dev/null; done',
     ].join(' && ')
     const exec = await container.exec({
       Cmd: ['sh', '-c', script],

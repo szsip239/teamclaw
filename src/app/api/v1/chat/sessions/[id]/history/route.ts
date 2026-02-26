@@ -254,6 +254,18 @@ function transformMessages(raw: ChatHistoryMessage[]): { messages: ChatMessage[]
       }
     }
   }
+
+  // Post-process: assistant messages that have tool calls are intermediate
+  // process narration (e.g. "Let me calculate that"), not final answers.
+  // Move their text content into the thinking field so it renders in the
+  // collapsible thinking block instead of as prominent chat text.
+  for (const msg of result) {
+    if (msg.role === 'assistant' && msg.toolCalls?.length && msg.content) {
+      msg.thinking = msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
+      msg.content = ''
+    }
+  }
+
   return { messages: result, pendingImages }
 }
 

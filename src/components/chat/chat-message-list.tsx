@@ -63,7 +63,7 @@ export function ChatMessageList() {
   const messageCount = messages.length
   useEffect(() => {
     if (isNearBottom) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+      bottomRef.current?.scrollIntoView({ behavior: "instant" })
     }
   }, [messageCount, isStreaming, isNearBottom])
 

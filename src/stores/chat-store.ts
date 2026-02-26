@@ -164,8 +164,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const msgs = [...s.messages]
       const last = msgs[msgs.length - 1]
       if (last?.role === 'assistant') {
+        // When a tool call arrives, any accumulated content is intermediate
+        // narration (e.g. "Let me calculate..."), not the final answer.
+        // Move it into thinking so it renders in the collapsible block.
+        const reclassifiedThinking =
+          last.content
+            ? last.content + (last.thinking ? '\n\n' + last.thinking : '')
+            : last.thinking
         msgs[msgs.length - 1] = {
           ...last,
+          content: '',
+          ...(reclassifiedThinking ? { thinking: reclassifiedThinking } : {}),
           toolCalls: [...(last.toolCalls ?? []), toolCall],
         }
       }
@@ -194,8 +203,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (instanceId, agentId, message, sessionId, attachments) => {
     const { addUserMessage } = get()
-    // Capture session ID at start to avoid race with clearMessages()
-    const capturedSessionId = get().activeSessionId
+    // Capture session ID at start — may be updated by the 'session' SSE event
+    // when the API creates a new session (activeSessionId was null)
+    let capturedSessionId = get().activeSessionId
 
     // 1. Add user message (with attachment previews for UI)
     const uiAttachments: ChatAttachment[] | undefined = attachments?.map(a => ({
@@ -233,6 +243,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         controller.signal,
       )) {
         switch (event.type) {
+          case 'session':
+            // API sends the session ID as the first event — track it
+            // so syncFromHistory works even when no sessionId was passed
+            capturedSessionId = event.sessionId
+            if (!get().activeSessionId) {
+              set({ activeSessionId: event.sessionId })
+            }
+            break
           case 'text':
             get().appendAssistantContent(event.content)
             break
