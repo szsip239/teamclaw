@@ -19,6 +19,7 @@ export interface InstanceConfig {
   modelProvider?: ModelProviderConfig
   defaultAgentId?: string         // default "main"
   env?: Record<string, string>    // extra env vars for openclaw.json env block
+  hostDataDir?: string            // host path to instance data dir (for sandbox workspace mapping)
 }
 
 // ─── Config Generation ──────────────────────────────────────────────
@@ -41,6 +42,13 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
   const port = config.gatewayPort || 18789
   const agentId = config.defaultAgentId || 'main'
 
+  // When hostDataDir is set, use host-resolvable paths for workspace.
+  // This enables OpenClaw sandbox (Docker-in-Docker) to bind-mount the workspace
+  // into sandbox containers using paths the host Docker daemon can resolve.
+  const wsPrefix = config.hostDataDir
+    ? `${config.hostDataDir}/workspace`
+    : '/workspace'
+
   const result: Record<string, unknown> = {
     gateway: {
       port,
@@ -57,7 +65,7 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
     },
     agents: {
       defaults: {
-        workspace: '/workspace/default',
+        workspace: `${wsPrefix}/default`,
         compaction: { mode: 'safeguard' },
         maxConcurrent: 4,
         subagents: { maxConcurrent: 8 },
@@ -66,7 +74,7 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
         {
           id: agentId,
           default: true,
-          workspace: `/workspace/${agentId}`,
+          workspace: `${wsPrefix}/${agentId}`,
         },
       ],
     },
@@ -141,8 +149,9 @@ export async function initializeInstanceFiles(config: InstanceConfig): Promise<{
   const agentId = config.defaultAgentId || 'main'
   const gatewayToken = config.gatewayToken || generateGatewayToken()
 
-  // Generate config
-  const configJson = generateOpenClawConfig({ ...config, gatewayToken })
+  // Generate config — resolve 'resolve' hostDataDir to actual dataDir
+  const hostDataDir = config.hostDataDir === 'resolve' ? dataDir : config.hostDataDir
+  const configJson = generateOpenClawConfig({ ...config, gatewayToken, hostDataDir })
 
   // Create directory structure
   await fs.mkdir(dataDir, { recursive: true })

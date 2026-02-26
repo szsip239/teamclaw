@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { registry } from '@/lib/gateway/registry'
 import { dockerManager } from '@/lib/docker'
+import { getInstanceDataDir } from '@/lib/docker/config-generator'
 import type { AgentConfigEntry, AgentDefaults, WorkspaceFileEntry } from '@/types/gateway'
 import type { AgentCategory } from '@/types/agent'
 import type { AgentMeta } from '@/generated/prisma'
@@ -46,6 +47,32 @@ export function resolveWorkspacePath(
 /** Resolve workspace path for container (expand ~ to /root) */
 export function containerWorkspacePath(workspacePath: string): string {
   return workspacePath.replace(/^~/, '/root')
+}
+
+/**
+ * Convert container-relative workspace paths to host-absolute paths for Docker instances.
+ * This enables OpenClaw sandbox mode (Docker-in-Docker) which needs host-resolvable paths
+ * for bind mounts that the host Docker daemon can resolve.
+ *
+ * /workspace/my-agent → {hostDataDir}/workspace/my-agent
+ * Non-/workspace paths and non-Docker instances are returned as-is.
+ */
+export async function resolveWorkspaceForInstance(
+  instanceId: string,
+  workspace: string,
+): Promise<string> {
+  if (!workspace.startsWith('/workspace/')) return workspace
+
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { name: true, containerId: true },
+  })
+
+  // Only convert for Docker-managed instances
+  if (!instance?.containerId) return workspace
+
+  const dataDir = getInstanceDataDir(instance.name)
+  return workspace.replace(/^\/workspace\//, `${dataDir}/workspace/`)
 }
 
 /** List workspace files for an agent via Docker exec */

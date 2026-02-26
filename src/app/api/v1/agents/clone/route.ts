@@ -8,6 +8,7 @@ import {
   parseAgentId,
   extractAgentsConfig,
   resolveWorkspacePath,
+  resolveWorkspaceForInstance,
   buildAgentId,
   containerWorkspacePath,
   sanitizeAgentEntry,
@@ -83,9 +84,9 @@ export const POST = withAuth(
         Object.assign(newAgent, rest)
       }
 
-      // Override workspace if specified
+      // Override workspace if specified (convert to host path for Docker sandbox)
       if (workspace) {
-        newAgent.workspace = workspace
+        newAgent.workspace = await resolveWorkspaceForInstance(targetInstanceId, workspace)
       }
 
       // 5. Phase 1: Patch config to add agent to target
