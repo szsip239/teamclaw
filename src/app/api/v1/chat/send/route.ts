@@ -787,22 +787,17 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Build text context for non-image files and output listing
-        const nonImageInputFiles = inputFiles.filter(f => {
-          const ext = ('.' + f.name.split('.').pop()!).toLowerCase()
-          return !SESSION_IMAGE_EXTS[ext]
-        })
-
-        if (nonImageInputFiles.length > 0 || outputFiles.length > 0) {
+        // Build text context listing ALL files (including images) as directory entries.
+        // Images are also best-effort attached as base64, but we don't claim
+        // "images attached" in the text — the model may not receive attachments
+        // depending on the API type, which would cause hallucination.
+        if (inputFiles.length > 0 || outputFiles.length > 0) {
           const lines: string[] = ['[Session Files]']
-          if (nonImageInputFiles.length > 0) {
+          if (inputFiles.length > 0) {
             lines.push(`Input: ${inputPath}`)
-            for (const f of nonImageInputFiles) {
+            for (const f of inputFiles) {
               lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
             }
-          }
-          if (sessionFileAttachments.length > 0) {
-            lines.push(`Images: ${sessionFileAttachments.length} image(s) attached to this message`)
           }
           if (outputFiles.length > 0) {
             lines.push(`Output: ${outputPath}`)
@@ -811,20 +806,6 @@ export async function POST(req: NextRequest) {
             }
           }
           lines.push('Rules: Read data from Input dir, write results to Output dir.')
-          lines.push('---')
-          finalMessage = lines.join('\n') + '\n' + message
-        } else if (sessionFileAttachments.length > 0) {
-          // Only images, no text files — still add a brief context
-          const lines: string[] = ['[Session Files]']
-          lines.push(`Images: ${sessionFileAttachments.length} image(s) attached to this message`)
-          if (outputFiles.length > 0) {
-            lines.push(`Output: ${outputPath}`)
-            for (const f of outputFiles) {
-              lines.push(`  - ${f.name} (${formatFileSize(f.size)})`)
-            }
-          }
-          lines.push(`Output dir: ${outputPath}`)
-          lines.push('Rules: Write generated files to Output dir.')
           lines.push('---')
           finalMessage = lines.join('\n') + '\n' + message
         }
