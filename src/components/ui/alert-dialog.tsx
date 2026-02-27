@@ -55,6 +55,7 @@ function AlertDialogContent({
     <AlertDialogPortal>
       <AlertDialogOverlay />
       <AlertDialogPrimitive.Content
+        aria-describedby={undefined}
         data-slot="alert-dialog-content"
         data-size={size}
         className={cn(
