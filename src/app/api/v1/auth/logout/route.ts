@@ -12,6 +12,10 @@ function getClientIp(req: NextRequest): string {
   )
 }
 
+function isSecure(req: NextRequest): boolean {
+  return req.headers.get('x-forwarded-proto') === 'https'
+}
+
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req)
   const userAgent = req.headers.get('user-agent') || undefined
@@ -49,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set('access_token', '', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 0,
     path: '/',
@@ -57,7 +61,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set('refresh_token', '', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 0,
     path: '/api/v1/auth',

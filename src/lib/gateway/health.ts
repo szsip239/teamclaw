@@ -2,7 +2,7 @@ import type { Prisma } from '@/generated/prisma'
 import { prisma } from '@/lib/db'
 import { redis } from '@/lib/redis'
 import { decrypt } from '@/lib/auth/encryption'
-import { registry, ensureRegistryInitialized } from './registry'
+import { registry, ensureRegistryInitialized, resolveGatewayUrl } from './registry'
 
 /** Return the version string only if it looks like a real release (not "dev", "unknown", etc.). */
 function usableVersion(v: string | null | undefined): string | null {
@@ -78,7 +78,7 @@ async function checkInstance(instanceId: string): Promise<void> {
 async function recoverInstances(): Promise<void> {
   const instances = await prisma.instance.findMany({
     where: { status: { in: ['ERROR', 'OFFLINE'] } },
-    select: { id: true, name: true, gatewayUrl: true, gatewayToken: true },
+    select: { id: true, name: true, gatewayUrl: true, gatewayToken: true, dockerConfig: true },
   })
 
   if (instances.length === 0) return
@@ -95,7 +95,7 @@ async function recoverInstances(): Promise<void> {
             if (registry.getStatus(inst.id)) {
               await registry.disconnect(inst.id)
             }
-            await registry.connect(inst.id, inst.gatewayUrl, decrypt(inst.gatewayToken))
+            await registry.connect(inst.id, resolveGatewayUrl(inst), decrypt(inst.gatewayToken))
           }
           // Connection succeeded — run health check to update status to ONLINE
           await checkInstance(inst.id)
@@ -161,6 +161,11 @@ export async function ensureHealthChecks(): Promise<void> {
   globalForHealth.healthEnsured = true
 
   await ensureRegistryInitialized()
+
+  // Only the Docker-deployed app manages instance lifecycle via periodic checks.
+  // Dev server connects to instances on-demand but does not run periodic health
+  // checks, preventing two processes from fighting over the same DB status.
+  if (!process.env.DOCKER_NETWORK) return
 
   // Run initial checks: first regular health, then recover ERROR/OFFLINE
   await checkAll().catch(console.error)

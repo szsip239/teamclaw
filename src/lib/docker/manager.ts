@@ -3,7 +3,7 @@ import tar from 'tar-stream'
 import { createGzip } from 'zlib'
 import type { ContainerCreateOptions, ContainerInfo } from './types'
 
-const NETWORK_NAME = 'gateway-net'
+const NETWORK_NAME = process.env.DOCKER_NETWORK || 'gateway-net'
 
 /**
  * Validate container file/directory path to prevent path traversal.

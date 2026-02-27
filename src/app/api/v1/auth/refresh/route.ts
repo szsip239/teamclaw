@@ -7,8 +7,8 @@ import {
   verifyRefreshToken,
 } from '@/lib/auth/jwt'
 
-function isSecure(): boolean {
-  return process.env.NODE_ENV === 'production'
+function isSecure(req: NextRequest): boolean {
+  return req.headers.get('x-forwarded-proto') === 'https'
 }
 
 export async function POST(req: NextRequest) {
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set('access_token', newAccessToken, {
     httpOnly: true,
-    secure: isSecure(),
+    secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 900,
     path: '/',
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set('refresh_token', newRefreshToken, {
     httpOnly: true,
-    secure: isSecure(),
+    secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 604800,
     path: '/api/v1/auth',
