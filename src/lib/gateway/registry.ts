@@ -142,21 +142,30 @@ export const registry =
 
 /**
  * Resolve the effective gateway URL for the current environment.
- * - Inside Docker (DOCKER_NETWORK set): use the DB URL as-is (container DNS)
- * - On host (no DOCKER_NETWORK): translate container DNS URLs to localhost + host port
+ *
+ * - Inside Docker (DOCKER_NETWORK set):
+ *     127.0.0.1/localhost → host.docker.internal  (loopback = container, not host)
+ *     LAN IPs (192.168.x.x) → used as-is         (reachable from Docker)
+ *     container DNS names    → used as-is          (same Docker network)
+ *
+ * - On host (no DOCKER_NETWORK):
+ *     container DNS names → localhost:hostPort     (via mapped port)
+ *     everything else     → used as-is
  */
 export function resolveGatewayUrl(inst: { gatewayUrl: string; dockerConfig: unknown }): string {
   const url = inst.gatewayUrl
-  if (process.env.DOCKER_NETWORK) return url
 
-  // On host: translate Docker-only hostnames and container DNS names
   try {
     const parsed = new URL(url.replace(/^ws/, 'http'))
-    // host.docker.internal → 127.0.0.1 (same machine, just different DNS context)
-    if (parsed.hostname === 'host.docker.internal') {
-      return `ws://127.0.0.1:${parsed.port}`
+
+    if (process.env.DOCKER_NETWORK) {
+      if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+        return `ws://host.docker.internal:${parsed.port}`
+      }
+      return url
     }
-    // Container DNS name → localhost:hostPort (from dockerConfig)
+
+    // On host: container DNS names are not resolvable, use mapped port
     if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') {
       const cfg = inst.dockerConfig as Record<string, unknown> | null
       if (cfg && typeof cfg.hostPort === 'number') {
