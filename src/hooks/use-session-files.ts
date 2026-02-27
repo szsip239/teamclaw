@@ -6,7 +6,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query"
-import { api } from "@/lib/api-client"
+import { api, ApiError } from "@/lib/api-client"
 import type { SessionFileListResponse } from "@/types/session-files"
 
 // ─── Query Key Factory ───────────────────────────────────────────────
@@ -35,6 +35,13 @@ export function useSessionFiles(
         `/api/v1/chat/sessions/${sessionId}/files?${params}`,
       ),
     enabled: !!sessionId,
+    // Don't retry on client errors (400/403/404) — instance has no container
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+        return false
+      }
+      return failureCount < 3
+    },
   })
 }
 
@@ -59,12 +66,19 @@ export function useFileWatch(sessionId: string | null) {
 
     async function connect() {
       if (aborted) return
+      let permanentFailure = false
       try {
         const res = await fetch(
           `/api/v1/chat/sessions/${sessionId}/files/watch`,
           { credentials: "include" },
         )
-        if (!res.ok || !res.body) return
+        if (!res.ok || !res.body) {
+          // Don't retry on client errors (400/403/404) — these won't resolve on retry
+          if (res.status >= 400 && res.status < 500) {
+            permanentFailure = true
+          }
+          return
+        }
 
         // Reset backoff on successful connection
         backoffRef.current = 1_000
@@ -97,8 +111,8 @@ export function useFileWatch(sessionId: string | null) {
         // Network error — will reconnect below
       }
 
-      // Reconnect with exponential backoff
-      if (!aborted) {
+      // Reconnect with exponential backoff — but only for transient errors
+      if (!aborted && !permanentFailure) {
         reconnectTimer = setTimeout(() => {
           backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF_MS)
           connect()

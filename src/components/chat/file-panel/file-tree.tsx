@@ -30,7 +30,7 @@ interface FileTreeProps {
 
 export function FileTree({ zone, sessionId }: FileTreeProps) {
   const t = useT()
-  const { data, isLoading } = useSessionFiles(sessionId, zone)
+  const { data, isLoading, isError } = useSessionFiles(sessionId, zone)
   const deleteMutation = useDeleteSessionFile(sessionId)
   const mkdirMutation = useMkdirSession(sessionId)
   const expandedDirs = useFilePanelStore((s) => s.expandedDirs)
@@ -101,6 +101,14 @@ export function FileTree({ zone, sessionId }: FileTreeProps) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <Loader2 className="size-4 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-4 text-muted-foreground text-xs">
+        {t("filePanel.unavailable")}
       </div>
     )
   }

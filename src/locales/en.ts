@@ -885,6 +885,7 @@ const en: Record<TranslationKey, string> = {
   'filePanel.noSelection': 'Select a file to view details',
   'filePanel.folderName': 'Folder name',
   'filePanel.rename': 'Rename',
+  'filePanel.unavailable': 'Files not available',
 }
 
 export default en
