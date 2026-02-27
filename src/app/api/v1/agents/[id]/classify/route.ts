@@ -18,7 +18,7 @@ export const PATCH = withAuth(
 
       const parsed = parseAgentId(params.id)
       if (!parsed) {
-        return NextResponse.json({ error: '无效的 Agent ID 格式' }, { status: 400 })
+        return NextResponse.json({ error: 'Invalid agent ID format' }, { status: 400 })
       }
 
       const { instanceId, agentId } = parsed
@@ -27,13 +27,13 @@ export const PATCH = withAuth(
       // Validate category-specific fields
       if (category === 'DEPARTMENT' && !departmentId) {
         return NextResponse.json(
-          { error: '部门分类需要指定部门 ID' },
+          { error: 'Department category requires a department ID' },
           { status: 400 },
         )
       }
       if (category === 'PERSONAL' && !ownerId) {
         return NextResponse.json(
-          { error: '个人分类需要指定用户 ID' },
+          { error: 'Personal category requires a user ID' },
           { status: 400 },
         )
       }

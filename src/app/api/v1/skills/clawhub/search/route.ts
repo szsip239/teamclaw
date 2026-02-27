@@ -18,7 +18,7 @@ export const POST = withAuth(
         return NextResponse.json({ results })
       } catch (err) {
         return NextResponse.json(
-          { error: `搜索 ClawHub 失败: ${(err as Error).message}` },
+          { error: `Failed to search ClawHub:${(err as Error).message}` },
           { status: 500 },
         )
       }

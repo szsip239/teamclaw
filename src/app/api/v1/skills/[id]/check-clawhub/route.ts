@@ -8,7 +8,7 @@ export const GET = withAuth(
   withPermission('skills:develop', async (_req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少技能 ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
     }
 
     const skill = await prisma.skill.findUnique({
@@ -16,10 +16,10 @@ export const GET = withAuth(
       select: { id: true, slug: true, version: true, source: true, clawhubSlug: true, homepage: true },
     })
     if (!skill) {
-      return NextResponse.json({ error: '技能不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
     }
     if (skill.source !== 'CLAWHUB') {
-      return NextResponse.json({ error: '仅 ClawHub 来源的技能支持检查更新' }, { status: 400 })
+      return NextResponse.json({ error: 'Only ClawHub skills support checking for updates' }, { status: 400 })
     }
 
     // Query ClawHub for latest version
@@ -28,7 +28,7 @@ export const GET = withAuth(
       return NextResponse.json({
         hasUpdate: false,
         currentVersion: skill.version,
-        error: '无法连接 ClawHub 或未找到该技能',
+        error: 'Cannot connect to ClawHub or skill not found',
       })
     }
 

@@ -400,12 +400,12 @@ export async function POST(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken
 
     if (!token) {
-      return NextResponse.json({ error: '未授权访问' }, { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const payload = await verifyAccessToken(token)
     if (!payload) {
-      return NextResponse.json({ error: '无效或过期的令牌' }, { status: 401 })
+      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
 
     userId = payload.userId
@@ -417,7 +417,7 @@ export async function POST(req: NextRequest) {
   })
 
   if (!user || user.status !== 'ACTIVE') {
-    return NextResponse.json({ error: '用户不存在或已禁用' }, { status: 401 })
+    return NextResponse.json({ error: 'User not found or disabled' }, { status: 401 })
   }
 
   const userRole = user.role // Always use DB role, never trust header
@@ -427,13 +427,13 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: '请求体格式错误' }, { status: 400 })
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
   const parsed = sendMessageSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json(
-      { error: '参数验证失败', details: parsed.error.issues },
+      { error: 'Validation failed', details: parsed.error.issues },
       { status: 400 },
     )
   }
@@ -443,7 +443,7 @@ export async function POST(req: NextRequest) {
   // --- Permission check ---
   if (userRole !== 'SYSTEM_ADMIN') {
     if (!user.departmentId) {
-      return NextResponse.json({ error: '无权访问此 Agent' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
     }
 
     // Layer 1: Instance access (department-level)
@@ -457,7 +457,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (!access) {
-      return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
     }
 
     // Layer 2: Agent classification visibility
@@ -469,13 +469,13 @@ export async function POST(req: NextRequest) {
       const { isAgentVisible } = await import('@/lib/agents/helpers')
       const authUser = { id: user.id, role: userRole ?? user.role, departmentId: user.departmentId, name: '', email: '', departmentName: null, avatar: null }
       if (!isAgentVisible(agentMeta, authUser)) {
-        return NextResponse.json({ error: '无权访问此 Agent' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
       }
     } else {
       // Fallback: legacy agentIds check from InstanceAccess
       const allowedIds = access.agentIds as string[] | null
       if (allowedIds && !allowedIds.includes(agentId)) {
-        return NextResponse.json({ error: '无权访问此 Agent' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
       }
     }
   }
@@ -486,7 +486,7 @@ export async function POST(req: NextRequest) {
   const client = registry.getClient(instanceId)
   const adapter = registry.getAdapter(instanceId)
   if (!client || !adapter) {
-    return NextResponse.json({ error: '实例未连接' }, { status: 502 })
+    return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
   }
 
   // --- Build session key ---
@@ -498,29 +498,34 @@ export async function POST(req: NextRequest) {
     const targetSession = await prisma.chatSession.findUnique({
       where: { id: targetSessionId },
     })
-    if (targetSession && targetSession.userId === user.id && !targetSession.isActive) {
+    if (
+      targetSession &&
+      targetSession.userId === user.id &&
+      targetSession.instanceId === instanceId &&
+      targetSession.agentId === agentId &&
+      !targetSession.isActive
+    ) {
       await switchActiveSession(user.id, instanceId, agentId, targetSessionId, sessionKey)
     }
   }
 
-  // --- Find or create ChatSession ---
-  const existingSession = await prisma.chatSession.findFirst({
-    where: { userId: user.id, instanceId, agentId, isActive: true },
-  })
-
-  let chatSessionId: string
-  if (existingSession) {
-    chatSessionId = existingSession.id
-    await prisma.chatSession.update({
-      where: { id: existingSession.id },
-      data: {
-        sessionId: sessionKey,
-        lastMessageAt: new Date(),
-        messageCount: { increment: 1 },
-      },
+  // --- Find or create ChatSession (atomic to prevent race conditions) ---
+  const session = await prisma.$transaction(async (tx) => {
+    const existing = await tx.chatSession.findFirst({
+      where: { userId: user.id, instanceId, agentId, isActive: true },
     })
-  } else {
-    const created = await prisma.chatSession.create({
+    if (existing) {
+      await tx.chatSession.update({
+        where: { id: existing.id },
+        data: {
+          sessionId: sessionKey,
+          lastMessageAt: new Date(),
+          messageCount: { increment: 1 },
+        },
+      })
+      return existing
+    }
+    return tx.chatSession.create({
       data: {
         userId: user.id,
         instanceId,
@@ -531,8 +536,9 @@ export async function POST(req: NextRequest) {
         isActive: true,
       },
     })
-    chatSessionId = created.id
-  }
+  })
+  const existingSession = session
+  const chatSessionId = session.id
 
   // --- SSE Stream ---
   const { readable, writable } = new TransformStream()
@@ -687,11 +693,11 @@ export async function POST(req: NextRequest) {
     } else if (state === 'error') {
       write({
         type: 'error',
-        error: String(evt.errorMessage ?? '未知错误'),
+        error: String(evt.errorMessage ?? 'Unknown error'),
       })
       cleanup()
     } else if (state === 'aborted') {
-      write({ type: 'error', error: '对话已中止' })
+      write({ type: 'error', error: 'Conversation aborted' })
       cleanup()
     }
   })
@@ -792,7 +798,7 @@ export async function POST(req: NextRequest) {
         // No text injection — session file rules and discovery are handled by AGENTS.md.
         for (const f of inputFiles) {
           if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
-          const ext = ('.' + f.name.split('.').pop()!).toLowerCase()
+          const ext = ('.' + (f.name.split('.').pop() ?? '')).toLowerCase()
           const mime = SESSION_IMAGE_EXTS[ext]
           if (!mime) continue
           try {
@@ -823,7 +829,7 @@ export async function POST(req: NextRequest) {
       attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
     })
     .catch((err: Error) => {
-      write({ type: 'error', error: err.message || '发送消息失败' })
+      write({ type: 'error', error: err.message || 'Failed to send message' })
       cleanup()
     })
 

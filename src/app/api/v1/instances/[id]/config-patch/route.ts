@@ -25,7 +25,7 @@ export const POST = withAuth(
 
       if (!registry.isConnected(id)) {
         return NextResponse.json(
-          { error: '实例未连接' },
+          { error: 'Instance not connected' },
           { status: 400 },
         )
       }
@@ -82,14 +82,14 @@ export const POST = withAuth(
         // which could be patch validation failures (e.g., invalid provider entry format).
         if (message.includes('config changed') || message.includes('baseHash') || message.includes('hash mismatch')) {
           return NextResponse.json(
-            { error: '配置已被其他用户修改，请刷新后重试', code: 'HASH_CONFLICT' },
+            { error: 'Configuration has been modified by another user, please refresh and retry', code: 'HASH_CONFLICT' },
             { status: 409 },
           )
         }
 
         console.error('[config-patch] Gateway error:', message)
         return NextResponse.json(
-          { error: `配置更新失败: ${message}` },
+          { error: `Configuration update failed:${message}` },
           { status: 500 },
         )
       }

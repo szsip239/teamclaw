@@ -35,7 +35,7 @@ export const GET = withAuth(
     } catch (err) {
       console.error('GET /api/v1/departments error:', err)
       return NextResponse.json(
-        { error: '获取部门列表失败' },
+        { error: 'Failed to fetch department list' },
         { status: 500 },
       )
     }
@@ -58,7 +58,7 @@ export const POST = withAuth(
         where: { name: body.name },
       })
       if (existing) {
-        return NextResponse.json({ error: '部门名称已存在' }, { status: 409 })
+        return NextResponse.json({ error: 'Department name already exists' }, { status: 409 })
       }
 
       const department = await prisma.department.create({

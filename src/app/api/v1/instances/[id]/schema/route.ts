@@ -13,7 +13,7 @@ export const GET = withAuth(
 
     if (!registry.isConnected(id)) {
       return NextResponse.json(
-        { error: '实例未连接，无法获取 Schema' },
+        { error: 'Instance not connected, cannot fetch schema' },
         { status: 400 },
       )
     }
@@ -33,7 +33,7 @@ export const GET = withAuth(
       })
     } catch (err) {
       return NextResponse.json(
-        { error: `获取配置数据失败: ${(err as Error).message}` },
+        { error: `Failed to fetch config data:${(err as Error).message}` },
         { status: 500 },
       )
     }

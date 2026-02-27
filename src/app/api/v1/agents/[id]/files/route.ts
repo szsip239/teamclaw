@@ -16,31 +16,31 @@ export const GET = withAuth(
     await ensureRegistryInitialized()
     const parsed = parseAgentId(params!.id as string)
     if (!parsed) {
-      return NextResponse.json({ error: '无效的 Agent ID 格式' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid agent ID format' }, { status: 400 })
     }
 
     const { instanceId, agentId } = parsed
 
     const instance = await getInstanceWithContainer(instanceId)
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
     if (!instance.containerId) {
-      return NextResponse.json({ error: '实例没有关联的容器' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance has no associated container' }, { status: 400 })
     }
 
     // Get agent workspace path from config
     const adapter = registry.getAdapter(instanceId)
     const client = registry.getClient(instanceId)
     if (!adapter || !client) {
-      return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
     }
 
     const configResult = await adapter.getConfig(client)
     const { defaults, list } = extractAgentsConfig(configResult.config)
     const agentConfig = list.find((a) => a.id === agentId)
     if (!agentConfig) {
-      return NextResponse.json({ error: `Agent "${agentId}" 不存在` }, { status: 404 })
+      return NextResponse.json({ error: `Agent "${agentId}" not found` }, { status: 404 })
     }
 
     const workspace = resolveWorkspacePath(agentConfig, defaults)
@@ -49,8 +49,8 @@ export const GET = withAuth(
     // Optional subdirectory
     const url = new URL(req.url)
     const dir = url.searchParams.get('dir') || ''
-    if (dir.includes('..')) {
-      return NextResponse.json({ error: '非法路径' }, { status: 400 })
+    if (dir.includes('..') || dir.includes('\0')) {
+      return NextResponse.json({ error: 'Illegal path' }, { status: 400 })
     }
 
     const targetPath = dir ? `${containerPath}/${dir}` : containerPath
@@ -75,7 +75,7 @@ export const GET = withAuth(
       return NextResponse.json({ files, workspace, dir })
     } catch (err) {
       return NextResponse.json(
-        { error: `读取目录失败: ${(err as Error).message}` },
+        { error: `Failed to read directory: ${(err as Error).message}` },
         { status: 500 },
       )
     }

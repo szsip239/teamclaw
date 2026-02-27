@@ -12,7 +12,7 @@ export const GET = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     await ensureRegistryInitialized()

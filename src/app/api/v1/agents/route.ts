@@ -52,7 +52,7 @@ export const GET = withAuth(
 
           // Fast fail if WebSocket is disconnected
           if (!client.isConnected()) {
-            errors.push({ instanceId, error: 'WebSocket 连接已断开' })
+            errors.push({ instanceId, error: 'WebSocket connection disconnected' })
             return
           }
 
@@ -164,7 +164,7 @@ export const POST = withAuth(
       // Validate the user can create with this category
       if (!canCreateWithCategory(user.role, category, user.departmentId, departmentId)) {
         return NextResponse.json(
-          { error: '无权创建此分类的 Agent' },
+          { error: 'No permission to create agent of this category' },
           { status: 403 },
         )
       }
@@ -172,7 +172,7 @@ export const POST = withAuth(
       // For non-admins creating on gateway, verify instance access
       if (user.role !== 'SYSTEM_ADMIN') {
         if (!user.departmentId) {
-          return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+          return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
         }
         const access = await prisma.instanceAccess.findUnique({
           where: {
@@ -183,7 +183,7 @@ export const POST = withAuth(
           },
         })
         if (!access) {
-          return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+          return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
         }
       }
 
@@ -191,7 +191,7 @@ export const POST = withAuth(
       const adapter = registry.getAdapter(instanceId)
       const client = registry.getClient(instanceId)
       if (!adapter || !client) {
-        return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+        return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
       }
 
       // Read current config
@@ -201,7 +201,7 @@ export const POST = withAuth(
       // Check for duplicate agent ID
       if (list.some((a) => a.id === agentId)) {
         return NextResponse.json(
-          { error: `Agent "${agentId}" 已存在于该实例中` },
+          { error: `Agent "${agentId}" already exists in this instance` },
           { status: 409 },
         )
       }
@@ -219,7 +219,7 @@ export const POST = withAuth(
         await adapter.patchConfig(client, { agents: { list: [sanitizeAgentEntry(newAgent)] } }, hash)
       } catch (err) {
         return NextResponse.json(
-          { error: `配置更新失败: ${(err as Error).message}` },
+          { error: `Configuration update failed:${(err as Error).message}` },
           { status: 500 },
         )
       }

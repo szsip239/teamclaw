@@ -61,7 +61,7 @@ export const POST = withAuth(
         where: { id: body.departmentId },
       })
       if (!department) {
-        return NextResponse.json({ error: '部门不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Department not found' }, { status: 404 })
       }
 
       // Verify instance exists
@@ -69,7 +69,7 @@ export const POST = withAuth(
         where: { id: body.instanceId },
       })
       if (!instance) {
-        return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
 
       // Upsert on unique(departmentId, instanceId)

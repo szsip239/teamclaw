@@ -12,7 +12,7 @@ export const POST = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     // Disconnect from gateway
@@ -26,7 +26,7 @@ export const POST = withAuth(
         const msg = (err as Error).message
         if (!msg.includes('already stopped') && !msg.includes('is not running')) {
           return NextResponse.json(
-            { error: `停止容器失败: ${msg}` },
+            { error: `Failed to stop container:${msg}` },
             { status: 500 },
           )
         }

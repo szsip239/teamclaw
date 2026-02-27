@@ -12,7 +12,7 @@ export const GET = withAuth(
   withPermission('skills:develop', async (_req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少 Skill ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
     }
 
     const skill = await prisma.skill.findUnique({
@@ -29,12 +29,12 @@ export const GET = withAuth(
     })
 
     if (!skill) {
-      return NextResponse.json({ error: 'Skill 不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
     }
 
     // Visibility check
     if (!isSkillVisible(skill, ctx.user)) {
-      return NextResponse.json({ error: '无权访问此 Skill' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this skill' }, { status: 403 })
     }
 
     const detail: SkillDetail = {
@@ -80,7 +80,7 @@ export const PUT = withAuth(
       }
       const id = ctx.params?.id as string
       if (!id) {
-        return NextResponse.json({ error: '缺少 Skill ID' }, { status: 400 })
+        return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
       }
 
       const skill = await prisma.skill.findUnique({
@@ -88,33 +88,33 @@ export const PUT = withAuth(
         include: { departments: { select: { id: true } } },
       })
       if (!skill) {
-        return NextResponse.json({ error: 'Skill 不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
       }
 
       // Edit permission check
       if (!canEditSkill(skill, user)) {
-        return NextResponse.json({ error: '无权编辑此 Skill' }, { status: 403 })
+        return NextResponse.json({ error: 'No permission to edit this skill' }, { status: 403 })
       }
 
       // Handle category change with permission check
       if (body.category !== undefined && body.category !== skill.category) {
         if (!canCreateSkillWithCategory(user.role, body.category, user.departmentId, body.departmentIds)) {
           return NextResponse.json(
-            { error: '无权将 Skill 分类更改为该类型' },
+            { error: 'No permission to change skill category to this type' },
             { status: 403 },
           )
         }
         if (body.category === 'DEPARTMENT') {
           const deptIds = body.departmentIds || (user.departmentId ? [user.departmentId] : [])
           if (deptIds.length === 0) {
-            return NextResponse.json({ error: '部门级技能需要指定部门' }, { status: 400 })
+            return NextResponse.json({ error: 'Department-level skills require specifying a department' }, { status: 400 })
           }
           // Validate all department IDs exist
           const deptCount = await prisma.department.count({
             where: { id: { in: deptIds } },
           })
           if (deptCount !== deptIds.length) {
-            return NextResponse.json({ error: '部分指定的部门不存在' }, { status: 404 })
+            return NextResponse.json({ error: 'Some specified departments do not exist' }, { status: 404 })
           }
         }
       }
@@ -124,7 +124,7 @@ export const PUT = withAuth(
         const existing = await prisma.skill.findUnique({ where: { slug: body.slug } })
         if (existing) {
           return NextResponse.json(
-            { error: `Slug "${body.slug}" 已被使用` },
+            { error: `Slug "${body.slug}" is already in use` },
             { status: 409 },
           )
         }
@@ -132,7 +132,7 @@ export const PUT = withAuth(
           await renameSkillDir(skill.slug, body.slug)
         } catch (err) {
           return NextResponse.json(
-            { error: `重命名技能目录失败: ${(err as Error).message}` },
+            { error: `Failed to rename skill directory:${(err as Error).message}` },
             { status: 500 },
           )
         }
@@ -206,7 +206,7 @@ export const DELETE = withAuth(
   withPermission('skills:develop', async (req, { user, params }) => {
     const id = (Array.isArray(params?.id) ? params.id[0] : params?.id) ?? ''
     if (!id) {
-      return NextResponse.json({ error: '缺少 Skill ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
     }
 
     const skill = await prisma.skill.findUnique({
@@ -214,12 +214,12 @@ export const DELETE = withAuth(
       include: { departments: { select: { id: true } } },
     })
     if (!skill) {
-      return NextResponse.json({ error: 'Skill 不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
     }
 
     // Edit permission check (same as edit — owner/admin only)
     if (!canEditSkill(skill, user)) {
-      return NextResponse.json({ error: '无权删除此 Skill' }, { status: 403 })
+      return NextResponse.json({ error: 'No permission to delete this skill' }, { status: 403 })
     }
 
     // Delete DB records (cascade deletes versions + installations)

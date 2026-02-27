@@ -25,7 +25,7 @@ export const PUT = withAuth(
         },
       })
       if (!existing) {
-        return NextResponse.json({ error: '授权记录不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Access grant not found' }, { status: 404 })
       }
 
       const grant = await prisma.instanceAccess.update({
@@ -90,7 +90,7 @@ export const DELETE = withAuth(
     })
 
     if (!existing) {
-      return NextResponse.json({ error: '授权记录不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Access grant not found' }, { status: 404 })
     }
 
     await prisma.instanceAccess.delete({ where: { id } })

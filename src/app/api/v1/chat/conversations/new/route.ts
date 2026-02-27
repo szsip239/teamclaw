@@ -59,13 +59,13 @@ export const POST = withAuth(
     try {
       body = await req.json()
     } catch {
-      return NextResponse.json({ error: '请求体格式错误' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
 
     const parsed = bodySchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json(
-        { error: '参数验证失败', details: parsed.error.issues },
+        { error: 'Validation failed', details: parsed.error.issues },
         { status: 400 },
       )
     }
@@ -75,7 +75,7 @@ export const POST = withAuth(
     // Permission check
     if (user.role !== 'SYSTEM_ADMIN') {
       if (!user.departmentId) {
-        return NextResponse.json({ error: '无权访问此 Agent' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
       }
       const access = await prisma.instanceAccess.findUnique({
         where: {
@@ -86,11 +86,11 @@ export const POST = withAuth(
         },
       })
       if (!access) {
-        return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
       }
       const allowedIds = access.agentIds as string[] | null
       if (allowedIds && !allowedIds.includes(agentId)) {
-        return NextResponse.json({ error: '无权访问此 Agent' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
       }
     }
 

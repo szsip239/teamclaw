@@ -12,11 +12,11 @@ export const GET = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     if (!instance.gatewayToken) {
-      return NextResponse.json({ error: '无 Gateway Token' }, { status: 400 })
+      return NextResponse.json({ error: 'No Gateway Token' }, { status: 400 })
     }
 
     const token = decrypt(instance.gatewayToken)

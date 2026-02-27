@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   // Guard: registration can be disabled via env (enterprise deployments)
   if (process.env.REGISTRATION_DISABLED === 'true') {
     return NextResponse.json(
-      { error: '注册功能已关闭，请联系管理员创建账号' },
+      { error: 'Registration is disabled, please contact an administrator' },
       { status: 403 },
     )
   }

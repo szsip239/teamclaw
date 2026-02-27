@@ -96,7 +96,7 @@ export const POST = withAuth(
       // Validate category permission
       if (!canCreateSkillWithCategory(user.role, category, user.departmentId, departmentIds)) {
         return NextResponse.json(
-          { error: '无权创建此分类的 Skill' },
+          { error: 'No permission to create skill of this category' },
           { status: 403 },
         )
       }
@@ -105,7 +105,7 @@ export const POST = withAuth(
       const existing = await prisma.skill.findUnique({ where: { slug } })
       if (existing) {
         return NextResponse.json(
-          { error: `Slug "${slug}" 已被使用` },
+          { error: `Slug "${slug}" is already in use` },
           { status: 409 },
         )
       }

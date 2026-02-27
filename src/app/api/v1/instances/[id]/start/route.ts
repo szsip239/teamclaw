@@ -14,7 +14,7 @@ export const POST = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     await ensureRegistryInitialized()
@@ -28,7 +28,7 @@ export const POST = withAuth(
         // Ignore "already started" errors
         if (!msg.includes('already started') && !msg.includes('is already running')) {
           return NextResponse.json(
-            { error: `启动容器失败: ${msg}` },
+            { error: `Failed to start container:${msg}` },
             { status: 500 },
           )
         }
@@ -89,7 +89,7 @@ export const POST = withAuth(
       })
 
       return NextResponse.json(
-        { error: `连接 Gateway 失败: ${(err as Error).message}` },
+        { error: `Failed to connect gateway:${(err as Error).message}` },
         { status: 500 },
       )
     }

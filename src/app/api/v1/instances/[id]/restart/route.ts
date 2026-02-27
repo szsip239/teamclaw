@@ -13,7 +13,7 @@ export const POST = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     await ensureRegistryInitialized()
@@ -27,7 +27,7 @@ export const POST = withAuth(
         await dockerManager.restartContainer(instance.containerId)
       } catch (err) {
         return NextResponse.json(
-          { error: `重启容器失败: ${(err as Error).message}` },
+          { error: `Failed to restart container:${(err as Error).message}` },
           { status: 500 },
         )
       }
@@ -87,7 +87,7 @@ export const POST = withAuth(
       })
 
       return NextResponse.json(
-        { error: `重连 Gateway 失败: ${(err as Error).message}` },
+        { error: `Failed to reconnect gateway:${(err as Error).message}` },
         { status: 500 },
       )
     }

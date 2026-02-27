@@ -19,7 +19,7 @@ export const POST = withAuth(
 
       const existing = await prisma.user.findUnique({ where: { id } })
       if (!existing) {
-        return NextResponse.json({ error: '用户不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
       }
 
       const passwordHash = await bcryptjs.hash(body.newPassword, 12)
@@ -43,7 +43,7 @@ export const POST = withAuth(
         result: 'SUCCESS',
       })
 
-      return NextResponse.json({ message: '密码重置成功' })
+      return NextResponse.json({ message: 'Password reset successful' })
     }),
   ),
 )
