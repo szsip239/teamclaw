@@ -14,7 +14,7 @@ export function ChatLayout() {
     <div className="flex h-full overflow-hidden">
       {sidebarOpen && <ChatSidebar />}
       <ChatMain />
-      {activeSessionId && selectedAgent && <ChatFilePanel />}
+      {activeSessionId && selectedAgent?.hasContainer !== false && <ChatFilePanel />}
     </div>
   )
 }
