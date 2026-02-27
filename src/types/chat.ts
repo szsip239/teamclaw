@@ -8,6 +8,7 @@ export interface ChatAgentInfo {
   status: string
   model?: string
   category?: AgentCategory
+  hasContainer?: boolean
 }
 
 // Structured content block — represents a single piece of content in a message
