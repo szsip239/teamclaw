@@ -883,6 +883,7 @@ const zhCN = {
   'filePanel.noSelection': '选择文件查看详情',
   'filePanel.folderName': '文件夹名称',
   'filePanel.rename': '重命名',
+  'filePanel.unavailable': '文件不可用',
 } as const
 
 export type TranslationKey = keyof typeof zhCN
