@@ -66,10 +66,17 @@ export class GatewayClient {
       this.connectResolve = resolve
       this.connectReject = reject
 
-      // Send Origin header matching the gateway host so OpenClaw's
-      // checkBrowserOrigin loopback check passes for ControlUI clients.
-      const origin = this.url.replace(/^ws(s?):/, 'http$1:')
-      this.ws = new WebSocket(this.url, { headers: { Origin: origin } })
+      // resolveGatewayUrl may rewrite 127.0.0.1 → host.docker.internal for
+      // Docker. OpenClaw's checkBrowserOrigin checks both Host and Origin
+      // headers against loopback, so we rewrite them back to 127.0.0.1.
+      const httpUrl = this.url.replace(/^ws(s?):/, 'http$1:')
+      const loopbackUrl = httpUrl.replace('host.docker.internal', '127.0.0.1')
+      const headers: Record<string, string> = { Origin: loopbackUrl }
+      if (this.url.includes('host.docker.internal')) {
+        const parsed = new URL(loopbackUrl)
+        headers['Host'] = parsed.host
+      }
+      this.ws = new WebSocket(this.url, { headers })
 
       this.ws.on('message', (data: WebSocket.Data) => {
         this.handleMessage(data)
