@@ -40,6 +40,8 @@ services:
       TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/data/teamclaw}"
       DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
       DOCKER_NETWORK: "teamclaw-net"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       init:
         condition: service_completed_successfully
