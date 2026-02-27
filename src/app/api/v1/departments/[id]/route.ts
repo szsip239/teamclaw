@@ -12,7 +12,7 @@ export const GET = withAuth(
 
     // DEPT_ADMIN can only view their own department's detail
     if (ctx.user.role === 'DEPT_ADMIN' && ctx.user.departmentId !== id) {
-      return NextResponse.json({ error: '无权查看其他部门详情' }, { status: 403 })
+      return NextResponse.json({ error: 'No permission to view other department details' }, { status: 403 })
     }
 
     const department = await prisma.department.findUnique({
@@ -50,7 +50,7 @@ export const GET = withAuth(
     })
 
     if (!department) {
-      return NextResponse.json({ error: '部门不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Department not found' }, { status: 404 })
     }
 
     return NextResponse.json({
@@ -99,7 +99,7 @@ export const PUT = withAuth(
 
       const existing = await prisma.department.findUnique({ where: { id } })
       if (!existing) {
-        return NextResponse.json({ error: '部门不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Department not found' }, { status: 404 })
       }
 
       // Check name uniqueness if name is being changed
@@ -108,7 +108,7 @@ export const PUT = withAuth(
           where: { name: body.name },
         })
         if (nameConflict) {
-          return NextResponse.json({ error: '部门名称已存在' }, { status: 409 })
+          return NextResponse.json({ error: 'Department name already exists' }, { status: 409 })
         }
       }
 
@@ -167,12 +167,12 @@ export const DELETE = withAuth(
     })
 
     if (!department) {
-      return NextResponse.json({ error: '部门不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Department not found' }, { status: 404 })
     }
 
     if (department._count.users > 0) {
       return NextResponse.json(
-        { error: '部门下还有成员，无法删除。请先将成员移出该部门。' },
+        { error: 'Department still has members, cannot delete. Please remove members first.' },
         { status: 400 },
       )
     }

@@ -11,32 +11,32 @@ export const GET = withAuth(
   withPermission('chat:use', async (req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少会话 ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing session ID' }, { status: 400 })
     }
 
     const session = await prisma.chatSession.findUnique({ where: { id } })
     if (!session) {
-      return NextResponse.json({ error: '会话不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
     if (session.userId !== ctx.user.id) {
-      return NextResponse.json({ error: '无权访问此会话' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this session' }, { status: 403 })
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
     if (!instance?.containerId) {
-      return NextResponse.json({ error: '实例未就绪' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
     }
 
     const url = new URL(req.url)
     const zone = (url.searchParams.get('zone') || 'input') as SessionFileZone
     if (zone !== 'input' && zone !== 'output') {
-      return NextResponse.json({ error: '无效的 zone 参数' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid zone parameter' }, { status: 400 })
     }
     const dir = url.searchParams.get('dir') || ''
 
     // Validate dir if provided
     if (dir && (dir.includes('..') || dir.includes('\0') || dir.startsWith('/'))) {
-      return NextResponse.json({ error: '无效的目录路径' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid directory path' }, { status: 400 })
     }
 
     const resolvedPath = resolveSessionFilePath(

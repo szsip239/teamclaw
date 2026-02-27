@@ -283,7 +283,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        get().setAssistantError((err as Error).message || '发送消息失败')
+        get().setAssistantError((err as Error).message || 'Failed to send message')
       }
     } finally {
       set({ isStreaming: false, abortController: null })

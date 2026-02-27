@@ -20,7 +20,7 @@ export const POST = withAuth(
       }
       const id = param(ctx as unknown as AuthContext, 'id')
       if (!id) {
-        return NextResponse.json({ error: '缺少技能 ID' }, { status: 400 })
+        return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
       }
 
       const { instanceId, agentId, installPath } = body
@@ -35,7 +35,7 @@ export const POST = withAuth(
         },
       })
       if (!installation) {
-        return NextResponse.json({ error: '未找到该技能的安装记录' }, { status: 404 })
+        return NextResponse.json({ error: 'Installation record not found for this skill' }, { status: 404 })
       }
 
       // Check instance has container
@@ -44,10 +44,10 @@ export const POST = withAuth(
         select: { id: true, name: true, containerId: true },
       })
       if (!instance) {
-        return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
       if (!instance.containerId) {
-        return NextResponse.json({ error: '该实例没有关联的容器' }, { status: 400 })
+        return NextResponse.json({ error: 'Instance has no associated container' }, { status: 400 })
       }
 
       // Determine container skill dir based on install path
@@ -60,14 +60,14 @@ export const POST = withAuth(
         const adapter = registry.getAdapter(instanceId)
         const client = registry.getClient(instanceId)
         if (!adapter || !client) {
-          return NextResponse.json({ error: '实例未连接，无法获取 Agent 工作区路径' }, { status: 400 })
+          return NextResponse.json({ error: 'Instance not connected, cannot get agent workspace path' }, { status: 400 })
         }
 
         const configResult = await adapter.getConfig(client)
         const { defaults, list } = extractAgentsConfig(configResult.config)
         const agentConfig = list.find((a) => a.id === agentId)
         if (!agentConfig) {
-          return NextResponse.json({ error: `Agent "${agentId}" 在实例配置中不存在` }, { status: 404 })
+          return NextResponse.json({ error: `Agent "${agentId}" not found in instance config` }, { status: 404 })
         }
 
         const workspace = resolveWorkspacePath(agentConfig, defaults)
@@ -80,7 +80,7 @@ export const POST = withAuth(
         await dockerManager.removeContainerDir(instance.containerId, containerSkillDir)
       } catch (err) {
         return NextResponse.json(
-          { error: `删除容器中的技能文件失败: ${(err as Error).message}` },
+          { error: `Failed to delete skill files from container:${(err as Error).message}` },
           { status: 500 },
         )
       }

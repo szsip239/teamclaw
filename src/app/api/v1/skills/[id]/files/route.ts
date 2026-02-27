@@ -9,7 +9,7 @@ export const GET = withAuth(
   withPermission('skills:develop', async (req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少 Skill ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
     }
 
     const skill = await prisma.skill.findUnique({
@@ -17,19 +17,19 @@ export const GET = withAuth(
       include: { departments: { select: { id: true } } },
     })
     if (!skill) {
-      return NextResponse.json({ error: 'Skill 不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
     }
 
     // Visibility check
     if (!isSkillVisible(skill, ctx.user)) {
-      return NextResponse.json({ error: '无权访问此 Skill' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this skill' }, { status: 403 })
     }
 
     // Optional subdirectory
     const url = new URL(req.url)
     const dir = url.searchParams.get('dir') || undefined
     if (dir && dir.includes('..')) {
-      return NextResponse.json({ error: '非法路径' }, { status: 400 })
+      return NextResponse.json({ error: 'Illegal path' }, { status: 400 })
     }
 
     try {
@@ -37,7 +37,7 @@ export const GET = withAuth(
       return NextResponse.json({ files, slug: skill.slug, dir: dir ?? '' })
     } catch (err) {
       return NextResponse.json(
-        { error: `读取目录失败: ${(err as Error).message}` },
+        { error: `Failed to read directory:${(err as Error).message}` },
         { status: 500 },
       )
     }

@@ -15,20 +15,20 @@ export const GET = withAuth(
     // Non-admin users must have instance access
     if (user.role !== 'SYSTEM_ADMIN') {
       if (!user.departmentId) {
-        return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
       }
       const access = await prisma.instanceAccess.findUnique({
         where: { departmentId_instanceId: { departmentId: user.departmentId, instanceId } },
       })
       if (!access) {
-        return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
       }
     }
 
     const adapter = registry.getAdapter(instanceId)
     const client = registry.getClient(instanceId)
     if (!adapter || !client) {
-      return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
     }
 
     const configResult = await adapter.getConfig(client)
@@ -59,7 +59,7 @@ export const PUT = withAuth(
       const adapter = registry.getAdapter(instanceId)
       const client = registry.getClient(instanceId)
       if (!adapter || !client) {
-        return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+        return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
       }
 
       // Read current config to get hash
@@ -70,7 +70,7 @@ export const PUT = withAuth(
         await adapter.patchConfig(client, { agents: { defaults: body } }, hash)
       } catch (err) {
         return NextResponse.json(
-          { error: `配置更新失败: ${(err as Error).message}` },
+          { error: `Configuration update failed:${(err as Error).message}` },
           { status: 500 },
         )
       }

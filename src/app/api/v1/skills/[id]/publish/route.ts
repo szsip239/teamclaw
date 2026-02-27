@@ -20,7 +20,7 @@ export const POST = withAuth(
       }
       const id = param(ctx as unknown as AuthContext, 'id')
       if (!id) {
-        return NextResponse.json({ error: '缺少技能 ID' }, { status: 400 })
+        return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
       }
 
       // Find skill
@@ -29,12 +29,12 @@ export const POST = withAuth(
         include: { departments: { select: { id: true } } },
       })
       if (!skill) {
-        return NextResponse.json({ error: '技能不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
       }
 
       // Permission check
       if (!canEditSkill(skill, user)) {
-        return NextResponse.json({ error: '没有权限编辑此技能' }, { status: 403 })
+        return NextResponse.json({ error: 'No permission to edit this skill' }, { status: 403 })
       }
 
       // Check version doesn't already exist
@@ -43,7 +43,7 @@ export const POST = withAuth(
       })
       if (existingVersion) {
         return NextResponse.json(
-          { error: `版本 ${body.version} 已存在，请使用不同的版本号` },
+          { error: `Version ${body.version} already exists, use a different version number` },
           { status: 409 },
         )
       }

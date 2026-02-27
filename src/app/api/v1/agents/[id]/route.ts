@@ -22,7 +22,7 @@ export const GET = withAuth(
     await ensureRegistryInitialized()
     const parsed = parseAgentId(params!.id as string)
     if (!parsed) {
-      return NextResponse.json({ error: '无效的 Agent ID 格式' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid agent ID format' }, { status: 400 })
     }
 
     const { instanceId, agentId } = parsed
@@ -30,25 +30,25 @@ export const GET = withAuth(
     // Access check: non-admin users must have instance access
     if (user.role !== 'SYSTEM_ADMIN') {
       if (!user.departmentId) {
-        return NextResponse.json({ error: '无权访问此 Agent' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
       }
       const access = await prisma.instanceAccess.findUnique({
         where: { departmentId_instanceId: { departmentId: user.departmentId, instanceId } },
       })
       if (!access) {
-        return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
       }
     }
 
     const adapter = registry.getAdapter(instanceId)
     const client = registry.getClient(instanceId)
     if (!adapter || !client) {
-      return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
     }
 
     const instance = await getInstanceWithContainer(instanceId)
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     const [configResult, agentsResult] = await Promise.all([
@@ -63,7 +63,7 @@ export const GET = withAuth(
 
     // If not in config list, check if it's an implicit agent from live list
     if (!agentConfig && !live) {
-      return NextResponse.json({ error: `Agent "${agentId}" 不存在` }, { status: 404 })
+      return NextResponse.json({ error: `Agent "${agentId}" not found` }, { status: 404 })
     }
 
     const workspace = agentConfig
@@ -87,7 +87,7 @@ export const GET = withAuth(
 
     // Visibility check: ensure user can see this agent
     if (meta && !isAgentVisible(meta, user)) {
-      return NextResponse.json({ error: 'Agent 不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     }
 
     return NextResponse.json({
@@ -124,7 +124,7 @@ export const PUT = withAuth(
 
       const parsed = parseAgentId(params.id)
       if (!parsed) {
-        return NextResponse.json({ error: '无效的 Agent ID 格式' }, { status: 400 })
+        return NextResponse.json({ error: 'Invalid agent ID format' }, { status: 400 })
       }
 
       const { instanceId, agentId } = parsed
@@ -132,7 +132,7 @@ export const PUT = withAuth(
       const adapter = registry.getAdapter(instanceId)
       const client = registry.getClient(instanceId)
       if (!adapter || !client) {
-        return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+        return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
       }
 
       // Read current config
@@ -141,7 +141,7 @@ export const PUT = withAuth(
 
       const agentIdx = list.findIndex((a) => a.id === agentId)
       if (agentIdx === -1) {
-        return NextResponse.json({ error: `Agent "${agentId}" 不存在` }, { status: 404 })
+        return NextResponse.json({ error: `Agent "${agentId}" not found` }, { status: 404 })
       }
 
       // Merge updates into the agent entry
@@ -165,7 +165,7 @@ export const PUT = withAuth(
         await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, freshConfig.hash)
       } catch (err) {
         return NextResponse.json(
-          { error: `配置更新失败: ${(err as Error).message}` },
+          { error: `Configuration update failed:${(err as Error).message}` },
           { status: 500 },
         )
       }
@@ -192,7 +192,7 @@ export const DELETE = withAuth(
     await ensureRegistryInitialized()
     const parsed = parseAgentId(params!.id as string)
     if (!parsed) {
-      return NextResponse.json({ error: '无效的 Agent ID 格式' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid agent ID format' }, { status: 400 })
     }
 
     const { instanceId, agentId } = parsed
@@ -200,7 +200,7 @@ export const DELETE = withAuth(
     const adapter = registry.getAdapter(instanceId)
     const client = registry.getClient(instanceId)
     if (!adapter || !client) {
-      return NextResponse.json({ error: '实例未连接' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance not connected' }, { status: 400 })
     }
 
     const { config, hash } = await adapter.getConfig(client)
@@ -208,12 +208,12 @@ export const DELETE = withAuth(
 
     const agentIdx = list.findIndex((a) => a.id === agentId)
     if (agentIdx === -1) {
-      return NextResponse.json({ error: `Agent "${agentId}" 不存在` }, { status: 404 })
+      return NextResponse.json({ error: `Agent "${agentId}" not found` }, { status: 404 })
     }
 
     // Prevent deleting the default agent
     if (list[agentIdx].default === true) {
-      return NextResponse.json({ error: '不能删除默认 Agent' }, { status: 400 })
+      return NextResponse.json({ error: 'Cannot delete the default agent' }, { status: 400 })
     }
 
     // Resolve workspace path before removing from config
@@ -229,7 +229,7 @@ export const DELETE = withAuth(
       await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, freshConfig.hash)
     } catch (err) {
       return NextResponse.json(
-        { error: `配置更新失败: ${(err as Error).message}` },
+        { error: `Configuration update failed:${(err as Error).message}` },
         { status: 500 },
       )
     }

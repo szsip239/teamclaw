@@ -374,9 +374,22 @@ export class DockerManager {
     })
     const stream = await exec.start({ Detach: false })
     return new Promise((resolve, reject) => {
-      stream.on('end', () => resolve())
+      const chunks: Buffer[] = []
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+      stream.on('end', async () => {
+        try {
+          const info = await exec.inspect()
+          if (info.ExitCode !== 0) {
+            const output = demuxDockerStream(Buffer.concat(chunks))
+            reject(new Error(`Failed to write file ${filePath} (exit ${info.ExitCode}): ${output}`))
+          } else {
+            resolve()
+          }
+        } catch (err) {
+          reject(err)
+        }
+      })
       stream.on('error', reject)
-      stream.resume() // drain the stream
     })
   }
 

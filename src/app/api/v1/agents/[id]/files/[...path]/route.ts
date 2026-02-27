@@ -22,27 +22,27 @@ async function resolveFilePath(
   | { containerId: string; fullPath: string; instanceId: string; agentId: string }
 > {
   const parsed = parseAgentId(compositeId)
-  if (!parsed) return { error: '无效的 Agent ID 格式', status: 400 }
+  if (!parsed) return { error: 'Invalid agent ID format', status: 400 }
 
   const { instanceId, agentId } = parsed
   const relativePath = pathSegments.join('/')
 
   if (!isPathSafe(relativePath)) {
-    return { error: '非法路径', status: 400 }
+    return { error: 'Illegal path', status: 400 }
   }
 
   const instance = await getInstanceWithContainer(instanceId)
-  if (!instance) return { error: '实例不存在', status: 404 }
-  if (!instance.containerId) return { error: '实例没有关联的容器', status: 400 }
+  if (!instance) return { error: 'Instance not found', status: 404 }
+  if (!instance.containerId) return { error: 'Instance has no associated container', status: 400 }
 
   const adapter = registry.getAdapter(instanceId)
   const client = registry.getClient(instanceId)
-  if (!adapter || !client) return { error: '实例未连接', status: 400 }
+  if (!adapter || !client) return { error: 'Instance not connected', status: 400 }
 
   const configResult = await adapter.getConfig(client)
   const { defaults, list } = extractAgentsConfig(configResult.config)
   const agentConfig = list.find((a) => a.id === agentId)
-  if (!agentConfig) return { error: `Agent "${agentId}" 不存在`, status: 404 }
+  if (!agentConfig) return { error: `Agent "${agentId}" not found`, status: 404 }
 
   const workspace = resolveWorkspacePath(agentConfig, defaults)
   const containerPath = containerWorkspacePath(workspace)
@@ -71,10 +71,10 @@ export const GET = withAuth(
     } catch (err) {
       const message = (err as Error).message
       if (message.includes('No such file')) {
-        return NextResponse.json({ error: '文件不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'File not found' }, { status: 404 })
       }
       return NextResponse.json(
-        { error: `读取文件失败: ${message}` },
+        { error: `Failed to read file:${message}` },
         { status: 500 },
       )
     }
@@ -130,7 +130,7 @@ export const PUT = withAuth(
         return NextResponse.json({ success: true, path: pathSegments.join('/') })
       } catch (err) {
         return NextResponse.json(
-          { error: `写入文件失败: ${(err as Error).message}` },
+          { error: `Failed to write file:${(err as Error).message}` },
           { status: 500 },
         )
       }

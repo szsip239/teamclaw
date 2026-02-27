@@ -12,41 +12,41 @@ export const POST = withAuth(
   withPermission('chat:use', async (req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少会话 ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing session ID' }, { status: 400 })
     }
 
     const session = await prisma.chatSession.findUnique({ where: { id } })
     if (!session) {
-      return NextResponse.json({ error: '会话不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
     if (session.userId !== ctx.user.id) {
-      return NextResponse.json({ error: '无权访问此会话' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this session' }, { status: 403 })
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
     if (!instance?.containerId) {
-      return NextResponse.json({ error: '实例未就绪' }, { status: 400 })
+      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
     }
 
     const formData = await req.formData()
     const file = formData.get('file') as File | null
     if (!file) {
-      return NextResponse.json({ error: '缺少文件' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing file' }, { status: 400 })
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json({ error: '文件大小超过 50MB 限制' }, { status: 400 })
+      return NextResponse.json({ error: 'File size exceeds 50MB limit' }, { status: 400 })
     }
 
     const dir = (formData.get('dir') as string) || ''
     if (dir && !isSessionPathSafe(dir)) {
-      return NextResponse.json({ error: '无效的目录路径' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid directory path' }, { status: 400 })
     }
 
     // Validate filename
     const fileName = file.name
     if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\0')) {
-      return NextResponse.json({ error: '无效的文件名' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid filename' }, { status: 400 })
     }
 
     const containerDir = resolveSessionFilePath(
@@ -60,7 +60,7 @@ export const POST = withAuth(
     } catch (err) {
       console.error('[session-files] upload failed:', err)
       return NextResponse.json(
-        { error: `上传失败: ${(err as Error).message}` },
+        { error: `Upload failed: ${(err as Error).message}` },
         { status: 500 },
       )
     }

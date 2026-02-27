@@ -51,28 +51,28 @@ export const POST = withAuth(
   withPermission('chat:use', async (_req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少会话 ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing session ID' }, { status: 400 })
     }
 
     const session = await prisma.chatSession.findUnique({ where: { id } })
 
     if (!session) {
-      return NextResponse.json({ error: '会话不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
     if (session.userId !== ctx.user.id) {
-      return NextResponse.json({ error: '无权操作此会话' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this session' }, { status: 403 })
     }
 
     if (!session.isActive) {
-      return NextResponse.json({ error: '会话已归档，无法清空上下文' }, { status: 400 })
+      return NextResponse.json({ error: 'Session is archived, cannot clear context' }, { status: 400 })
     }
 
     // Connect to gateway
     await ensureRegistryInitialized()
     const client = registry.getClient(session.instanceId)
     if (!client) {
-      return NextResponse.json({ error: '实例未连接' }, { status: 502 })
+      return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
     }
 
     const sessionKey = `agent:${session.agentId}:tc:${session.userId}`
@@ -154,7 +154,7 @@ export const POST = withAuth(
 
       return NextResponse.json({ success: true })
     } catch (err) {
-      const message = err instanceof Error ? err.message : '清空上下文失败'
+      const message = err instanceof Error ? err.message : 'Failed to clear context'
       return NextResponse.json({ error: message }, { status: 502 })
     }
   }),

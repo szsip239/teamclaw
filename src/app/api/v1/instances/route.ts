@@ -144,7 +144,7 @@ export const POST = withAuth(
       // Check name uniqueness
       const existing = await prisma.instance.findUnique({ where: { name } })
       if (existing) {
-        return NextResponse.json({ error: '实例名称已存在' }, { status: 409 })
+        return NextResponse.json({ error: 'Instance name already exists' }, { status: 409 })
       }
 
       if (mode === 'docker') {
@@ -197,7 +197,7 @@ async function createDockerInstance(
     dataDir = result.dataDir
   } catch (err) {
     return NextResponse.json(
-      { error: `初始化实例文件失败: ${(err as Error).message}` },
+      { error: `Failed to initialize instance files:${(err as Error).message}` },
       { status: 500 },
     )
   }
@@ -216,7 +216,7 @@ async function createDockerInstance(
     } catch (err) {
       await cleanupInstanceFiles(name).catch(() => {})
       return NextResponse.json(
-        { error: `拉取镜像失败: ${(err as Error).message}` },
+        { error: `Failed to pull image:${(err as Error).message}` },
         { status: 500 },
       )
     }
@@ -258,7 +258,7 @@ async function createDockerInstance(
   } catch (err) {
     await cleanupInstanceFiles(name).catch(() => {})
     return NextResponse.json(
-      { error: `创建容器失败: ${(err as Error).message}` },
+      { error: `Failed to create container:${(err as Error).message}` },
       { status: 500 },
     )
   }
@@ -303,14 +303,14 @@ async function createDockerInstance(
       action: 'INSTANCE_CREATE',
       resource: 'instance',
       resourceId: instance.id,
-      details: { name, error: `启动容器失败: ${(err as Error).message}` },
+      details: { name, error: `Failed to start container:${(err as Error).message}` },
       ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
       userAgent: req.headers.get('user-agent') || undefined,
       result: 'FAILURE',
     })
 
     return NextResponse.json(
-      { instance, warning: `容器已创建但启动失败: ${(err as Error).message}` },
+      { instance, warning: `Container created but failed to start:${(err as Error).message}` },
       { status: 201 },
     )
   }
@@ -389,7 +389,7 @@ async function createExternalInstance(
   // External mode: gatewayUrl and gatewayToken are required (validated by refine)
   if (!gatewayUrl || !gatewayToken) {
     return NextResponse.json(
-      { error: '外部模式下 Gateway URL 和 Token 为必填' },
+      { error: 'Gateway URL and Token are required in external mode' },
       { status: 400 },
     )
   }

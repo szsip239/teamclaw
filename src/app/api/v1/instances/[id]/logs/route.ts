@@ -12,7 +12,7 @@ export const GET = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     // DEPT_ADMIN must have instance access for their department
@@ -21,13 +21,13 @@ export const GET = withAuth(
         where: { departmentId_instanceId: { departmentId: user.departmentId, instanceId: id } },
       })
       if (!access) {
-        return NextResponse.json({ error: '无权访问此实例' }, { status: 403 })
+        return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
       }
     }
 
     if (!instance.containerId) {
       return NextResponse.json(
-        { error: '该实例不是 Docker 管理的容器' },
+        { error: 'This instance is not a Docker-managed container' },
         { status: 400 },
       )
     }
@@ -37,7 +37,7 @@ export const GET = withAuth(
       return NextResponse.json({ logs, containerId: instance.containerId })
     } catch (err) {
       return NextResponse.json(
-        { error: `获取日志失败: ${(err as Error).message}` },
+        { error: `Failed to fetch logs:${(err as Error).message}` },
         { status: 500 },
       )
     }

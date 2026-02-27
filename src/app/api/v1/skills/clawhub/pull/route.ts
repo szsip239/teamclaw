@@ -37,7 +37,7 @@ export const POST = withAuth(
       const existing = await prisma.skill.findUnique({ where: { slug } })
       if (existing) {
         return NextResponse.json(
-          { error: `技能 slug "${slug}" 已存在，请先删除或使用不同的 slug` },
+          { error: `Skill slug "${slug}" already exists, delete it first or use a different slug` },
           { status: 409 },
         )
       }
@@ -49,7 +49,7 @@ export const POST = withAuth(
       const pullResult = await pullClawHubSkill(slug, targetDir)
       if (!pullResult) {
         return NextResponse.json(
-          { error: '从 ClawHub 拉取技能失败，请确认 slug 正确且 ClawHub 可访问' },
+          { error: 'Failed to pull skill from ClawHub' },
           { status: 502 },
         )
       }
@@ -70,7 +70,7 @@ export const POST = withAuth(
       if (skillCategory === 'DEPARTMENT') {
         if (!departmentIds || departmentIds.length === 0) {
           return NextResponse.json(
-            { error: '部门级技能需要指定部门' },
+            { error: 'Department-level skills require specifying a department' },
             { status: 400 },
           )
         }
@@ -78,7 +78,7 @@ export const POST = withAuth(
           where: { id: { in: departmentIds } },
         })
         if (deptCount !== departmentIds.length) {
-          return NextResponse.json({ error: '部分指定的部门不存在' }, { status: 404 })
+          return NextResponse.json({ error: 'Some specified departments do not exist' }, { status: 404 })
         }
       }
 
@@ -127,7 +127,7 @@ export const POST = withAuth(
         data: {
           skillId: skill.id,
           version: skill.version,
-          changelog: '从 ClawHub 拉取',
+          changelog: 'Pulled from ClawHub',
           publishedById: user.id,
         },
       })

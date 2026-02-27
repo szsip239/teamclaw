@@ -15,13 +15,13 @@ async function resolveSkillFile(
     where: { id },
     include: { departments: { select: { id: true } } },
   })
-  if (!skill) return { error: 'Skill 不存在', status: 404 }
+  if (!skill) return { error: 'Skill not found', status: 404 }
 
   const relativePath = pathSegments.join('/')
-  if (!relativePath) return { error: '缺少文件路径', status: 400 }
+  if (!relativePath) return { error: 'Missing file path', status: 400 }
 
   if (!isSkillPathSafe(skill.slug, relativePath)) {
-    return { error: '非法路径', status: 400 }
+    return { error: 'Illegal path', status: 400 }
   }
 
   return { skill, relativePath }
@@ -42,7 +42,7 @@ export const GET = withAuth(
 
     // Visibility check
     if (!isSkillVisible(skill, ctx.user)) {
-      return NextResponse.json({ error: '无权访问此 Skill' }, { status: 403 })
+      return NextResponse.json({ error: 'No access to this skill' }, { status: 403 })
     }
 
     try {
@@ -51,10 +51,10 @@ export const GET = withAuth(
     } catch (err) {
       const message = (err as Error).message
       if (message.includes('ENOENT') || message.includes('no such file')) {
-        return NextResponse.json({ error: '文件不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'File not found' }, { status: 404 })
       }
       return NextResponse.json(
-        { error: `读取文件失败: ${message}` },
+        { error: `Failed to read file:${message}` },
         { status: 500 },
       )
     }
@@ -85,7 +85,7 @@ export const PUT = withAuth(
 
       // Edit permission check
       if (!canEditSkill(skill, user)) {
-        return NextResponse.json({ error: '无权编辑此 Skill' }, { status: 403 })
+        return NextResponse.json({ error: 'No permission to edit this skill' }, { status: 403 })
       }
 
       try {
@@ -105,7 +105,7 @@ export const PUT = withAuth(
         return NextResponse.json({ success: true, path: relativePath })
       } catch (err) {
         return NextResponse.json(
-          { error: `写入文件失败: ${(err as Error).message}` },
+          { error: `Failed to write file:${(err as Error).message}` },
           { status: 500 },
         )
       }
@@ -130,13 +130,13 @@ export const DELETE = withAuth(
 
     // Edit permission check
     if (!canEditSkill(skill, user)) {
-      return NextResponse.json({ error: '无权编辑此 Skill' }, { status: 403 })
+      return NextResponse.json({ error: 'No permission to edit this skill' }, { status: 403 })
     }
 
     // Prohibit deleting SKILL.md
     if (relativePath === 'SKILL.md') {
       return NextResponse.json(
-        { error: '不允许删除 SKILL.md 文件' },
+        { error: 'Cannot delete SKILL.md file' },
         { status: 400 },
       )
     }
@@ -159,10 +159,10 @@ export const DELETE = withAuth(
     } catch (err) {
       const message = (err as Error).message
       if (message.includes('ENOENT') || message.includes('no such file')) {
-        return NextResponse.json({ error: '文件不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'File not found' }, { status: 404 })
       }
       return NextResponse.json(
-        { error: `删除文件失败: ${message}` },
+        { error: `Failed to delete file:${message}` },
         { status: 500 },
       )
     }

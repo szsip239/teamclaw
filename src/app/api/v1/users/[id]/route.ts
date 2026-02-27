@@ -34,7 +34,7 @@ export const GET = withAuth(async (_req, { user, params }) => {
 
   // Allow self-access or users:list permission
   if (id !== user.id && !hasPermission(user.role, 'users:list')) {
-    return NextResponse.json({ error: '权限不足' }, { status: 403 })
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const target = await prisma.user.findUnique({
@@ -43,7 +43,7 @@ export const GET = withAuth(async (_req, { user, params }) => {
   })
 
   if (!target) {
-    return NextResponse.json({ error: '用户不存在' }, { status: 404 })
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
 
   return NextResponse.json({ user: mapUser(target) })
@@ -63,13 +63,13 @@ export const PUT = withAuth(
 
       const existing = await prisma.user.findUnique({ where: { id } })
       if (!existing) {
-        return NextResponse.json({ error: '用户不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
       }
 
       // Cannot change own role
       if (id === user.id && body.role !== undefined) {
         return NextResponse.json(
-          { error: '不能修改自己的角色' },
+          { error: 'Cannot modify your own role' },
           { status: 400 },
         )
       }
@@ -80,7 +80,7 @@ export const PUT = withAuth(
           where: { id: body.departmentId },
         })
         if (!dept) {
-          return NextResponse.json({ error: '部门不存在' }, { status: 400 })
+          return NextResponse.json({ error: 'Department not found' }, { status: 400 })
         }
       }
 
@@ -123,14 +123,14 @@ export const DELETE = withAuth(
 
     if (id === user.id) {
       return NextResponse.json(
-        { error: '不能禁用自己的账号' },
+        { error: 'Cannot disable your own account' },
         { status: 400 },
       )
     }
 
     const existing = await prisma.user.findUnique({ where: { id } })
     if (!existing) {
-      return NextResponse.json({ error: '用户不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
     await prisma.user.update({

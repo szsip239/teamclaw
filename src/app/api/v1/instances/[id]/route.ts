@@ -34,7 +34,7 @@ export const GET = withAuth(
     })
 
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     return NextResponse.json({ instance })
@@ -55,7 +55,7 @@ export const PUT = withAuth(
 
       const existing = await prisma.instance.findUnique({ where: { id } })
       if (!existing) {
-        return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
 
       // Check name uniqueness if name is being changed
@@ -64,7 +64,7 @@ export const PUT = withAuth(
           where: { name: body.name },
         })
         if (nameConflict) {
-          return NextResponse.json({ error: '实例名称已存在' }, { status: 409 })
+          return NextResponse.json({ error: 'Instance name already exists' }, { status: 409 })
         }
       }
 
@@ -123,7 +123,7 @@ export const DELETE = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     // Disconnect from gateway

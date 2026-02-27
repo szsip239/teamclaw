@@ -87,7 +87,7 @@ export const POST = withAuth(
         where: { email: body.email },
       })
       if (existing) {
-        return NextResponse.json({ error: '该邮箱已被注册' }, { status: 409 })
+        return NextResponse.json({ error: 'Email already registered' }, { status: 409 })
       }
 
       // Validate departmentId if provided
@@ -96,7 +96,7 @@ export const POST = withAuth(
           where: { id: body.departmentId },
         })
         if (!dept) {
-          return NextResponse.json({ error: '部门不存在' }, { status: 400 })
+          return NextResponse.json({ error: 'Department not found' }, { status: 400 })
         }
       }
 

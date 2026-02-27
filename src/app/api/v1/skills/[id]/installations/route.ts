@@ -7,7 +7,7 @@ export const GET = withAuth(
   withPermission('skills:develop', async (_req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少技能 ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing skill ID' }, { status: 400 })
     }
 
     // Verify skill exists
@@ -16,7 +16,7 @@ export const GET = withAuth(
       select: { id: true, slug: true, name: true },
     })
     if (!skill) {
-      return NextResponse.json({ error: '技能不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
     }
 
     const installations = await prisma.skillInstallation.findMany({

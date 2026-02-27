@@ -12,12 +12,12 @@ export const GET = withAuth(
 
     const instance = await prisma.instance.findUnique({ where: { id } })
     if (!instance) {
-      return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
     }
 
     if (!instance.containerId) {
       return NextResponse.json(
-        { error: '该实例不是 Docker 管理的容器' },
+        { error: 'This instance is not a Docker-managed container' },
         { status: 400 },
       )
     }
@@ -27,7 +27,7 @@ export const GET = withAuth(
       return NextResponse.json({ config, containerId: instance.containerId })
     } catch (err) {
       return NextResponse.json(
-        { error: `读取配置失败: ${(err as Error).message}` },
+        { error: `Failed to read config:${(err as Error).message}` },
         { status: 500 },
       )
     }
@@ -48,12 +48,12 @@ export const PUT = withAuth(
 
       const instance = await prisma.instance.findUnique({ where: { id } })
       if (!instance) {
-        return NextResponse.json({ error: '实例不存在' }, { status: 404 })
+        return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
 
       if (!instance.containerId) {
         return NextResponse.json(
-          { error: '该实例不是 Docker 管理的容器' },
+          { error: 'This instance is not a Docker-managed container' },
           { status: 400 },
         )
       }
@@ -78,7 +78,7 @@ export const PUT = withAuth(
         return NextResponse.json({ status: 'updated', containerId: instance.containerId })
       } catch (err) {
         return NextResponse.json(
-          { error: `更新配置失败: ${(err as Error).message}` },
+          { error: `Failed to update config:${(err as Error).message}` },
           { status: 500 },
         )
       }

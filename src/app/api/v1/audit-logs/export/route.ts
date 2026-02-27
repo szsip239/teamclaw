@@ -32,7 +32,7 @@ export const GET = withAuth(
     })
 
     const BOM = '\uFEFF'
-    const header = '时间,用户,操作,资源类型,资源ID,结果,IP地址,详情'
+    const header = 'Time,User,Action,Resource Type,Resource ID,Result,IP Address,Details'
     const rows = logs.map((log) => {
       const time = log.createdAt.toISOString()
       const userName = csvEscape(getDisplayName(log.user))

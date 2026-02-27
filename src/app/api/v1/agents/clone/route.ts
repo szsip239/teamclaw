@@ -32,7 +32,7 @@ export const POST = withAuth(
       // 1. Parse source agent
       const parsed = parseAgentId(sourceId)
       if (!parsed) {
-        return NextResponse.json({ error: '无效的源 Agent ID 格式' }, { status: 400 })
+        return NextResponse.json({ error: 'Invalid source agent ID format' }, { status: 400 })
       }
       const { instanceId: srcInstanceId, agentId: srcAgentId } = parsed
 
@@ -40,7 +40,7 @@ export const POST = withAuth(
       const srcAdapter = registry.getAdapter(srcInstanceId)
       const srcClient = registry.getClient(srcInstanceId)
       if (!srcAdapter || !srcClient) {
-        return NextResponse.json({ error: '源实例未连接' }, { status: 400 })
+        return NextResponse.json({ error: 'Source instance not connected' }, { status: 400 })
       }
 
       const [srcConfigResult, srcAgentsResult] = await Promise.all([
@@ -54,14 +54,14 @@ export const POST = withAuth(
       const srcAgentConfig = srcList.find((a) => a.id === srcAgentId)
       const srcLive = srcLiveAgents.find((a) => a.id === srcAgentId)
       if (!srcAgentConfig && !srcLive) {
-        return NextResponse.json({ error: `源 Agent "${srcAgentId}" 不存在` }, { status: 404 })
+        return NextResponse.json({ error: `Source agent "${srcAgentId}" not found` }, { status: 404 })
       }
 
       // 3. Get target instance adapter + config
       const tgtAdapter = registry.getAdapter(targetInstanceId)
       const tgtClient = registry.getClient(targetInstanceId)
       if (!tgtAdapter || !tgtClient) {
-        return NextResponse.json({ error: '目标实例未连接' }, { status: 400 })
+        return NextResponse.json({ error: 'Target instance not connected' }, { status: 400 })
       }
 
       const tgtConfigResult = await tgtAdapter.getConfig(tgtClient)
@@ -70,7 +70,7 @@ export const POST = withAuth(
       // Check for duplicate agent ID on target
       if (tgtList.some((a) => a.id === newAgentId)) {
         return NextResponse.json(
-          { error: `Agent "${newAgentId}" 已存在于目标实例中` },
+          { error: `Agent "${newAgentId}" already exists in target instance` },
           { status: 409 },
         )
       }
@@ -100,7 +100,7 @@ export const POST = withAuth(
         )
       } catch (err) {
         return NextResponse.json(
-          { error: `配置更新失败: ${(err as Error).message}` },
+          { error: `Configuration update failed:${(err as Error).message}` },
           { status: 500 },
         )
       }
@@ -158,7 +158,7 @@ export const POST = withAuth(
               // Rollback failed — log but don't hide original error
             }
             return NextResponse.json(
-              { error: `文件复制失败: ${(copyErr as Error).message}` },
+              { error: `File copy failed:${(copyErr as Error).message}` },
               { status: 500 },
             )
           }

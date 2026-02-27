@@ -11,12 +11,12 @@ export const POST = withAuth(
   withPermission('resources:manage', async (_req, ctx) => {
     const id = param(ctx, 'id')
     if (!id) {
-      return NextResponse.json({ error: '缺少资源 ID' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing resource ID' }, { status: 400 })
     }
 
     const resource = await prisma.resource.findUnique({ where: { id } })
     if (!resource) {
-      return NextResponse.json({ error: '资源不存在' }, { status: 404 })
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 })
     }
 
     const config = resource.config as ResourceConfig | null
