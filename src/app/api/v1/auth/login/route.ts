@@ -20,8 +20,11 @@ function getClientIp(req: NextRequest): string {
   )
 }
 
-function isSecure(): boolean {
-  return process.env.NODE_ENV === 'production'
+function isSecure(req: NextRequest): boolean {
+  // Only set Secure cookies when the client actually connected via HTTPS
+  // (indicated by reverse proxy's x-forwarded-proto header).
+  // Never base this on NODE_ENV — production can be accessed via HTTP locally.
+  return req.headers.get('x-forwarded-proto') === 'https'
 }
 
 export async function POST(req: NextRequest) {
@@ -169,7 +172,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set('access_token', accessToken, {
     httpOnly: true,
-    secure: isSecure(),
+    secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 900, // 15 minutes
     path: '/',
@@ -177,7 +180,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set('refresh_token', refreshToken, {
     httpOnly: true,
-    secure: isSecure(),
+    secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 604800, // 7 days
     path: '/api/v1/auth',

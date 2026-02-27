@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission } from '@/lib/middleware/auth'
 import { decrypt } from '@/lib/auth/encryption'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
+import { registry, ensureRegistryInitialized, resolveGatewayUrl } from '@/lib/gateway/registry'
 import { dockerManager } from '@/lib/docker'
 import { auditLog } from '@/lib/audit'
 
@@ -39,7 +39,7 @@ export const POST = withAuth(
     // Reconnect to gateway
     try {
       const token = decrypt(instance.gatewayToken)
-      await registry.connect(id, instance.gatewayUrl, token)
+      await registry.connect(id, resolveGatewayUrl(instance), token)
 
       // Extract version from Docker container OCI labels
       let version: string | undefined

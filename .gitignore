@@ -36,6 +36,9 @@ yarn-error.log*
 .env.local
 .env.*.local
 
+# SSL certificates (contain private keys)
+nginx/cert/
+
 # vercel
 .vercel
 

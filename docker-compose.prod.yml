@@ -31,7 +31,7 @@ services:
       JWT_REFRESH_EXPIRY: "${JWT_REFRESH_EXPIRY:-7d}"
       JWT_ISSUER: "${JWT_ISSUER:-teamclaw}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
-      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-http://localhost:3100}"
+      NEXT_PUBLIC_APP_URL: ""
       NODE_ENV: production
       DEFAULT_MODEL_PROVIDER: "${DEFAULT_MODEL_PROVIDER:-anthropic}"
       DEFAULT_MODEL_API_KEY: "${DEFAULT_MODEL_API_KEY:-}"
@@ -39,6 +39,7 @@ services:
       DEFAULT_MODEL_API_TYPE: "${DEFAULT_MODEL_API_TYPE:-anthropic-messages}"
       TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/data/teamclaw}"
       DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
+      DOCKER_NETWORK: "teamclaw-net"
     depends_on:
       init:
         condition: service_completed_successfully
@@ -59,6 +60,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-teamclaw}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamclaw_dev_2024}
       POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -73,6 +76,8 @@ services:
     image: redis:7-alpine
     container_name: teamclaw-redis
     restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -83,6 +88,26 @@ services:
       timeout: 5s
       retries: 5
 
+  nginx:
+    image: nginx:alpine
+    container_name: teamclaw-nginx
+    restart: unless-stopped
+    profiles: [nginx]
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
+      NGINX_SSL_CERT: ${NGINX_SSL_CERT:-server.crt}
+      NGINX_SSL_KEY: ${NGINX_SSL_KEY:-server.key}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/cert:/etc/nginx/cert:ro
+    depends_on:
+      - app
+    networks:
+      - data-net
+
 volumes:
   postgres-data:
   redis-data:
@@ -90,3 +115,4 @@ volumes:
 networks:
   data-net:
     driver: bridge
+    name: teamclaw-net   # Fixed name — immune to project-prefix differences across platforms

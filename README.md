@@ -92,10 +92,29 @@ bash setup.sh
 
 脚本会自动：
 1. 生成 JWT 密钥对和加密密钥
-2. 通过 Docker Compose 启动 PostgreSQL、Redis 和 TeamClaw
-3. 初始化数据库并创建默认管理员账号
+2. 询问是否启用 Nginx HTTPS 反向代理（可选）
+3. 通过 Docker Compose 启动 PostgreSQL、Redis 和 TeamClaw
+4. 初始化数据库并创建默认管理员账号
 
 访问 `http://localhost:3100` — 账号：`admin@teamclaw.local` / `Admin@123456`
+
+#### 启用 HTTPS（可选）
+
+`setup.sh` 会交互式询问是否启用 Nginx 反向代理。你也可以手动配置：
+
+1. 将 SSL 证书文件放入 `nginx/cert/` 目录
+2. 编辑 `.env` 设置 Nginx 变量：
+   ```
+   NGINX_SERVER_NAME="your-domain.com"
+   NGINX_SSL_CERT="your-cert.crt"
+   NGINX_SSL_KEY="your-cert.key"
+   ```
+3. 使用 `--profile nginx` 启动：
+   ```bash
+   docker compose -f docker-compose.prod.yml --profile nginx up -d
+   ```
+
+访问 `https://your-domain.com`
 
 ### 方式三：本地开发
 
@@ -346,10 +365,29 @@ bash setup.sh
 
 This will:
 1. Generate JWT keys and encryption secrets
-2. Start PostgreSQL, Redis, and TeamClaw via Docker Compose
-3. Initialize the database with default admin account
+2. Ask whether to enable Nginx HTTPS reverse proxy (optional)
+3. Start PostgreSQL, Redis, and TeamClaw via Docker Compose
+4. Initialize the database with default admin account
 
 Visit `http://localhost:3100` — Login: `admin@teamclaw.local` / `Admin@123456`
+
+#### Enable HTTPS (Optional)
+
+`setup.sh` interactively asks whether to enable Nginx reverse proxy. You can also configure it manually:
+
+1. Place SSL certificate files in `nginx/cert/`
+2. Edit `.env` to set Nginx variables:
+   ```
+   NGINX_SERVER_NAME="your-domain.com"
+   NGINX_SSL_CERT="your-cert.crt"
+   NGINX_SSL_KEY="your-cert.key"
+   ```
+3. Start with `--profile nginx`:
+   ```bash
+   docker compose -f docker-compose.prod.yml --profile nginx up -d
+   ```
+
+Visit `https://your-domain.com`
 
 ### Option 3: Local Development
 

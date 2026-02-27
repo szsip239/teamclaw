@@ -468,16 +468,20 @@ function ClawHubPullForm({ onSuccess }: { onSuccess: () => void }) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-medium">{result.name}</span>
-                  <span className="text-[11px] text-muted-foreground font-mono">
-                    v{result.version}
-                  </span>
+                  {result.version && (
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      v{result.version}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
                   {result.description}
                 </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  by {result.author}
-                </p>
+                {result.author && (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    by {result.author}
+                  </p>
+                )}
               </div>
               <Button
                 size="sm"

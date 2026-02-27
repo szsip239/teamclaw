@@ -53,11 +53,17 @@ async function findNextAvailablePort(): Promise<number> {
   try {
     const instances = await prisma.instance.findMany({
       where: { containerId: { not: null } },
-      select: { gatewayUrl: true },
+      select: { gatewayUrl: true, dockerConfig: true },
     })
 
     let maxPort = BASE_HOST_PORT - 1
     for (const inst of instances) {
+      // Check dockerConfig.hostPort (Docker-mode instances store host port here)
+      const cfg = inst.dockerConfig as Record<string, unknown> | null
+      if (cfg && typeof cfg.hostPort === 'number' && cfg.hostPort > maxPort) {
+        maxPort = cfg.hostPort
+      }
+      // Also check gatewayUrl for backward compatibility (host-mode instances)
       try {
         const url = new URL(inst.gatewayUrl.replace(/^ws/, 'http'))
         const port = parseInt(url.port, 10)
@@ -71,6 +77,16 @@ async function findNextAvailablePort(): Promise<number> {
   } finally {
     release()
   }
+}
+
+/** Build the gateway WebSocket URL based on deployment environment. */
+function buildGatewayUrl(containerName: string, hostPort: number): string {
+  if (process.env.DOCKER_NETWORK) {
+    // Running inside Docker — use container DNS name + internal port
+    return `ws://${containerName}:${GATEWAY_PORT}`
+  }
+  // Running on host — use host port mapping
+  return `ws://127.0.0.1:${hostPort}`
 }
 
 /** Resolve model provider from request body or environment defaults. */
@@ -281,7 +297,7 @@ async function createDockerInstance(
     }
   } catch (err) {
     // Keep container for debugging — create DB record with ERROR status
-    const gatewayUrl = `ws://127.0.0.1:${hostPort}`
+    const gatewayUrl = buildGatewayUrl(containerName, hostPort)
     const instance = await prisma.instance.create({
       data: {
         name,
@@ -291,7 +307,7 @@ async function createDockerInstance(
         containerId,
         containerName,
         imageName,
-        dockerConfig: (body.docker || {}) as Prisma.InputJsonValue,
+        dockerConfig: { ...body.docker, hostPort } as Prisma.InputJsonValue,
         status: 'ERROR',
         createdById: user.id,
       },
@@ -316,7 +332,7 @@ async function createDockerInstance(
   }
 
   // 9. Compute gateway URL and create DB record (initially OFFLINE)
-  const gatewayUrl = `ws://127.0.0.1:${hostPort}`
+  const gatewayUrl = buildGatewayUrl(containerName, hostPort)
 
   const instance = await prisma.instance.create({
     data: {
@@ -327,7 +343,7 @@ async function createDockerInstance(
       containerId,
       containerName,
       imageName,
-      dockerConfig: (body.docker || {}) as Prisma.InputJsonValue,
+      dockerConfig: { ...body.docker, hostPort } as Prisma.InputJsonValue,
       status: 'OFFLINE',
       createdById: user.id,
     },

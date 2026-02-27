@@ -140,6 +140,35 @@ export const registry =
   globalForRegistry.gatewayRegistry ||
   (globalForRegistry.gatewayRegistry = new GatewayRegistry())
 
+/**
+ * Resolve the effective gateway URL for the current environment.
+ * - Inside Docker (DOCKER_NETWORK set): use the DB URL as-is (container DNS)
+ * - On host (no DOCKER_NETWORK): translate container DNS URLs to localhost + host port
+ */
+export function resolveGatewayUrl(inst: { gatewayUrl: string; dockerConfig: unknown }): string {
+  const url = inst.gatewayUrl
+  if (process.env.DOCKER_NETWORK) return url
+
+  // On host: translate Docker-only hostnames and container DNS names
+  try {
+    const parsed = new URL(url.replace(/^ws/, 'http'))
+    // host.docker.internal → 127.0.0.1 (same machine, just different DNS context)
+    if (parsed.hostname === 'host.docker.internal') {
+      return `ws://127.0.0.1:${parsed.port}`
+    }
+    // Container DNS name → localhost:hostPort (from dockerConfig)
+    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') {
+      const cfg = inst.dockerConfig as Record<string, unknown> | null
+      if (cfg && typeof cfg.hostPort === 'number') {
+        return `ws://127.0.0.1:${cfg.hostPort}`
+      }
+    }
+  } catch {
+    // invalid URL, return as-is
+  }
+  return url
+}
+
 // Lazy initialization: restore connections for all non-DISABLED instances.
 // ERROR/OFFLINE instances are included because the container may have restarted
 // since the status was set — skipping them would leave them stuck forever.
@@ -153,7 +182,8 @@ export async function ensureRegistryInitialized(): Promise<void> {
     await Promise.allSettled(
       instances.map(async (inst) => {
         try {
-          await registry.connect(inst.id, inst.gatewayUrl, decrypt(inst.gatewayToken))
+          const effectiveUrl = resolveGatewayUrl(inst)
+          await registry.connect(inst.id, effectiveUrl, decrypt(inst.gatewayToken))
           // Connection succeeded — if instance was ERROR/OFFLINE, mark as DEGRADED
           // so the health check cycle can promote it to ONLINE on next success.
           if (inst.status === 'ERROR' || inst.status === 'OFFLINE') {
