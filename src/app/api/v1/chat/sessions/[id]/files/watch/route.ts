@@ -54,14 +54,24 @@ export async function GET(
         encoder.encode(`data: ${JSON.stringify({ type: 'connected' })}\n\n`),
       )
 
+      let failCount = 0
+
       // Poll directory mtime via docker exec
       timer = setInterval(async () => {
         try {
+          // Use shell to suppress stat errors when directories don't exist yet.
+          // `|| true` ensures zero exit code; `2>/dev/null` hides stderr.
+          // Positional params ($1, $2) avoid shell-injection from paths.
           const mtime = await dockerManager.execWithOutput(containerId, [
-            'stat', '-c', '%Y', inputDir, outputDir,
+            'sh', '-c',
+            'stat -c "%Y" "$1" "$2" 2>/dev/null || true',
+            '_', inputDir, outputDir,
           ])
-          if (mtime !== lastMtime) {
-            lastMtime = mtime
+          failCount = 0 // reset on successful exec
+          const trimmed = mtime.trim()
+          if (!trimmed) return // directories don't exist yet — wait silently
+          if (trimmed !== lastMtime) {
+            lastMtime = trimmed
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({ type: 'files-changed' })}\n\n`,
@@ -69,10 +79,14 @@ export async function GET(
             )
           }
         } catch {
-          // Container stopped or exec failed — close the stream
-          if (timer) clearInterval(timer)
-          timer = null
-          controller.close()
+          // Docker exec failed (container stopped / removed / API error).
+          // Tolerate transient failures; only close after 3 consecutive.
+          failCount++
+          if (failCount >= 3) {
+            if (timer) clearInterval(timer)
+            timer = null
+            controller.close()
+          }
         }
       }, POLL_INTERVAL_MS)
     },
