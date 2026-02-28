@@ -4,8 +4,6 @@ import { withAuth, withPermission } from '@/lib/middleware/auth'
 import { decrypt } from '@/lib/auth/encryption'
 
 // GET /api/v1/instances/[id]/dashboard — Return dashboard URL and token
-// Frontend opens the URL and posts the token via form submission to avoid
-// exposing the decrypted gateway token in URL query parameters.
 export const GET = withAuth(
   withPermission('instances:view', async (_req, { params }) => {
     const id = params!.id as string
@@ -21,8 +19,23 @@ export const GET = withAuth(
 
     const token = decrypt(instance.gatewayToken)
 
-    // Convert ws://host:port → http://host:port
-    const dashboardUrl = instance.gatewayUrl
+    // Resolve to a URL the user's browser can reach:
+    // - Docker instances: container DNS → localhost:hostPort
+    // - External instances (127.0.0.1, LAN IPs): used as-is
+    let browserUrl = instance.gatewayUrl
+    try {
+      const parsed = new URL(browserUrl.replace(/^ws/, 'http'))
+      if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') {
+        const cfg = instance.dockerConfig as Record<string, unknown> | null
+        if (cfg && typeof cfg.hostPort === 'number') {
+          browserUrl = `ws://127.0.0.1:${cfg.hostPort}`
+        }
+      }
+    } catch {
+      // invalid URL, use as-is
+    }
+
+    const dashboardUrl = browserUrl
       .replace(/^wss:\/\//, 'https://')
       .replace(/^ws:\/\//, 'http://')
 
