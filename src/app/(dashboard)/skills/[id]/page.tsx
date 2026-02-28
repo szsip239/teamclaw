@@ -82,7 +82,7 @@ export default function SkillDetailPage({ params }: { params: Promise<{ id: stri
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-1 flex-col gap-4 p-6"
+      className="flex flex-1 flex-col gap-4 p-6 min-h-0"
     >
       <SkillDetailHeader
         skill={skill}

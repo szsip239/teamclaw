@@ -101,8 +101,7 @@ export default function InstanceConfigPage({
     }
   }
 
-  // Full-height layout, counter dashboard padding
-  const wrapper = "h-[calc(100vh-3.5rem)] -m-6"
+  const wrapper = "flex-1 min-h-0"
 
   if (isLoading) {
     return (
