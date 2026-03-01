@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: tc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teamclaw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpass}
+      POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teamclaw}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: tc-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tc-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3200}:3200"
+    env_file: .env
+    environment:
+      # Override DB/Redis URLs to use container hostnames
+      DATABASE_URL: "postgres://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-devpass}@postgres:5432/${POSTGRES_DB:-teamclaw}?sslmode=disable"
+      REDIS_URL: "redis://redis:6379"
+      PORT: "3200"
+    volumes:
+      # Hot-reload RBAC policy without rebuild
+      - ./configs:/app/configs:ro
+      # Docker socket for container management (Phase 3)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:
+    driver: bridge
+    name: teamclaw-dev
