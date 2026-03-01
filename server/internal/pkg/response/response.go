@@ -95,3 +95,8 @@ func ValidationError(c *gin.Context, details interface{}) {
 		Data:    details,
 	})
 }
+
+// ServiceUnavailable sends a 503 error.
+func ServiceUnavailable(c *gin.Context, message string) {
+	Error(c, http.StatusServiceUnavailable, 503, message)
+}

@@ -28,7 +28,6 @@ p, SYSTEM_ADMIN, *, chat, use
 p, SYSTEM_ADMIN, *, monitor, view
 p, SYSTEM_ADMIN, *, resources, manage
 p, SYSTEM_ADMIN, *, rbac, manage
-
 p, DEPT_ADMIN, *, users, list
 p, DEPT_ADMIN, *, departments, list
 p, DEPT_ADMIN, *, departments, view
@@ -43,7 +42,6 @@ p, DEPT_ADMIN, *, audit, view_dept
 p, DEPT_ADMIN, *, chat, use
 p, DEPT_ADMIN, *, monitor, view_basic
 p, DEPT_ADMIN, *, instances, view
-
 p, USER, *, agents, view
 p, USER, *, agents, create
 p, USER, *, sessions, view_own
