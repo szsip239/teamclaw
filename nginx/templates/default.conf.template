@@ -29,7 +29,7 @@ server {
     add_header X-Content-Type-Options nosniff always;
 
     # ── Request body size (file uploads / attachments) ───
-    client_max_body_size 10m;
+    client_max_body_size 50m;
 
     # ── Static assets (Next.js _next/static) ─────────────
     location /_next/static/ {
