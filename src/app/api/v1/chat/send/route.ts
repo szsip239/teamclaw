@@ -490,85 +490,88 @@ export async function POST(req: NextRequest) {
     await close()
   }
 
-  // --- Auto-attach session images as base64 (non-blocking, no text injection) ---
-  const finalMessage = message
-  const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
-  const SESSION_IMAGE_EXTS: Record<string, string> = {
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
-  }
-  const SESSION_IMAGE_MAX = 5 * 1024 * 1024 // 5MB per image for attachment
-  try {
-    const activeSession = existingSession ?? await prisma.chatSession.findFirst({
-      where: { userId: user.id, instanceId, agentId, isActive: true },
-    })
-    if (activeSession) {
-      const instance = await prisma.instance.findUnique({
-        where: { id: instanceId },
-        select: { containerId: true },
+  // --- Auto-attach session images + send message (runs in background) ---
+  // Start async work WITHOUT blocking the SSE response. This ensures the
+  // client gets the SSE connection immediately (no multi-second delay from
+  // Docker exec operations like symlink creation, dir listing, and image download).
+  ;(async () => {
+    const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
+    const SESSION_IMAGE_EXTS: Record<string, string> = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+    }
+    const SESSION_IMAGE_MAX = 5 * 1024 * 1024 // 5MB per image for attachment
+    try {
+      const activeSession = existingSession ?? await prisma.chatSession.findFirst({
+        where: { userId: user.id, instanceId, agentId, isActive: true },
       })
-      if (instance?.containerId) {
-        const inputPath = buildSessionInputPath(agentId, activeSession.id)
+      if (activeSession) {
+        const instance = await prisma.instance.findUnique({
+          where: { id: instanceId },
+          select: { containerId: true },
+        })
+        if (instance?.containerId) {
+          const inputPath = buildSessionInputPath(agentId, activeSession.id)
 
-        // Update `current-session` symlink so the agent can find files via
-        // `current-session/input/` without needing injected paths.
-        // Pre-create both input/ and output/ so agent sees them immediately.
-        try {
-          const linkPath = buildCurrentSessionLinkPath(agentId)
-          const target = buildCurrentSessionTarget(activeSession.id)
-          const outputPath = buildSessionOutputPath(agentId, activeSession.id)
-          await Promise.all([
-            dockerManager.execInContainer(instance.containerId, [
-              'ln', '-sfn', '--', target, linkPath,
-            ]),
-            dockerManager.ensureContainerDir(instance.containerId, inputPath),
-            dockerManager.ensureContainerDir(instance.containerId, outputPath),
-          ])
-        } catch {
-          // Non-fatal: symlink/mkdir failure doesn't block chat
-        }
-
-        let inputFiles: { name: string; path: string; type: string; size: number }[] = []
-        try { inputFiles = await dockerManager.listContainerDir(instance.containerId, inputPath) } catch {}
-
-        // Auto-attach images from input/ as base64 attachments so the model can see them.
-        // No text injection — session file rules and discovery are handled by AGENTS.md.
-        for (const f of inputFiles) {
-          if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
-          const ext = ('.' + (f.name.split('.').pop() ?? '')).toLowerCase()
-          const mime = SESSION_IMAGE_EXTS[ext]
-          if (!mime) continue
+          // Update `current-session` symlink so the agent can find files via
+          // `current-session/input/` without needing injected paths.
+          // Pre-create both input/ and output/ so agent sees them immediately.
           try {
-            const filePath = `${inputPath}${f.name}`
-            const buf = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
-            sessionFileAttachments.push({
-              fileName: f.name,
-              mimeType: mime,
-              content: buf.toString('base64'),
-            })
+            const linkPath = buildCurrentSessionLinkPath(agentId)
+            const target = buildCurrentSessionTarget(activeSession.id)
+            const outputPath = buildSessionOutputPath(agentId, activeSession.id)
+            await Promise.all([
+              dockerManager.execInContainer(instance.containerId, [
+                'ln', '-sfn', '--', target, linkPath,
+              ]),
+              dockerManager.ensureContainerDir(instance.containerId, inputPath),
+              dockerManager.ensureContainerDir(instance.containerId, outputPath),
+            ])
           } catch {
-            // Skip unreadable images
+            // Non-fatal: symlink/mkdir failure doesn't block chat
+          }
+
+          let inputFiles: { name: string; path: string; type: string; size: number }[] = []
+          try { inputFiles = await dockerManager.listContainerDir(instance.containerId, inputPath) } catch {}
+
+          // Auto-attach images from input/ as base64 attachments so the model can see them.
+          // No text injection — session file rules and discovery are handled by AGENTS.md.
+          for (const f of inputFiles) {
+            if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
+            const ext = ('.' + (f.name.split('.').pop() ?? '')).toLowerCase()
+            const mime = SESSION_IMAGE_EXTS[ext]
+            if (!mime) continue
+            try {
+              const filePath = `${inputPath}${f.name}`
+              const buf = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
+              sessionFileAttachments.push({
+                fileName: f.name,
+                mimeType: mime,
+                content: buf.toString('base64'),
+              })
+            } catch {
+              // Skip unreadable images
+            }
           }
         }
       }
+    } catch {
+      // Non-blocking: skip on any error
     }
-  } catch {
-    // Non-blocking: skip on any error
-  }
 
-  const mappedAttachments = [
-    ...(attachments?.map(a => ({ fileName: a.name, mimeType: a.mimeType, content: a.content })) ?? []),
-    ...sessionFileAttachments,
-  ]
+    const mappedAttachments = [
+      ...(attachments?.map(a => ({ fileName: a.name, mimeType: a.mimeType, content: a.content })) ?? []),
+      ...sessionFileAttachments,
+    ]
 
-  adapter
-    .sendMessage(client, sessionKey, finalMessage, idempotencyKey, {
-      attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
-    })
-    .catch((err: Error) => {
-      write({ type: 'error', error: err.message || 'Failed to send message' })
-      cleanup()
-    })
+    await adapter
+      .sendMessage(client, sessionKey, message, idempotencyKey, {
+        attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
+      })
+  })().catch((err) => {
+    write({ type: 'error', error: (err as Error).message || 'Failed to send message' })
+    cleanup()
+  })
 
   return new Response(readable, {
     headers: {

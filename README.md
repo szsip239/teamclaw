@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="docs/screenshots/cover.png" alt="TeamClaw Cover" width="800">
+</p>
+
+<p align="center">
   <h1 align="center">TeamClaw</h1>
   <p align="center">Enterprise OpenClaw AI Agent Management Platform</p>
   <p align="center">企业级 OpenClaw AI Agent 管理平台</p>
@@ -12,13 +16,6 @@
 
 <p align="center">
   <a href="#english">English</a> | <a href="#中文">中文</a>
-</p>
-
----
-
-<!-- Demo GIF -->
-<p align="center">
-  <img src="docs/screenshots/teamclaw-demo.gif" alt="TeamClaw Demo" width="800">
 </p>
 
 ---

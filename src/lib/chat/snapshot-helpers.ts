@@ -87,7 +87,9 @@ export function splitThinkingFallback(thinking: string): { thinking: string; tex
     }
   }
 
-  return { thinking: '', text: thinking }
+  // No separator found — keep as thinking rather than exposing as visible text.
+  // This is safer: the user can expand the thinking block to read it.
+  return { thinking, text: '' }
 }
 
 // ─── Snapshot building ───────────────────────────────────────────────
