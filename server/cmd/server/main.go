@@ -171,10 +171,28 @@ func main() {
 		dashboard.GET("/stats", middleware.RequirePermission(enforcer, "monitor", "view_basic"), dashboardHandler.Stats)
 	}
 
+	skillHandler := handler.NewSkillHandler(db)
+	skills := protected.Group("/skills")
+	{
+		skills.GET("", middleware.RequirePermission(enforcer, "skills", "develop"), skillHandler.List)
+		skills.GET("/:id", middleware.RequirePermission(enforcer, "skills", "develop"), skillHandler.Get)
+		skills.POST("", middleware.RequirePermission(enforcer, "skills", "develop"), skillHandler.Create)
+		skills.PATCH("/:id", middleware.RequirePermission(enforcer, "skills", "develop"), skillHandler.Update)
+		skills.DELETE("/:id", middleware.RequirePermission(enforcer, "skills", "develop"), skillHandler.Delete)
+	}
+
+	resourceHandler := handler.NewResourceHandler(db, enc)
+	resources := protected.Group("/resources")
+	{
+		resources.GET("", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.List)
+		resources.GET("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Get)
+		resources.POST("", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Create)
+		resources.PATCH("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Update)
+		resources.DELETE("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Delete)
+	}
+
 	// TODO: Add remaining handlers
 	// chatHandler := handler.NewChatHandler(db)
-	// skillHandler := handler.NewSkillHandler(db)
-	// resourceHandler := handler.NewResourceHandler(db)
 
 	// ── Start Server ───────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
