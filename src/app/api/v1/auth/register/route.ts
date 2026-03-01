@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
     httpOnly: true,
     secure: isSecure(req),
     sameSite: 'lax',
-    maxAge: 900,
+    maxAge: 10800, // 180 minutes
     path: '/',
   })
 

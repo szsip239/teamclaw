@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify, importPKCS8, importSPKI } from 'jose'
 
 const ALG = 'RS256'
 const ISSUER = 'teamclaw'
-const ACCESS_EXPIRY = '15m'
+const ACCESS_EXPIRY = '180m'
 const REFRESH_EXPIRY = '7d'
 
 let privateKey: CryptoKey | null = null
