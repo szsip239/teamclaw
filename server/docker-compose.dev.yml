@@ -48,8 +48,8 @@ services:
       REDIS_URL: "redis://redis:6379"
       PORT: "3200"
     volumes:
-      # Hot-reload RBAC policy without rebuild
-      - ./configs:/app/configs:ro
+      # RBAC policy: rw so SavePolicy() can persist runtime changes
+      - ./configs:/app/configs:rw
       # Docker socket for container management (Phase 3)
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:

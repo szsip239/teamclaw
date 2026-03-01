@@ -191,6 +191,15 @@ func main() {
 		resources.DELETE("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Delete)
 	}
 
+	rbacHandler := handler.NewRBACHandler(enforcer)
+	rbac := protected.Group("/rbac")
+	{
+		rbac.GET("/policies", middleware.RequirePermission(enforcer, "rbac", "manage"), rbacHandler.ListPolicies)
+		rbac.GET("/roles", middleware.RequirePermission(enforcer, "rbac", "manage"), rbacHandler.ListRoles)
+		rbac.POST("/policies", middleware.RequirePermission(enforcer, "rbac", "manage"), rbacHandler.AddPolicy)
+		rbac.DELETE("/policies", middleware.RequirePermission(enforcer, "rbac", "manage"), rbacHandler.RemovePolicy)
+	}
+
 	// TODO: Add remaining handlers
 	// chatHandler := handler.NewChatHandler(db)
 
