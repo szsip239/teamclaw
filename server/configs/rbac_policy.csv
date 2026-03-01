@@ -35,6 +35,7 @@ p, DEPT_ADMIN, *, agents, view
 p, DEPT_ADMIN, *, agents, create
 p, DEPT_ADMIN, *, agents, manage
 p, DEPT_ADMIN, *, sessions, view_dept
+p, DEPT_ADMIN, *, sessions, view_own
 p, DEPT_ADMIN, *, skills, manage_dept
 p, DEPT_ADMIN, *, skills, develop
 p, DEPT_ADMIN, *, models, view

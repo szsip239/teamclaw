@@ -24,7 +24,7 @@ const (
 	baseReconnectDelay    = 1 * time.Second
 	maxReconnectDelay     = 32 * time.Second
 	dialTimeout           = 10 * time.Second
-	clientID              = "openclaw-control-ui"
+	clientID              = "gateway-client"
 	clientVersion         = "1.0.0"
 )
 
