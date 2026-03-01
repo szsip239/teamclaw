@@ -156,12 +156,25 @@ func main() {
 		agents.DELETE("/:id", middleware.RequirePermission(enforcer, "agents", "manage"), agentHandler.Delete)
 	}
 
+	auditHandler := handler.NewAuditLogHandler(db)
+	auditLogs := protected.Group("/audit-logs")
+	{
+		// view_dept is the minimum permission; handler auto-scopes by role:
+		// SYSTEM_ADMIN → all logs; DEPT_ADMIN → own department's logs only
+		auditLogs.GET("", middleware.RequirePermission(enforcer, "audit", "view_dept"), auditHandler.List)
+		auditLogs.GET("/export", middleware.RequirePermission(enforcer, "audit", "view_dept"), auditHandler.Export)
+	}
+
+	dashboardHandler := handler.NewDashboardHandler(db)
+	dashboard := protected.Group("/dashboard")
+	{
+		dashboard.GET("/stats", middleware.RequirePermission(enforcer, "monitor", "view_basic"), dashboardHandler.Stats)
+	}
+
 	// TODO: Add remaining handlers
 	// chatHandler := handler.NewChatHandler(db)
 	// skillHandler := handler.NewSkillHandler(db)
 	// resourceHandler := handler.NewResourceHandler(db)
-	// auditHandler := handler.NewAuditLogHandler(db)
-	// dashboardHandler := handler.NewDashboardHandler(db)
 
 	// ── Start Server ───────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
