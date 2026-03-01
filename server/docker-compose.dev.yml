@@ -62,6 +62,21 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # One-shot test runner — not started by default.
+  # Usage: docker compose -f docker-compose.dev.yml run --rm test
+  # Runs inside teamclaw-dev network so it can reach `api` by hostname.
+  test:
+    image: alpine/curl
+    container_name: tc-test
+    profiles: ["test"]
+    networks:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Keep stdin open so you can exec commands interactively:
+    # docker compose -f docker-compose.dev.yml run --rm test sh
+    entrypoint: ["sh"]
+
 volumes:
   postgres-data:
 
