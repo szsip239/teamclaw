@@ -235,6 +235,18 @@ func main() {
 		gw.POST("/:id/request", middleware.RequirePermission(enforcer, "instances", "manage"), gatewayHandler.Proxy)
 	}
 
+	// ── Chat (SSE streaming) ───────────────────────────
+	chatHandler := handler.NewChatHandler(db, gatewayRegistry)
+	chat := protected.Group("/chat")
+	{
+		chat.POST("/send", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.Send)
+		chat.GET("/agents", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.ListAgents)
+		chat.GET("/sessions", middleware.RequirePermission(enforcer, "sessions", "view_own"), chatHandler.ListSessions)
+		chat.GET("/sessions/:id/history", middleware.RequirePermission(enforcer, "sessions", "view_own"), chatHandler.GetHistory)
+		chat.POST("/sessions/:id/clear-context", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.ClearContext)
+		chat.POST("/conversations/new", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.NewConversation)
+	}
+
 	// ── Start Server ───────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	logger.Info("Starting TeamClaw API server", zap.String("addr", addr), zap.String("mode", cfg.Server.Mode))
