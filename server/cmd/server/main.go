@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/szsip239/teamclaw/server/internal/middleware"
 	"github.com/szsip239/teamclaw/server/internal/model"
 	"github.com/szsip239/teamclaw/server/internal/pkg/crypto"
+	gatewaySvc "github.com/szsip239/teamclaw/server/internal/service/gateway"
 )
 
 func main() {
@@ -208,8 +210,30 @@ func main() {
 	instances.GET("/:id/container/status", middleware.RequirePermission(enforcer, "instances", "view"), containerHandler.Status)
 	instances.GET("/:id/container/logs", middleware.RequirePermission(enforcer, "instances", "view"), containerHandler.Logs)
 
-	// TODO: Add remaining handlers
-	// chatHandler := handler.NewChatHandler(db)
+	// ── Gateway Registry ───────────────────────────────
+	gatewayRegistry := gatewaySvc.NewRegistry(db, logger, enc)
+
+	// Initialize in background so slow/offline instances don't delay startup.
+	go func() {
+		initCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		gatewayRegistry.Initialize(initCtx)
+
+		// Start health checks only after initialization (so initial DB state is clean).
+		healthCtx := context.Background() // runs for process lifetime
+		checker := gatewaySvc.NewHealthChecker(gatewayRegistry, db, enc, logger)
+		go checker.Start(healthCtx)
+	}()
+
+	// Gateway management endpoints (status + manual connect/disconnect)
+	gatewayHandler := handler.NewGatewayHandler(db, enc, gatewayRegistry)
+	gw := protected.Group("/gateway")
+	{
+		gw.GET("/status", middleware.RequirePermission(enforcer, "instances", "view"), gatewayHandler.Status)
+		gw.POST("/:id/connect", middleware.RequirePermission(enforcer, "instances", "manage"), gatewayHandler.Connect)
+		gw.DELETE("/:id/connect", middleware.RequirePermission(enforcer, "instances", "manage"), gatewayHandler.Disconnect)
+		gw.POST("/:id/request", middleware.RequirePermission(enforcer, "instances", "manage"), gatewayHandler.Proxy)
+	}
 
 	// ── Start Server ───────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
