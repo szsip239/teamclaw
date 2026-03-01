@@ -31,6 +31,7 @@ export class GatewayClient {
   private lastTick = 0
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private connectTimer: ReturnType<typeof setTimeout> | null = null
   private connected = false
   private intentionalDisconnect = false
 
@@ -66,6 +67,17 @@ export class GatewayClient {
       this.connectResolve = resolve
       this.connectReject = reject
 
+      // 15s overall timeout: if handshake doesn't complete, reject and close
+      this.connectTimer = setTimeout(() => {
+        this.clearConnectTimer()
+        if (this.connectReject) {
+          this.connectReject(new Error('Connect handshake timed out'))
+          this.connectResolve = null
+          this.connectReject = null
+        }
+        this.ws?.close(4001, 'connect timeout')
+      }, 15_000)
+
       // resolveGatewayUrl may rewrite 127.0.0.1 → host.docker.internal for
       // Docker. OpenClaw's checkBrowserOrigin checks both Host and Origin
       // headers against loopback, so we rewrite them back to 127.0.0.1.
@@ -83,6 +95,7 @@ export class GatewayClient {
       })
 
       this.ws.on('close', () => {
+        this.clearConnectTimer()
         this.connected = false
         this.stopTickWatch()
         this.onStatusChange?.('disconnected')
@@ -101,6 +114,7 @@ export class GatewayClient {
       })
 
       this.ws.on('error', (err: Error) => {
+        this.clearConnectTimer()
         if (!this.connected && this.connectReject) {
           this.connectReject(err)
           this.connectResolve = null
@@ -113,6 +127,7 @@ export class GatewayClient {
   /** Cleanly shut down the connection. */
   disconnect(): void {
     this.intentionalDisconnect = true
+    this.clearConnectTimer()
     this.stopTickWatch()
     this.clearReconnectTimer()
     this.rejectAllPending('Client disconnected')
@@ -125,6 +140,27 @@ export class GatewayClient {
 
   isConnected(): boolean {
     return this.connected
+  }
+
+  /**
+   * Wait for the client to become connected (e.g. during background reconnection).
+   * Returns true if connected within the timeout, false otherwise.
+   */
+  waitForConnection(timeoutMs = 10_000): Promise<boolean> {
+    if (this.connected) return Promise.resolve(true)
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        clearInterval(check)
+        resolve(false)
+      }, timeoutMs)
+      const check = setInterval(() => {
+        if (this.connected) {
+          clearTimeout(timer)
+          clearInterval(check)
+          resolve(true)
+        }
+      }, 200)
+    })
   }
 
   /**
@@ -228,6 +264,7 @@ export class GatewayClient {
 
     this.request('connect', params as unknown as Record<string, unknown>)
       .then((helloOk) => {
+        this.clearConnectTimer()
         this.connected = true
         this.reconnectAttempts = 0
 
@@ -325,6 +362,13 @@ export class GatewayClient {
     if (this.tickTimer) {
       clearInterval(this.tickTimer)
       this.tickTimer = null
+    }
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer)
+      this.connectTimer = null
     }
   }
 

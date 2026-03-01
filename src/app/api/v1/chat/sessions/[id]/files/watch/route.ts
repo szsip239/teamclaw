@@ -8,6 +8,8 @@ import {
 } from '@/lib/session-files/helpers'
 
 const POLL_INTERVAL_MS = 5_000
+const EXEC_TIMEOUT_MS = 8_000
+const MAX_LIFETIME_MS = 4 * 60 * 1_000 // 4 minutes — client auto-reconnects
 
 // GET /api/v1/chat/sessions/[id]/files/watch — SSE stream for file changes
 export async function GET(
@@ -44,33 +46,53 @@ export async function GET(
 
   // --- SSE stream ---
   const encoder = new TextEncoder()
-  let timer: ReturnType<typeof setInterval> | null = null
+  let stopped = false
+  let pollTimer: ReturnType<typeof setTimeout> | null = null
+  let lifetimeTimer: ReturnType<typeof setTimeout> | null = null
   let lastMtime = ''
+
+  function cleanup() {
+    stopped = true
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+    if (lifetimeTimer) { clearTimeout(lifetimeTimer); lifetimeTimer = null }
+  }
+
+  // Listen for client disconnect via req.signal (Next.js propagates this)
+  req.signal.addEventListener('abort', cleanup, { once: true })
 
   const stream = new ReadableStream({
     start(controller) {
-      // Send initial connected event
       controller.enqueue(
         encoder.encode(`data: ${JSON.stringify({ type: 'connected' })}\n\n`),
       )
 
+      // Auto-close after MAX_LIFETIME_MS to prevent indefinite connections.
+      // Client-side useFileWatch reconnects automatically with backoff.
+      lifetimeTimer = setTimeout(() => {
+        cleanup()
+        try { controller.close() } catch { /* already closed */ }
+      }, MAX_LIFETIME_MS)
+
       let failCount = 0
 
-      // Poll directory mtime via docker exec
-      timer = setInterval(async () => {
+      // Sequential poll: wait for previous exec to finish before scheduling next.
+      // Prevents docker exec accumulation when container is slow.
+      async function poll() {
+        if (stopped) return
         try {
-          // Use shell to suppress stat errors when directories don't exist yet.
-          // `|| true` ensures zero exit code; `2>/dev/null` hides stderr.
-          // Positional params ($1, $2) avoid shell-injection from paths.
-          const mtime = await dockerManager.execWithOutput(containerId, [
-            'sh', '-c',
-            'stat -c "%Y" "$1" "$2" 2>/dev/null || true',
-            '_', inputDir, outputDir,
+          const mtime = await Promise.race([
+            dockerManager.execWithOutput(containerId, [
+              'sh', '-c',
+              'stat -c "%Y" "$1" "$2" 2>/dev/null || true',
+              '_', inputDir, outputDir,
+            ]),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('exec timeout')), EXEC_TIMEOUT_MS),
+            ),
           ])
-          failCount = 0 // reset on successful exec
+          failCount = 0
           const trimmed = mtime.trim()
-          if (!trimmed) return // directories don't exist yet — wait silently
-          if (trimmed !== lastMtime) {
+          if (trimmed && trimmed !== lastMtime) {
             lastMtime = trimmed
             controller.enqueue(
               encoder.encode(
@@ -79,20 +101,25 @@ export async function GET(
             )
           }
         } catch {
-          // Docker exec failed (container stopped / removed / API error).
-          // Tolerate transient failures; only close after 3 consecutive.
           failCount++
           if (failCount >= 3) {
-            if (timer) clearInterval(timer)
-            timer = null
-            controller.close()
+            cleanup()
+            try { controller.close() } catch { /* already closed */ }
+            return
           }
         }
-      }, POLL_INTERVAL_MS)
+
+        // Schedule next poll only after current one completes
+        if (!stopped) {
+          pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
+        }
+      }
+
+      // Start first poll after a short delay
+      pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
     },
     cancel() {
-      if (timer) clearInterval(timer)
-      timer = null
+      cleanup()
     },
   })
 

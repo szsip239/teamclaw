@@ -43,6 +43,10 @@ interface ChatState {
   // Session management
   clearMessages: () => void
 
+  // Gateway connection status
+  connectionStatus: 'ok' | 'unreachable'
+  setConnectionStatus: (v: 'ok' | 'unreachable') => void
+
   // Sidebar
   sidebarOpen: boolean
   setSidebarOpen: (v: boolean) => void
@@ -299,8 +303,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     const { abortController } = get()
     if (abortController) abortController.abort()
-    set({ messages: [], isStreaming: false, abortController: null, activeSessionId: null })
+    set({ messages: [], isStreaming: false, abortController: null, activeSessionId: null, connectionStatus: 'ok' })
   },
+
+  connectionStatus: 'ok',
+  setConnectionStatus: (v) => set({ connectionStatus: v }),
 
   sidebarOpen: true,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),

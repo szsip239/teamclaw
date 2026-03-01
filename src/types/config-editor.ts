@@ -53,5 +53,5 @@ export interface ConfigEditorInitResponse {
 export interface ConfigPatchInput {
   patch: Record<string, unknown>
   baseHash: string
-  missingProviders?: string[]
+  syncProviders?: string[]
 }

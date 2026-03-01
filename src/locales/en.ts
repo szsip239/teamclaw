@@ -359,6 +359,7 @@ const en: Record<TranslationKey, string> = {
   'chat.contextRestart': 'AI context restarted from here',
   'chat.contextReset': 'Context reset',
   'chat.loadingHistory': 'Loading history...',
+  'chat.gatewayUnreachable': 'Gateway connection lost. Refresh to retry.',
   'chat.department': 'Department',
   'chat.personal': 'Personal',
   'chat.onlineStatus': 'Online',

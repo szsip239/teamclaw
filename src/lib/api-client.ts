@@ -15,6 +15,24 @@ class ApiError extends Error {
 
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? ""
 
+// Dedup concurrent refresh calls to prevent token rotation race condition.
+// Without this, multiple 401s trigger multiple refresh requests — the first
+// succeeds but the second uses the already-rotated token, triggering reuse
+// detection which nukes ALL tokens for the user.
+let refreshPromise: Promise<boolean> | null = null
+
+function doRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise
+  refreshPromise = fetch(`${BASE_URL}/api/v1/auth/refresh`, {
+    method: "POST",
+    credentials: "include",
+  })
+    .then((res) => res.ok)
+    .catch(() => false)
+    .finally(() => { refreshPromise = null })
+  return refreshPromise
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestOptions = {}
@@ -35,14 +53,10 @@ async function request<T>(
 
   let response = await fetch(`${BASE_URL}${endpoint}`, config)
 
-  // On 401, try refreshing the token once
+  // On 401, try refreshing the token once (deduped across concurrent calls)
   if (response.status === 401 && !endpoint.includes("/auth/refresh")) {
-    const refreshRes = await fetch(`${BASE_URL}/api/v1/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-    })
-
-    if (refreshRes.ok) {
+    const refreshed = await doRefresh()
+    if (refreshed) {
       response = await fetch(`${BASE_URL}${endpoint}`, config)
     }
   }

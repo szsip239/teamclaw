@@ -80,14 +80,14 @@ export default function InstanceConfigPage({
 
     // Detect model references that need provider API keys synced
     const configData = useConfigEditorStore.getState().configData
-    const { referenced, existing } = extractReferencedProviders(configData)
-    const missingProviders = [...referenced].filter(p => !existing.has(p))
+    const { referenced } = extractReferencedProviders(configData)
+    const syncProviders = [...referenced]
 
     try {
       const result = await patchConfig.mutateAsync({
         patch,
         baseHash,
-        missingProviders: missingProviders.length > 0 ? missingProviders : undefined,
+        syncProviders: syncProviders.length > 0 ? syncProviders : undefined,
       })
       applyPatchResult(result.config ?? {}, result.hash ?? "")
       toast.success(t('config.saved'))
