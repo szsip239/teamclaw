@@ -1,0 +1,12 @@
+# Compiled binaries
+*.exe
+*.exe~
+bin/
+teamclaw-server
+
+# Environment (contains private keys)
+.env
+
+# Go test cache
+*.test
+*.out
