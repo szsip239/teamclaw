@@ -45,9 +45,11 @@ function HistoryLoadingSkeleton() {
 }
 
 export function ChatMessageList() {
+  const t = useT()
   const messages = useChatStore((s) => s.messages)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const isLoadingHistory = useChatStore((s) => s.isLoadingHistory)
+  const connectionStatus = useChatStore((s) => s.connectionStatus)
   const bottomRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -78,6 +80,12 @@ export function ChatMessageList() {
   return (
     <ScrollArea className="flex-1" viewportRef={viewportRef} onScroll={handleScroll}>
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+        {connectionStatus === 'unreachable' && (
+          <div className="flex items-center gap-2 rounded-md bg-yellow-50 px-4 py-2 text-sm text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
+            <span className="size-2 shrink-0 rounded-full bg-yellow-500" />
+            {t('chat.gatewayUnreachable')}
+          </div>
+        )}
         {messages.map((msg) => {
           // Check if this is a separator message
           const separatorType = isSeparator(msg.content)

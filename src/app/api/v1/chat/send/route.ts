@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto'
-import { readFile } from 'fs/promises'
-import { extname, resolve } from 'path'
+import { extname } from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
@@ -8,9 +7,10 @@ import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
 import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget } from '@/lib/session-files/helpers'
+import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
+import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl } from '@/lib/chat/image-helpers'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
-import type { ChatToolCall } from '@/types/chat'
 import { Prisma } from '@/generated/prisma'
 
 function encodeSSE(event: ChatStreamEvent): string {
@@ -83,190 +83,6 @@ function extractThinkingFromMessage(message: unknown): string {
   return parts.join('\n').trim()
 }
 
-function extractContentBlocks(content: ChatHistoryMessage['content']): ChatContentBlock[] | undefined {
-  if (!Array.isArray(content)) return undefined
-  const blocks: ChatContentBlock[] = []
-  for (const block of content) {
-    if (block.type === 'image') {
-      let imageUrl = ''
-      if (block.source?.type === 'base64' && block.source.data) {
-        imageUrl = `data:${block.source.media_type || 'image/png'};base64,${block.source.data}`
-      } else if (block.url) {
-        imageUrl = block.url
-      }
-      if (imageUrl) {
-        blocks.push({ type: 'image', imageUrl, mimeType: block.source?.media_type })
-      }
-    }
-  }
-  return blocks.length > 0 ? blocks : undefined
-}
-
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
-const MIME_BY_EXT: Record<string, string> = {
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
-}
-
-/**
- * Extract MEDIA: paths from tool output text.
- * OpenClaw skills output lines like: "MEDIA: /path/to/image.png"
- * Also handles "Image saved: /path/to/image.png" patterns.
- */
-function extractMediaPaths(toolOutput: unknown): string[] {
-  const text = typeof toolOutput === 'string'
-    ? toolOutput
-    : typeof toolOutput === 'object' && toolOutput !== null
-      ? JSON.stringify(toolOutput)
-      : ''
-  if (!text) return []
-
-  const paths: string[] = []
-  // Match "MEDIA: /path" or "MEDIA:/path" patterns
-  const mediaRegex = /MEDIA:\s*(\S+)/gi
-  let match: RegExpExecArray | null
-  while ((match = mediaRegex.exec(text)) !== null) {
-    const p = match[1]
-    if (p && IMAGE_EXTENSIONS.has(extname(p).toLowerCase())) {
-      paths.push(p)
-    }
-  }
-  // Match "Image saved: /path" patterns
-  const savedRegex = /Image saved:\s*(\S+)/gi
-  while ((match = savedRegex.exec(text)) !== null) {
-    const p = match[1]
-    if (p && IMAGE_EXTENSIONS.has(extname(p).toLowerCase())) {
-      if (!paths.includes(p)) paths.push(p)
-    }
-  }
-  return paths
-}
-
-/**
- * Extract file:/// image paths from text content.
- * AI may embed local file references in markdown format: ![alt](file:///path/to/image.png)
- * or as plain file:///path/to/image.png references.
- */
-function extractFileProtocolPaths(text: string): string[] {
-  if (!text) return []
-  const paths: string[] = []
-  const fileRegex = /file:\/\/\/([\S]+?\.(?:png|jpg|jpeg|gif|webp|bmp))(?:[)\s\]"]|$)/gi
-  let match: RegExpExecArray | null
-  while ((match = fileRegex.exec(text)) !== null) {
-    const p = '/' + match[1]
-    if (!paths.includes(p)) paths.push(p)
-  }
-  return paths
-}
-
-/** Allowed base directories for reading image files from the host */
-const ALLOWED_IMAGE_DIRS = ['/tmp', '/home']
-
-/**
- * Check if a file path is within an allowed directory.
- * Prevents arbitrary file reads from AI-generated paths.
- */
-function isAllowedImagePath(filePath: string): boolean {
-  const resolved = resolve(filePath)
-  return ALLOWED_IMAGE_DIRS.some(dir => resolved.startsWith(dir + '/'))
-}
-
-/**
- * Read a local image file and return as base64 data URL.
- * Returns null if the file can't be read, is too large (>10MB),
- * or is outside allowed directories.
- */
-async function readImageAsDataUrl(filePath: string): Promise<string | null> {
-  try {
-    if (!isAllowedImagePath(filePath)) return null
-    const data = await readFile(filePath)
-    if (data.byteLength > 10 * 1024 * 1024) return null // 10MB limit
-    const ext = extname(filePath).toLowerCase()
-    const mime = MIME_BY_EXT[ext] || 'image/png'
-    return `data:${mime};base64,${data.toString('base64')}`
-  } catch {
-    return null
-  }
-}
-
-function extractHistoryText(content: ChatHistoryMessage['content']): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  const parts: string[] = []
-  for (const block of content) {
-    if (block.type === 'text' && block.text) parts.push(block.text)
-  }
-  return parts.join('\n').trim()
-}
-
-/**
- * Strip OpenClaw delivery metadata from stored user messages.
- * OpenClaw prepends "Conversation info ... [timestamp]" to user messages
- * in chat.history. Extract the actual user text after the timestamp line.
- */
-function stripUserMetadata(text: string): string {
-  const match = text.match(/\[[\w\s:+\-]+UTC\]\s*/)
-  if (match && match.index !== undefined) {
-    const after = text.slice(match.index + match[0].length)
-    if (after) return after
-  }
-  return text
-}
-
-/**
- * Strip <final>...</final> wrapping from stored assistant messages.
- * OpenClaw wraps final text in <final> tags in chat.history storage.
- */
-function stripFinalTags(text: string): string {
-  return text.replace(/<final>([\s\S]*?)<\/final>/g, '$1').trim()
-}
-
-function extractHistoryThinking(content: ChatHistoryMessage['content']): string {
-  if (typeof content === 'string') return ''
-  if (!Array.isArray(content)) return ''
-  const parts: string[] = []
-  for (const block of content) {
-    if (block.type === 'thinking' && block.thinking) parts.push(block.thinking)
-  }
-  return parts.join('\n').trim()
-}
-
-/**
- * Fallback: extract response text embedded in thinking blocks.
- *
- * MiniMax models output `<think>...</think>` internally; the Anthropic-compatible
- * API layer is supposed to parse these into separate content blocks. When parsing
- * fails, the response text leaks into the thinking block in two known patterns:
- *
- * 1. Complete API failure: raw `<think>reasoning</think>response` in one block
- * 2. Partial API failure: thinking block contains reasoning + ZWJ (U+200D) + response
- *    (API stripped the tags but didn't create a separate text block)
- * 3. Ultimate fallback: show full thinking as content (better than empty)
- */
-function splitThinkingFallback(thinking: string): { thinking: string; text: string } {
-  // Strategy 1: <think> tags still present (complete API parsing failure)
-  const thinkMatch = thinking.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/)
-  if (thinkMatch) {
-    const extractedThinking = thinkMatch[1].trim()
-    const extractedText = thinkMatch[2].trim()
-    if (extractedText.length >= 2) {
-      return { thinking: extractedThinking, text: extractedText }
-    }
-  }
-
-  // Strategy 2: ZWJ separator (partial API failure — tags stripped, blocks not split)
-  const zwjIndex = thinking.lastIndexOf('\u200D')
-  if (zwjIndex !== -1) {
-    const before = thinking.slice(0, zwjIndex).trim()
-    const after = thinking.slice(zwjIndex + 1).trim()
-    if (after.length >= 2) {
-      return { thinking: before, text: after }
-    }
-  }
-
-  // Strategy 3: use full thinking as content (better than showing nothing)
-  return { thinking: '', text: thinking }
-}
 
 /**
  * Snapshot + archive the currently active session, then activate the target session.
@@ -279,107 +95,22 @@ async function switchActiveSession(
   targetSessionId: string,
   sessionKey: string,
 ) {
-  // Find current active session
   const activeSession = await prisma.chatSession.findFirst({
     where: { userId, instanceId, agentId, isActive: true },
   })
 
   if (activeSession && activeSession.id !== targetSessionId) {
-    // Snapshot the active session's messages
     await ensureRegistryInitialized()
     const client = registry.getClient(instanceId)
 
     if (client) {
-      try {
-        const rawResult = await client.request('chat.history', {
-          sessionKey,
-          limit: 200,
-        })
-        const historyResult = rawResult as ChatHistoryResult
-        const rawMessages = historyResult.messages ?? []
-
-        if (rawMessages.length > 0) {
-          const batchId = randomUUID()
-          let orderIndex = 0
-          const snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[] = []
-          let firstUserMessage: string | null = null
-
-          for (const msg of rawMessages) {
-            if (msg.role === 'user') {
-              const text = stripUserMetadata(extractHistoryText(msg.content))
-              const cb = extractContentBlocks(msg.content)
-              if (!firstUserMessage && text) firstUserMessage = text
-              snapshotData.push({
-                chatSessionId: activeSession.id,
-                batchId,
-                orderIndex: orderIndex++,
-                role: 'user',
-                content: text,
-                contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
-              })
-            } else if (msg.role === 'assistant') {
-              let text = stripFinalTags(extractHistoryText(msg.content))
-              let thinking = extractHistoryThinking(msg.content)
-              const cb = extractContentBlocks(msg.content)
-              const toolCalls: ChatToolCall[] = []
-
-              // Fallback: if model embedded response in thinking block
-              if (!text && thinking) {
-                const split = splitThinkingFallback(thinking)
-                if (split.text) {
-                  text = split.text
-                  thinking = split.thinking
-                }
-              }
-
-              snapshotData.push({
-                chatSessionId: activeSession.id,
-                batchId,
-                orderIndex: orderIndex++,
-                role: 'assistant',
-                content: text,
-                contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
-                thinking: thinking || null,
-                toolCalls: toolCalls.length > 0 ? (toolCalls as unknown as Prisma.InputJsonValue) : undefined,
-              })
-            } else if (msg.role === 'toolResult') {
-              const lastSnapshot = snapshotData[snapshotData.length - 1]
-              if (lastSnapshot?.role === 'assistant') {
-                const existing = (lastSnapshot.toolCalls as unknown as ChatToolCall[] | null) ?? []
-                existing.push({
-                  toolName: msg.toolName ?? 'tool',
-                  toolInput: null,
-                  toolOutput: extractHistoryText(msg.content),
-                })
-                lastSnapshot.toolCalls = existing as unknown as Prisma.InputJsonValue
-              }
-            }
-          }
-
-          if (snapshotData.length > 0) {
-            await prisma.chatMessageSnapshot.createMany({ data: snapshotData })
-          }
-
-          if (!activeSession.title && firstUserMessage) {
-            await prisma.chatSession.update({
-              where: { id: activeSession.id },
-              data: { title: firstUserMessage.slice(0, 50) },
-            })
-          }
-        }
-
-        // Delete OpenClaw session
-        await client.request('sessions.delete', { key: sessionKey })
-      } catch {
-        // Gateway offline — continue with DB operations
-      }
+      await archiveSession(activeSession.id, instanceId, agentId, userId, client)
+    } else {
+      await prisma.chatSession.update({
+        where: { id: activeSession.id },
+        data: { isActive: false, liveMessages: Prisma.DbNull },
+      })
     }
-
-    // Deactivate old session
-    await prisma.chatSession.update({
-      where: { id: activeSession.id },
-      data: { isActive: false },
-    })
   }
 
   // Activate target session
@@ -685,9 +416,14 @@ export async function POST(req: NextRequest) {
       // Gateway doesn't emit tool agent events, so we must check history for MEDIA:/file:///paths.
       fetchAndEmitImages(textContent).then(() => {
         write({ type: 'done' })
+        // Post-run auto-snapshot (fire-and-forget)
+        saveLiveSnapshot(chatSessionId, client!, sessionKey).catch((err) =>
+          console.error('[live-snapshot] Save failed:', err),
+        )
         cleanup()
       }).catch(() => {
         write({ type: 'done' })
+        saveLiveSnapshot(chatSessionId, client!, sessionKey).catch(() => {})
         cleanup()
       })
     } else if (state === 'error') {
@@ -730,7 +466,8 @@ export async function POST(req: NextRequest) {
 
         // Detect image file paths in tool output (e.g. "MEDIA: /path/to/image.png")
         // and emit them as image SSE events
-        const mediaPaths = extractMediaPaths(data.result)
+        const resultText = typeof data.result === 'string' ? data.result : ''
+        const mediaPaths = extractMediaPaths(resultText)
         if (mediaPaths.length > 0) {
           const imageReadPromise = Promise.all(
             mediaPaths.map(async (p) => {

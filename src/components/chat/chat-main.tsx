@@ -14,6 +14,7 @@ export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const setMessages = useChatStore((s) => s.setMessages)
   const setLoadingHistory = useChatStore((s) => s.setLoadingHistory)
+  const setConnectionStatus = useChatStore((s) => s.setConnectionStatus)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
   const messagesLength = useChatStore((s) => s.messages.length)
@@ -83,9 +84,14 @@ export function ChatMain() {
         historyData.currentMessages,
         historyData.isActive,
       )
-      setMessages(assembled)
+      // Don't overwrite existing messages with empty history — can happen when the
+      // history fetch races ahead of gateway processing the first chat.send request.
+      if (assembled.length > 0 || messagesLength === 0) {
+        setMessages(assembled)
+      }
+      setConnectionStatus(historyData.connectionStatus ?? 'ok')
     }
-  }, [historyData, matchingSession, setMessages, messagesLength, dataUpdatedAt, isStreaming])
+  }, [historyData, matchingSession, setMessages, setConnectionStatus, messagesLength, dataUpdatedAt, isStreaming])
 
   if (!selectedAgent) {
     return (

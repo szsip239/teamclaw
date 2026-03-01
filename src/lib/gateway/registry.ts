@@ -192,7 +192,12 @@ export async function ensureRegistryInitialized(): Promise<void> {
       instances.map(async (inst) => {
         try {
           const effectiveUrl = resolveGatewayUrl(inst)
-          await registry.connect(inst.id, effectiveUrl, decrypt(inst.gatewayToken))
+          await Promise.race([
+            registry.connect(inst.id, effectiveUrl, decrypt(inst.gatewayToken)),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Init connect timed out')), 20_000),
+            ),
+          ])
           // Connection succeeded — if instance was ERROR/OFFLINE, mark as DEGRADED
           // so the health check cycle can promote it to ONLINE on next success.
           if (inst.status === 'ERROR' || inst.status === 'OFFLINE') {

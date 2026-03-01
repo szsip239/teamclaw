@@ -80,12 +80,12 @@ export async function buildProviderEntries(
     if (!baseUrl) continue
 
     // models array is required by OpenClaw schema
-    // Priority: registry defaultModels → resource config models (custom/opencode providers)
+    // Priority: resource config models (user-configured) → registry defaultModels (built-in fallback)
     const registryModels = providerDef?.defaultModels
     const resourceModels = resourceConfig?.models as ProviderModelEntry[] | undefined
-    const models = (registryModels && registryModels.length > 0)
-      ? registryModels
-      : (resourceModels && resourceModels.length > 0 ? resourceModels : null)
+    const models = (resourceModels && resourceModels.length > 0)
+      ? resourceModels
+      : (registryModels && registryModels.length > 0 ? registryModels : null)
     if (!models) continue
 
     // Decrypt API key
@@ -126,8 +126,8 @@ export async function buildProviderEntries(
 
 /**
  * Merge provider entries into an existing patch object.
- * Does NOT overwrite providers already present in the patch
- * (user manual edits take priority).
+ * Always overwrites with latest data from Resource DB
+ * so that API key / baseUrl / model changes propagate.
  */
 export function mergeProvidersIntoPatch(
   patch: Record<string, unknown>,
@@ -148,12 +148,54 @@ export function mergeProvidersIntoPatch(
   }
   const providers = models.providers as Record<string, unknown>
 
-  // Inject entries, skipping already-present providers
+  // Inject entries, always overwriting with latest Resource DB data
   for (const [id, entry] of Object.entries(entries)) {
-    if (!(id in providers)) {
-      providers[id] = entry
-    }
+    providers[id] = entry
   }
 
   return result
+}
+
+/**
+ * Push updated provider config to all connected instances that reference it.
+ * Called after resource update (fire-and-forget from API handler).
+ */
+export async function syncProviderToInstances(providerId: string): Promise<void> {
+  // Build latest provider entry from Resource DB
+  const entries = await buildProviderEntries([providerId])
+  const entry = entries[providerId]
+  if (!entry) return
+
+  // Dynamic import to avoid circular dependency (provider-sync → registry)
+  const { registry, ensureRegistryInitialized } = await import('@/lib/gateway/registry')
+  await ensureRegistryInitialized()
+
+  const connectedIds = registry.getConnectedIds()
+  if (connectedIds.length === 0) return
+
+  // Push to each instance that already uses this provider
+  const results = await Promise.allSettled(
+    connectedIds.map(async (instanceId) => {
+      const configResult = await registry.request(instanceId, 'config.get') as {
+        config?: Record<string, unknown>
+        hash?: string
+      }
+      const providers = (configResult.config?.models as Record<string, unknown>)
+        ?.providers as Record<string, unknown> | undefined
+      if (!providers || !(providerId in providers)) return
+
+      const patch = { models: { providers: { [providerId]: entry } } }
+      await registry.request(instanceId, 'config.patch', {
+        raw: JSON.stringify(patch),
+        baseHash: configResult.hash,
+      })
+      console.log(`[resource-sync] Synced provider "${providerId}" to instance ${instanceId}`)
+    }),
+  )
+
+  for (const [i, r] of results.entries()) {
+    if (r.status === 'rejected') {
+      console.warn(`[resource-sync] Failed to sync to ${connectedIds[i]}:`, (r.reason as Error)?.message)
+    }
+  }
 }

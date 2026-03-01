@@ -52,6 +52,7 @@ export interface ChatHistoryResponse {
   snapshots: ChatSnapshotBatch[]
   currentMessages: ChatMessage[]
   isActive: boolean
+  connectionStatus?: 'ok' | 'unreachable'
 }
 
 export interface ChatMessage {

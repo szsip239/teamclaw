@@ -62,6 +62,7 @@ export function useFileWatch(sessionId: string | null) {
 
     let aborted = false
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    const controller = new AbortController()
     backoffRef.current = 1_000
 
     async function connect() {
@@ -70,7 +71,7 @@ export function useFileWatch(sessionId: string | null) {
       try {
         const res = await fetch(
           `/api/v1/chat/sessions/${sessionId}/files/watch`,
-          { credentials: "include" },
+          { credentials: "include", signal: controller.signal },
         )
         if (!res.ok || !res.body) {
           // Don't retry on client errors (400/403/404) — these won't resolve on retry
@@ -124,6 +125,7 @@ export function useFileWatch(sessionId: string | null) {
 
     return () => {
       aborted = true
+      controller.abort()
       if (reconnectTimer) clearTimeout(reconnectTimer)
     }
   }, [sessionId, invalidateFiles])

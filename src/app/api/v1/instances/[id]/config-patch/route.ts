@@ -10,7 +10,7 @@ import type { ConfigGetResult } from '@/types/gateway'
 const patchSchema = z.object({
   patch: z.record(z.string(), z.unknown()),
   baseHash: z.string().min(1),
-  missingProviders: z.array(z.string()).optional(),
+  syncProviders: z.array(z.string()).optional(),
 })
 
 // POST /api/v1/instances/[id]/config-patch — Incremental config update via gateway
@@ -38,9 +38,9 @@ export const POST = withAuth(
       try {
         // Enrich patch with provider API keys from Resource DB (best-effort)
         let finalPatch = body.patch
-        if (body.missingProviders?.length) {
+        if (body.syncProviders?.length) {
           try {
-            const entries = await buildProviderEntries(body.missingProviders)
+            const entries = await buildProviderEntries(body.syncProviders)
             finalPatch = mergeProvidersIntoPatch(body.patch, entries)
           } catch (err) {
             console.warn('[config-patch] Provider sync failed:', err)

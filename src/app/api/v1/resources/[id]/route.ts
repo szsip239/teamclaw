@@ -5,6 +5,7 @@ import { withAuth, withPermission, withValidation, param } from '@/lib/middlewar
 import { auditLog } from '@/lib/audit'
 import { updateResourceSchema } from '@/lib/validations/resource'
 import { encryptCredential, maskCredential, decryptCredential } from '@/lib/resources/credential-utils'
+import { syncProviderToInstances } from '@/lib/config-editor/provider-sync'
 import { getDisplayName } from '@/lib/utils/display-name'
 import { getProvider } from '@/lib/resources/providers'
 import type { ResourceDetail, ResourceType, ResourceConfig } from '@/types/resource'
@@ -109,6 +110,16 @@ export const PUT = withAuth(
       try {
         maskedKey = maskCredential(decryptCredential(updated.credentials))
       } catch { /* keep masked */ }
+
+      // Fire-and-forget: sync to instances that use this provider
+      const shouldSync = body.apiKey !== undefined ||
+        body.config !== undefined ||
+        body.provider !== undefined
+      if (shouldSync) {
+        syncProviderToInstances(updated.provider).catch(err =>
+          console.error('[resource-sync] Auto-push failed:', err),
+        )
+      }
 
       auditLog({
         userId: user.id,

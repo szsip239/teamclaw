@@ -357,6 +357,7 @@ const zhCN = {
   'chat.contextRestart': 'AI 上下文从此处重新开始',
   'chat.contextReset': '上下文已重置',
   'chat.loadingHistory': '加载历史消息…',
+  'chat.gatewayUnreachable': 'Gateway 连接中断，请刷新页面重试。',
   'chat.department': '部门',
   'chat.personal': '个人',
   'chat.onlineStatus': '在线',
