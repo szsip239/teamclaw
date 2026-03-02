@@ -100,22 +100,22 @@ export function splitThinkingFallback(thinking: string): { thinking: string; tex
 
 /**
  * Build ChatMessageSnapshot data from gateway chat.history messages.
- * Returns structured data ready for prisma.createMany and the first user message for auto-title.
+ * Returns structured data ready for prisma.createMany and the last user message for auto-title.
  */
 export function buildSnapshotData(
   chatSessionId: string,
   rawMessages: ChatHistoryMessage[],
-): { snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[]; firstUserMessage: string | null } {
+): { snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[]; lastUserMessage: string | null } {
   const batchId = randomUUID()
   let orderIndex = 0
   const snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[] = []
-  let firstUserMessage: string | null = null
+  let lastUserMessage: string | null = null
 
   for (const msg of rawMessages) {
     if (msg.role === 'user') {
       const text = stripUserMetadata(extractText(msg.content))
       const cb = extractContentBlocks(msg.content)
-      if (!firstUserMessage && text) firstUserMessage = text
+      if (text) lastUserMessage = text
       snapshotData.push({
         chatSessionId,
         batchId,
@@ -161,7 +161,7 @@ export function buildSnapshotData(
     }
   }
 
-  return { snapshotData, firstUserMessage }
+  return { snapshotData, lastUserMessage }
 }
 
 // ─── Full archive flow ──────────────────────────────────────────────
@@ -192,20 +192,18 @@ export async function archiveSession(
 
   // Save snapshots to DB (errors propagate to caller — don't silently lose data)
   if (rawMessages.length > 0) {
-    const { snapshotData, firstUserMessage } = buildSnapshotData(sessionId, rawMessages)
+    const { snapshotData, lastUserMessage } = buildSnapshotData(sessionId, rawMessages)
 
     if (snapshotData.length > 0) {
       await prisma.chatMessageSnapshot.createMany({ data: snapshotData })
     }
 
-    const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId },
-      select: { title: true },
-    })
-    if (!session?.title && firstUserMessage) {
+    // Auto-title: always update to the last user message so the title
+    // reflects the most recent topic of the conversation.
+    if (lastUserMessage) {
       await prisma.chatSession.update({
         where: { id: sessionId },
-        data: { title: firstUserMessage.slice(0, 50) },
+        data: { title: lastUserMessage.slice(0, 50) },
       })
     }
   }
