@@ -233,6 +233,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const controller = new AbortController()
     set({ isStreaming: true, abortController: controller })
 
+    // 3b. Progress polling — periodically sync from history to show intermediate
+    // tool calls and thinking that SSE can't deliver (OpenClaw doesn't broadcast
+    // tool events). This is the equivalent of the user pressing "refresh" every
+    // few seconds, but automatic.
+    let syncing = false
+    const PROGRESS_POLL_INTERVAL = 5_000 // 5 seconds — fast enough to catch most tool calls
+    const progressTimer = setInterval(() => {
+      const sid = capturedSessionId || get().activeSessionId
+      if (sid && get().isStreaming && !syncing) {
+        syncing = true
+        syncFromHistory(sid, set).finally(() => { syncing = false })
+      }
+    }, PROGRESS_POLL_INTERVAL)
+
     try {
       // 4. Stream events
       // Build attachments payload (base64 only, no data URL prefix)
@@ -290,6 +304,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         get().setAssistantError((err as Error).message || 'Failed to send message')
       }
     } finally {
+      clearInterval(progressTimer)
       set({ isStreaming: false, abortController: null })
 
       // 5. Sync with full history (gateway omits thinking + tool events during streaming)
