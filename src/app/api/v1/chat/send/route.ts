@@ -292,8 +292,25 @@ export async function POST(req: NextRequest) {
   // Send session ID as the first event so the frontend can track this session
   write({ type: 'session', sessionId: chatSessionId })
 
+  // SSE heartbeat: keep connection alive during long tool-use runs.
+  // OpenClaw doesn't broadcast tool events, so the stream can be idle
+  // for minutes while the agent works. Without heartbeat, proxies and
+  // browsers may close the idle connection (nginx proxy_read_timeout, etc.).
+  const heartbeatTimer = setInterval(() => {
+    if (closed) {
+      clearInterval(heartbeatTimer)
+      return
+    }
+    // SSE comment line — ignored by data: parser but keeps TCP alive
+    writer.write(encoder.encode(': heartbeat\n\n')).catch(() => {
+      closed = true
+      clearInterval(heartbeatTimer)
+    })
+  }, 15_000) // every 15 seconds
+
   async function close() {
     if (closed) return
+    clearInterval(heartbeatTimer)
     // Wait for any pending image reads to complete before closing
     if (pendingImageReads.length > 0) {
       await Promise.allSettled(pendingImageReads)
