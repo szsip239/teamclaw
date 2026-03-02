@@ -51,10 +51,13 @@ export async function GET(
   let lifetimeTimer: ReturnType<typeof setTimeout> | null = null
   let lastMtime = ''
 
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
   function cleanup() {
     stopped = true
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
     if (lifetimeTimer) { clearTimeout(lifetimeTimer); lifetimeTimer = null }
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
   }
 
   // Listen for client disconnect via req.signal (Next.js propagates this)
@@ -72,6 +75,13 @@ export async function GET(
         cleanup()
         try { controller.close() } catch { /* already closed */ }
       }, MAX_LIFETIME_MS)
+
+      // Heartbeat to keep nginx proxy alive during silent periods (no file changes).
+      // nginx proxy_read_timeout is 300s; 30s heartbeat keeps the connection well within that.
+      heartbeatTimer = setInterval(() => {
+        if (stopped) return
+        try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch { /* closed */ }
+      }, 30_000)
 
       let failCount = 0
 
