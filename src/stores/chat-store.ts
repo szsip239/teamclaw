@@ -100,7 +100,18 @@ async function syncFromHistory(
     // Don't overwrite existing messages with empty history — gateway may temporarily
     // return empty results mid-run (race condition between tool calls).
     if (assembled.length > 0) {
-      set(() => ({ messages: assembled }))
+      set((s) => {
+        // During streaming polls, if history hasn't caught up yet (no assistant message),
+        // preserve the in-progress assistant message to keep the loading indicator visible.
+        if (opts?.polling && s.isStreaming) {
+          const lastCurrent = s.messages[s.messages.length - 1]
+          const lastAssembled = assembled[assembled.length - 1]
+          if (lastCurrent?.role === 'assistant' && lastAssembled?.role !== 'assistant') {
+            return { messages: [...assembled, lastCurrent] }
+          }
+        }
+        return { messages: assembled }
+      })
     }
   } catch {
     // Silently fail — sync is a non-critical UI enhancement
