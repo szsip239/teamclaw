@@ -176,35 +176,41 @@ export async function archiveSession(
 ): Promise<void> {
   const sessionKey = `agent:${agentId}:tc:${userId}`
 
+  // Fetch history from gateway (may fail if gateway is offline)
+  let rawMessages: ChatHistoryMessage[] = []
   try {
     const rawResult = await client.request('chat.history', { sessionKey, limit: 200 })
     const historyResult = rawResult as ChatHistoryResult
-    const rawMessages = historyResult.messages ?? []
-
-    if (rawMessages.length > 0) {
-      const { snapshotData, firstUserMessage } = buildSnapshotData(sessionId, rawMessages)
-
-      if (snapshotData.length > 0) {
-        await prisma.chatMessageSnapshot.createMany({ data: snapshotData })
-      }
-
-      // Auto-generate title from first user message
-      const session = await prisma.chatSession.findUnique({
-        where: { id: sessionId },
-        select: { title: true },
-      })
-      if (!session?.title && firstUserMessage) {
-        await prisma.chatSession.update({
-          where: { id: sessionId },
-          data: { title: firstUserMessage.slice(0, 50) },
-        })
-      }
-    }
-
-    // Delete OpenClaw session to reset context
-    await client.request('sessions.delete', { key: sessionKey })
+    rawMessages = historyResult.messages ?? []
   } catch {
     // Gateway offline — continue with DB operations
+  }
+
+  // Save snapshots to DB (errors propagate to caller — don't silently lose data)
+  if (rawMessages.length > 0) {
+    const { snapshotData, firstUserMessage } = buildSnapshotData(sessionId, rawMessages)
+
+    if (snapshotData.length > 0) {
+      await prisma.chatMessageSnapshot.createMany({ data: snapshotData })
+    }
+
+    const session = await prisma.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { title: true },
+    })
+    if (!session?.title && firstUserMessage) {
+      await prisma.chatSession.update({
+        where: { id: sessionId },
+        data: { title: firstUserMessage.slice(0, 50) },
+      })
+    }
+  }
+
+  // Delete OpenClaw session to reset context
+  try {
+    await client.request('sessions.delete', { key: sessionKey })
+  } catch {
+    // Gateway offline — session will be cleaned up on next connect
   }
 
   if (!opts?.keepActive) {

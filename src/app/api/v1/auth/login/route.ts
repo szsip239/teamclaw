@@ -98,8 +98,8 @@ export async function POST(req: NextRequest) {
       details: { reason: 'Account not active' },
     })
     return NextResponse.json(
-      { error: 'Account is disabled or pending activation' },
-      { status: 403 }
+      { error: 'Invalid email or password' },
+      { status: 401 }
     )
   }
 

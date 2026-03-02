@@ -220,8 +220,8 @@ export const GET = withAuth(
               createdAt: session.updatedAt.toISOString(),
               messages: session.liveMessages as unknown as ChatMessage[],
             })
-            // Persist as permanent snapshot (fire-and-forget)
-            persistLiveAsSnapshot(id, session.liveMessages as unknown as ChatMessage[]).catch(() => {})
+            // Persist as permanent snapshot before clearing liveMessages
+            await persistLiveAsSnapshot(id, session.liveMessages as unknown as ChatMessage[]).catch(() => {})
           }
           // Mark session inactive + clear liveMessages
           await prisma.chatSession.update({
