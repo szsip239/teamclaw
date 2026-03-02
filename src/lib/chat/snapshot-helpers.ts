@@ -52,10 +52,12 @@ export function extractContentBlocks(content: ChatHistoryMessage['content']): Ch
  * Timestamp formats vary: [Mon 2026-03-02 11:50 UTC], [2026-03-02 11:50+0800], etc.
  */
 export function stripUserMetadata(text: string): string {
-  // Match any [... YYYY-MM-DD HH:MM ...] timestamp bracket
-  const match = text.match(/\[[^\]]*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}[^\]]*\]\s*/)
-  if (match && match.index !== undefined) {
-    const after = text.slice(match.index + match[0].length)
+  // Use the LAST timestamp match — tool results and system lines can also
+  // contain [YYYY-MM-DD HH:MM ...] brackets before the actual metadata timestamp.
+  const matches = [...text.matchAll(/\[[^\]]*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}[^\]]*\]\s*/g)]
+  if (matches.length > 0) {
+    const last = matches[matches.length - 1]
+    const after = text.slice(last.index! + last[0].length)
     if (after) return after
   }
   return text
