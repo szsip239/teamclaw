@@ -90,6 +90,12 @@ export const GET = withAuth(
       }),
     )
 
+    // Stable sort: instance name → agent name (alphabetical)
+    agents.sort((a, b) =>
+      a.instanceName.localeCompare(b.instanceName) ||
+      a.agentName.localeCompare(b.agentName),
+    )
+
     return NextResponse.json({ agents })
   }),
 )
