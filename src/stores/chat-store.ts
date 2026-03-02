@@ -97,7 +97,11 @@ async function syncFromHistory(
       assembled.push(...currentMessages)
     }
 
-    set(() => ({ messages: assembled }))
+    // Don't overwrite existing messages with empty history — gateway may temporarily
+    // return empty results mid-run (race condition between tool calls).
+    if (assembled.length > 0) {
+      set(() => ({ messages: assembled }))
+    }
   } catch {
     // Silently fail — sync is a non-critical UI enhancement
   }
