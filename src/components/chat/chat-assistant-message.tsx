@@ -17,8 +17,6 @@ export function ChatAssistantMessage({
   message,
   isStreaming,
 }: ChatAssistantMessageProps) {
-  const hasContent = message.content || message.thinking || message.toolCalls?.length || message.contentBlocks?.length
-
   return (
     <div className="flex justify-start">
       <div className="flex max-w-[85%] items-start gap-2">
@@ -40,7 +38,7 @@ export function ChatAssistantMessage({
               <ChatImageBlock key={i} imageUrl={block.imageUrl} alt={block.alt} />
             ) : null,
           )}
-          {!hasContent && isStreaming && (
+          {isStreaming && !message.content && (
             <div className="flex items-center gap-1 py-2">
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:0ms]" />
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:150ms]" />
