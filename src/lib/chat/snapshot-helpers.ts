@@ -49,9 +49,11 @@ export function extractContentBlocks(content: ChatHistoryMessage['content']): Ch
 /**
  * Strip OpenClaw delivery metadata from stored user messages.
  * OpenClaw prepends "Conversation info ... [timestamp]" to user messages.
+ * Timestamp formats vary: [Mon 2026-03-02 11:50 UTC], [2026-03-02 11:50+0800], etc.
  */
 export function stripUserMetadata(text: string): string {
-  const match = text.match(/\[[\w\s:+\-]+UTC\]\s*/)
+  // Match any [... YYYY-MM-DD HH:MM ...] timestamp bracket
+  const match = text.match(/\[[^\]]*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}[^\]]*\]\s*/)
   if (match && match.index !== undefined) {
     const after = text.slice(match.index + match[0].length)
     if (after) return after
