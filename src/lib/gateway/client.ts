@@ -120,6 +120,11 @@ export class GatewayClient {
           this.connectResolve = null
           this.connectReject = null
         }
+        // Drain pending requests on established connections — otherwise they
+        // hang until their 30s timeout even though the socket is already dead.
+        if (this.connected) {
+          this.rejectAllPending(`WebSocket error: ${err.message}`)
+        }
       })
     })
   }

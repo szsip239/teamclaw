@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param, paramArray } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, isSessionPathSafe } from '@/lib/session-files/helpers'
 import type { SessionFileZone } from '@/lib/session-files/helpers'
 
 // GET /api/v1/chat/sessions/[id]/files/[...path] — download a file
@@ -24,7 +24,7 @@ export const GET = withAuth(
     }
 
     const relativePath = pathSegments.slice(1).join('/')
-    if (relativePath.includes('..') || relativePath.includes('\0')) {
+    if (!isSessionPathSafe(relativePath)) {
       return NextResponse.json({ error: 'Invalid file path' }, { status: 400 })
     }
 
@@ -80,7 +80,7 @@ export const DELETE = withAuth(
     }
 
     const relativePath = pathSegments.slice(1).join('/')
-    if (relativePath.includes('..') || relativePath.includes('\0')) {
+    if (!isSessionPathSafe(relativePath)) {
       return NextResponse.json({ error: 'Invalid file path' }, { status: 400 })
     }
 

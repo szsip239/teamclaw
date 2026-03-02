@@ -219,6 +219,8 @@ export async function ensureRegistryInitialized(): Promise<void> {
       })
     )
   } catch (err) {
+    // Reset flag so next call retries initialization (e.g. after transient DB failure)
+    globalForRegistry.registryInitialized = false
     console.error('Failed to initialize gateway registry:', err)
   }
 

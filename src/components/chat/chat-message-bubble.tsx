@@ -1,7 +1,6 @@
 "use client"
 
 import { User, FileText } from "lucide-react"
-import { useT } from "@/stores/language-store"
 import type { ChatMessage } from "@/types/chat"
 
 interface ChatMessageBubbleProps {
@@ -15,7 +14,6 @@ function formatFileSize(bytes: number): string {
 }
 
 export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
-  const t = useT()
   const hasAttachments = message.attachments && message.attachments.length > 0
 
   return (
@@ -49,7 +47,7 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
             </div>
           )}
           {/* Text content */}
-          {message.content && message.content !== t('chat.attachment') && (
+          {message.content && message.content !== '__attachment_only__' && (
             <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5">
               <p className="whitespace-pre-wrap text-sm">{message.content}</p>
             </div>

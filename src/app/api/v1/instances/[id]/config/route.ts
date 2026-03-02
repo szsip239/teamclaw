@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { updateInstanceConfigSchema } from '@/lib/validations/instance'
 import { dockerManager } from '@/lib/docker'
+import { decrypt } from '@/lib/auth/encryption'
+import { registry, ensureRegistryInitialized, resolveGatewayUrl } from '@/lib/gateway/registry'
 import { auditLog } from '@/lib/audit'
 
 // GET /api/v1/instances/[id]/config — Read openclaw.json from container
@@ -59,10 +61,24 @@ export const PUT = withAuth(
       }
 
       try {
-        await dockerManager.updateContainerConfig(instance.containerId, body.config)
+        await ensureRegistryInitialized()
 
-        // Restart container to apply new config
+        // Disconnect gateway before restart (mirrors restart/route.ts pattern)
+        await registry.disconnect(id)
+
+        await dockerManager.updateContainerConfig(instance.containerId, body.config)
         await dockerManager.restartContainer(instance.containerId)
+
+        // Wait for container to initialize
+        await new Promise((r) => setTimeout(r, 3000))
+
+        // Reconnect to gateway
+        const token = decrypt(instance.gatewayToken)
+        await registry.connect(id, resolveGatewayUrl(instance), token)
+        await prisma.instance.update({
+          where: { id },
+          data: { status: 'ONLINE' },
+        })
 
         auditLog({
           userId: user.id,

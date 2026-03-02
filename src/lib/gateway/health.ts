@@ -115,9 +115,8 @@ async function checkAll(): Promise<void> {
   })
 
   if (instances.length === 0) {
-    stopHealthChecks()
-    stopRecoveryChecks()
-    globalForHealth.healthRunning = false
+    // No ONLINE/DEGRADED instances to check, but keep recovery timer running
+    // so ERROR/OFFLINE instances can still be recovered automatically.
     return
   }
 

@@ -37,7 +37,7 @@ export function ChatInput() {
     const text = input.trim()
     if ((!text && pendingFiles.length === 0) || !selectedAgent || isStreaming) return
 
-    const message = text || t('chat.attachment')
+    const message = text || '__attachment_only__'
     const attachments = pendingFiles.length > 0 ? pendingFiles : undefined
 
     setInput("")
