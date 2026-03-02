@@ -208,8 +208,11 @@ export const GET = withAuth(
         // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
         // Skip for very recently created sessions — the gateway may not have received the
         // first chat.send yet (race: SSE session event arrives before gateway processes message).
+        // Also skip during progress polling — the gateway may temporarily return empty results
+        // mid-run (race condition), and we don't want to destroy an active session.
+        const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
         const sessionAgeMs = Date.now() - session.createdAt.getTime()
-        if (currentMessages.length === 0 && sessionAgeMs > 30_000) {
+        if (!isPolling && currentMessages.length === 0 && sessionAgeMs > 30_000) {
           if (session.liveMessages) {
             // Recover messages from liveMessages auto-snapshot
             snapshots.push({

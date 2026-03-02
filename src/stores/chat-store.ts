@@ -64,9 +64,11 @@ interface ChatState {
 async function syncFromHistory(
   activeSessionId: string,
   set: (fn: (s: ChatState) => Partial<ChatState>) => void,
+  opts?: { polling?: boolean },
 ) {
   try {
-    const res = await fetch(`/api/v1/chat/sessions/${activeSessionId}/history`, {
+    const url = `/api/v1/chat/sessions/${activeSessionId}/history${opts?.polling ? '?polling=true' : ''}`
+    const res = await fetch(url, {
       credentials: 'include',
     })
     if (!res.ok) return
@@ -243,7 +245,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const sid = capturedSessionId || get().activeSessionId
       if (sid && get().isStreaming && !syncing) {
         syncing = true
-        syncFromHistory(sid, set).finally(() => { syncing = false })
+        syncFromHistory(sid, set, { polling: true }).finally(() => { syncing = false })
       }
     }, PROGRESS_POLL_INTERVAL)
 
