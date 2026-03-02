@@ -15,6 +15,11 @@ function formatFileSize(bytes: number): string {
 
 export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
   const hasAttachments = message.attachments && message.attachments.length > 0
+  // After syncFromHistory, user images move from `attachments` (client-only)
+  // to `contentBlocks` (from gateway history). Render those as fallback.
+  const contentImages = !hasAttachments
+    ? message.contentBlocks?.filter((b) => b.type === "image" && b.imageUrl) ?? []
+    : []
 
   return (
     <div className="flex justify-end">
@@ -44,6 +49,19 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
                   </div>
                 ),
               )}
+            </div>
+          )}
+          {/* Images from contentBlocks (after history sync replaces attachments) */}
+          {contentImages.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {contentImages.map((block, i) => (
+                <img
+                  key={`cb-${i}`}
+                  src={block.imageUrl!}
+                  alt={block.alt ?? ""}
+                  className="max-h-32 max-w-48 rounded-lg border object-cover"
+                />
+              ))}
             </div>
           )}
           {/* Text content */}
