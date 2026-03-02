@@ -16,9 +16,16 @@ function AuthRefresh() {
       if (Date.now() - lastRefresh < REFRESH_INTERVAL) return
       localStorage.setItem(LOCK_KEY, String(Date.now()))
       fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' })
-        .catch(() => {})
+        .then(res => {
+          if (!res.ok) localStorage.removeItem(LOCK_KEY) // allow retry on next interval
+        })
+        .catch(() => {
+          localStorage.removeItem(LOCK_KEY) // allow retry on next interval
+        })
     }
 
+    // Check immediately on mount — token may already be near expiry
+    doRefresh()
     const timer = setInterval(doRefresh, REFRESH_INTERVAL)
     return () => clearInterval(timer)
   }, [])

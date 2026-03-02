@@ -21,7 +21,7 @@ export async function* streamChat(
   if (!response.ok) {
     const data = await response.json().catch(() => null)
     throw new Error(
-      (data as { error?: string } | null)?.error || '发送消息失败',
+      (data as { error?: string } | null)?.error || 'Failed to send message',
     )
   }
 

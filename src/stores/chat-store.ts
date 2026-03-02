@@ -314,8 +314,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ isStreaming: false, abortController: null })
 
       // 5. Sync with full history (gateway omits thinking + tool events during streaming)
-      // Use captured ID to avoid reading a stale/changed activeSessionId
-      if (capturedSessionId) {
+      // Use captured ID to avoid reading a stale/changed activeSessionId.
+      // Skip if session was cleared (abort) — don't restore messages the user deliberately removed.
+      if (capturedSessionId && get().activeSessionId) {
         syncFromHistory(capturedSessionId, set)
       }
     }

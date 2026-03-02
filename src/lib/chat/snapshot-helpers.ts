@@ -124,7 +124,6 @@ export function buildSnapshotData(
       let text = stripFinalTags(extractText(msg.content))
       let thinking = extractThinking(msg.content)
       const cb = extractContentBlocks(msg.content)
-      const toolCalls: ChatToolCall[] = []
 
       if (!text && thinking) {
         const split = splitThinkingFallback(thinking)
@@ -142,7 +141,7 @@ export function buildSnapshotData(
         content: text,
         contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
         thinking: thinking || null,
-        toolCalls: toolCalls.length > 0 ? (toolCalls as unknown as Prisma.InputJsonValue) : undefined,
+        // toolCalls populated later by toolResult handler below
       })
     } else if (msg.role === 'toolResult') {
       const lastSnapshot = snapshotData[snapshotData.length - 1]
