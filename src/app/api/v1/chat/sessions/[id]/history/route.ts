@@ -212,6 +212,23 @@ export const GET = withAuth(
             }
           }
 
+          // Fallback: for images that failed to load from filesystem (e.g. external
+          // instance paths not mounted in container), supplement from liveMessages
+          // contentBlocks which may have been captured during SSE streaming.
+          if (session.liveMessages) {
+            const cached = session.liveMessages as unknown as ChatMessage[]
+            if (Array.isArray(cached)) {
+              const limit = Math.min(msgs.length, cached.length)
+              for (let i = 0; i < limit; i++) {
+                if (msgs[i].role !== 'assistant' || msgs[i].role !== cached[i]?.role) continue
+                if (msgs[i].contentBlocks?.length) continue // already has images
+                if (cached[i].contentBlocks?.length) {
+                  msgs[i].contentBlocks = cached[i].contentBlocks
+                }
+              }
+            }
+          }
+
           currentMessages = msgs
         }
 
