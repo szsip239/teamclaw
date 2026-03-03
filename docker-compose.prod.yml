@@ -57,6 +57,7 @@ services:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
       - ${HOME}/.openclaw/media:${HOME}/.openclaw/media:ro
+      - /tmp:/tmp:ro
 
   postgres:
     image: postgres:17-alpine
