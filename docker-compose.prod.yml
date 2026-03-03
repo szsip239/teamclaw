@@ -50,6 +50,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INTERNAL_API_URL: "http://api:3200"
     container_name: teamclaw-app
     restart: unless-stopped
     ports:

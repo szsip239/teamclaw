@@ -11,6 +11,12 @@ RUN npm config set registry https://registry.npmmirror.com/ && \
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# INTERNAL_API_URL must be available at build time so Next.js rewrites()
+# can embed the correct destination in the standalone routes manifest.
+# Default to http://localhost:3200 for local dev without Docker Compose.
+ARG INTERNAL_API_URL=http://localhost:3200
+ENV INTERNAL_API_URL=$INTERNAL_API_URL
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
