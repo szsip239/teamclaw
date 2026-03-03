@@ -54,8 +54,9 @@ services:
     group_add:
       - "${DOCKER_GID:-0}"   # GID of docker.sock owner inside container (0=root on macOS)
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
+      - ${HOME}/.openclaw/media:${HOME}/.openclaw/media:ro
 
   postgres:
     image: postgres:17-alpine

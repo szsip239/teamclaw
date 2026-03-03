@@ -1,5 +1,6 @@
 import { readFile } from 'fs/promises'
 import { extname, resolve } from 'path'
+import { dockerManager } from '@/lib/docker/manager'
 
 // ─── Image constants ─────────────────────────────────────────────────
 
@@ -9,6 +10,8 @@ export const MIME_BY_EXT: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
 }
+
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024
 
 // ─── Path extraction ─────────────────────────────────────────────────
 
@@ -53,8 +56,12 @@ export function extractFileProtocolPaths(text: string): string[] {
 
 // ─── Image file reading ──────────────────────────────────────────────
 
-/** Allowed base directories for reading image files from the host */
-const ALLOWED_IMAGE_DIRS = ['/tmp', '/home']
+/** Allowed base directories for reading image files from the host.
+ *  Covers Linux (/tmp, /home), macOS (/Users), and any extra dirs via env. */
+const ALLOWED_IMAGE_DIRS = [
+  '/tmp', '/home', '/Users',
+  ...(process.env.IMAGE_ALLOWED_DIRS?.split(':').filter(Boolean) ?? []),
+]
 
 /**
  * Check if a file path is within an allowed directory.
@@ -66,18 +73,43 @@ export function isAllowedImagePath(filePath: string): boolean {
 }
 
 /**
+ * Convert a Buffer to a base64 data URL.
+ * Returns null if the buffer exceeds the max size.
+ */
+export function bufferToDataUrl(buf: Buffer, filePath: string): string | null {
+  if (buf.byteLength > IMAGE_MAX_BYTES) return null
+  const ext = extname(filePath).toLowerCase()
+  const mime = MIME_BY_EXT[ext] || 'image/png'
+  return `data:${mime};base64,${buf.toString('base64')}`
+}
+
+/**
  * Read a local image file and return as base64 data URL.
  * Returns null if the file can't be read, is too large (>10MB),
  * or is outside allowed directories.
+ * Used for external instances (no containerId).
  */
 export async function readImageAsDataUrl(filePath: string): Promise<string | null> {
   try {
     if (!isAllowedImagePath(filePath)) return null
     const data = await readFile(filePath)
-    if (data.byteLength > 10 * 1024 * 1024) return null
-    const ext = extname(filePath).toLowerCase()
-    const mime = MIME_BY_EXT[ext] || 'image/png'
-    return `data:${mime};base64,${data.toString('base64')}`
+    return bufferToDataUrl(data, filePath)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read an image from a Docker container's filesystem and return as base64 data URL.
+ * Used for container instances where host fs.readFile cannot access the file.
+ */
+export async function readContainerImageAsDataUrl(
+  containerId: string,
+  filePath: string,
+): Promise<string | null> {
+  try {
+    const data = await dockerManager.downloadFileFromContainer(containerId, filePath)
+    return bufferToDataUrl(data, filePath)
   } catch {
     return null
   }
