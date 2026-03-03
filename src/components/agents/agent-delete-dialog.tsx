@@ -32,10 +32,8 @@ export function AgentDeleteDialog({
   async function handleDelete() {
     if (!agent) return
 
-    const compositeId = `${agent.instanceId}:${agent.id}`
-
     try {
-      await deleteAgent.mutateAsync(compositeId)
+      await deleteAgent.mutateAsync(agent.id)
       toast.success(t('agent.deletedMsg', { name: agent.name }))
       onOpenChange(false)
     } catch (err) {

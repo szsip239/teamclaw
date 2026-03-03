@@ -46,9 +46,9 @@ export function AgentDetailSheet({
   onClone,
 }: AgentDetailSheetProps) {
   const t = useT()
-  const compositeId = agent ? `${agent.instanceId}:${agent.id}` : ""
-  const { data: detail, isLoading } = useAgent(agent ? compositeId : null)
-  const classify = useClassifyAgent(compositeId)
+  const agentDbId = agent?.id ?? ""
+  const { data: detail, isLoading } = useAgent(agent ? agentDbId : null)
+  const classify = useClassifyAgent(agentDbId)
   const currentUser = useAuthStore((s) => s.user)
   const canClassify = currentUser ? hasPermission(currentUser.role, "agents:classify") : false
 
@@ -186,7 +186,7 @@ export function AgentDetailSheet({
               <AgentOverviewTab agent={detail} canManage={canManage} instanceId={agent.instanceId} />
             </TabsContent>
             <TabsContent value="files" className="mt-4">
-              <AgentFilesTab compositeId={compositeId} />
+              <AgentFilesTab compositeId={agentDbId} />
             </TabsContent>
           </Tabs>
         ) : (
