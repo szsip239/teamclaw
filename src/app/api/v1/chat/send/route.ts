@@ -283,6 +283,10 @@ export async function POST(req: NextRequest) {
   const pendingImageReads: Promise<void>[] = []
   // Resolved in the async IIFE below; used by fetchAndEmitImages + tool result handler
   let containerId: string | null = null
+  // Capture images from SSE events for liveMessages persistence.
+  // chat.history doesn't return inline image blocks, so we must capture
+  // them from the live chat events where OpenClaw embeds them.
+  const capturedImages: { imageUrl: string; mimeType?: string }[] = []
 
   function write(event: ChatStreamEvent) {
     if (closed) return
@@ -376,7 +380,9 @@ export async function POST(req: NextRequest) {
             : await readImageAsDataUrl(p)
           if (dataUrl) {
             const ext = extname(p).toLowerCase()
-            write({ type: 'image', imageUrl: dataUrl, mimeType: MIME_BY_EXT[ext] })
+            const mimeType = MIME_BY_EXT[ext]
+            write({ type: 'image', imageUrl: dataUrl, mimeType })
+            capturedImages.push({ imageUrl: dataUrl, mimeType })
           }
         }),
       )
@@ -407,10 +413,11 @@ export async function POST(req: NextRequest) {
         lastTextContent = textContent
       }
 
-      // Emit new image blocks
+      // Emit new image blocks (these come from OpenClaw embedding MEDIA file data)
       const images = extractImagesFromMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
         write({ type: 'image', imageUrl: images[i].url, mimeType: images[i].mimeType, alt: images[i].alt })
+        capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
       }
       lastImageCount = images.length
     } else if (state === 'final') {
@@ -431,6 +438,7 @@ export async function POST(req: NextRequest) {
       const images = extractImagesFromMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
         write({ type: 'image', imageUrl: images[i].url, mimeType: images[i].mimeType, alt: images[i].alt })
+        capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
       }
 
       // After streaming completes, fetch chat.history to find images in tool results.
@@ -438,13 +446,13 @@ export async function POST(req: NextRequest) {
       fetchAndEmitImages(textContent).then(() => {
         write({ type: 'done' })
         // Post-run auto-snapshot (fire-and-forget)
-        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId).catch((err) =>
+        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages).catch((err) =>
           console.error('[live-snapshot] Save failed:', err),
         )
         cleanup()
       }).catch(() => {
         write({ type: 'done' })
-        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId).catch(() => {})
+        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages).catch(() => {})
         cleanup()
       })
     } else if (state === 'error') {
@@ -497,7 +505,9 @@ export async function POST(req: NextRequest) {
                 : await readImageAsDataUrl(p)
               if (dataUrl) {
                 const ext = extname(p).toLowerCase()
-                write({ type: 'image', imageUrl: dataUrl, mimeType: MIME_BY_EXT[ext] })
+                const mimeType = MIME_BY_EXT[ext]
+                write({ type: 'image', imageUrl: dataUrl, mimeType })
+                capturedImages.push({ imageUrl: dataUrl, mimeType })
               }
             }),
           ).then(() => {}).catch(() => {})

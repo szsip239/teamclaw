@@ -378,6 +378,7 @@ export async function saveLiveSnapshot(
   client: GatewayClient,
   sessionKey: string,
   containerId?: string | null,
+  capturedImages?: { imageUrl: string; mimeType?: string }[],
 ): Promise<void> {
   const rawResult = await client.request('chat.history', { sessionKey, limit: 200 }, 10_000)
   const historyResult = rawResult as ChatHistoryResult
@@ -390,19 +391,33 @@ export async function saveLiveSnapshot(
   // so images persist across page refreshes and container rebuilds.
   await resolveMediaInMessages(liveMessages, containerId ?? null)
 
-  // Count user messages in new vs existing liveMessages to detect session reset
-  const newUserCount = liveMessages.filter(m => m.role === 'user').length
+  // Merge images captured from SSE events into the last assistant message.
+  // chat.history doesn't return inline image content blocks that the gateway
+  // embeds during live streaming, so we must carry them from the SSE handler.
+  if (capturedImages?.length) {
+    mergeCapturedImages(liveMessages, capturedImages)
+  }
+
+  // Carry forward contentBlocks from existing liveMessages.
+  // Previous runs' images are already persisted; don't lose them when
+  // saveLiveSnapshot overwrites with fresh (image-less) chat.history data.
   const session = await prisma.chatSession.findUnique({
     where: { id: chatSessionId },
     select: { liveMessages: true },
   })
   const existingLive = (session?.liveMessages ?? []) as unknown as ChatMessage[]
+
+  if (Array.isArray(existingLive)) {
+    mergeExistingContentBlocks(liveMessages, existingLive)
+  }
+
+  // Detect session reset (user message count decreased)
+  const newUserCount = liveMessages.filter(m => m.role === 'user').length
   const oldUserCount = Array.isArray(existingLive)
     ? existingLive.filter(m => m.role === 'user').length
     : 0
 
   if (oldUserCount > 0 && newUserCount < oldUserCount) {
-    // Gateway session was reset — archive old messages before overwriting
     console.warn(
       `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
       `old=${oldUserCount} user msgs, new=${newUserCount}. Archiving old messages.`,
@@ -414,6 +429,57 @@ export async function saveLiveSnapshot(
     where: { id: chatSessionId },
     data: { liveMessages: liveMessages as unknown as Prisma.InputJsonValue },
   })
+}
+
+/**
+ * Merge captured SSE images into the last assistant message's contentBlocks.
+ * During live streaming, OpenClaw embeds image data in chat events, but
+ * chat.history strips them. We capture during SSE and merge here.
+ */
+function mergeCapturedImages(
+  messages: ChatMessage[],
+  images: { imageUrl: string; mimeType?: string }[],
+): void {
+  // Find the last assistant message (the one produced by this run)
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
+      const existing = messages[i].contentBlocks ?? []
+      const existingUrls = new Set(existing.filter(b => b.type === 'image').map(b => b.imageUrl))
+      for (const img of images) {
+        if (!existingUrls.has(img.imageUrl)) {
+          existing.push({ type: 'image', imageUrl: img.imageUrl, mimeType: img.mimeType })
+        }
+      }
+      if (existing.length > 0) {
+        messages[i].contentBlocks = existing
+      }
+      break
+    }
+  }
+}
+
+/**
+ * Carry forward contentBlocks from previous liveMessages.
+ * When saveLiveSnapshot overwrites with fresh chat.history data,
+ * images from earlier runs would be lost without this merge.
+ */
+function mergeExistingContentBlocks(
+  newMessages: ChatMessage[],
+  oldMessages: ChatMessage[],
+): void {
+  // Match messages by index + role (chat.history order is stable)
+  const limit = Math.min(newMessages.length, oldMessages.length)
+  for (let i = 0; i < limit; i++) {
+    const newMsg = newMessages[i]
+    const oldMsg = oldMessages[i]
+    if (newMsg.role !== oldMsg.role) continue
+    if (newMsg.role !== 'assistant') continue
+    if (!oldMsg.contentBlocks?.length) continue
+    if (newMsg.contentBlocks?.length) continue // new data already has images
+
+    // Carry over old contentBlocks
+    newMsg.contentBlocks = oldMsg.contentBlocks
+  }
 }
 
 /**
