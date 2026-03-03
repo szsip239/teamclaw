@@ -61,10 +61,10 @@ func New() (*Manager, error) {
 	}
 	c := &http.Client{Transport: transport}
 
-	// Quick availability check
+	// Quick availability check — /_ping returns plain-text "OK", not JSON.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if _, err := doRequest[map[string]any](ctx, c, http.MethodGet, "/_ping", nil); err != nil {
+	if err := ping(ctx, c); err != nil {
 		return nil, fmt.Errorf("docker: socket unavailable: %w", err)
 	}
 	return &Manager{client: c}, nil
@@ -72,8 +72,21 @@ func New() (*Manager, error) {
 
 // IsAvailable returns true if the Docker daemon is reachable.
 func (m *Manager) IsAvailable(ctx context.Context) bool {
-	_, err := doRequest[map[string]any](ctx, m.client, http.MethodGet, "/_ping", nil)
-	return err == nil
+	return ping(ctx, m.client) == nil
+}
+
+// ping hits /_ping and returns nil if Docker responded with HTTP 200.
+// Docker's /_ping returns plain text "OK", not JSON, so we use doRaw.
+func ping(ctx context.Context, c *http.Client) error {
+	resp, err := doRaw(ctx, c, http.MethodGet, "/_ping", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("docker: ping returned HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // PullImage pulls the given image if it is not already present locally.
