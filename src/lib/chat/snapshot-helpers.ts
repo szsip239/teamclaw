@@ -290,6 +290,11 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
 /**
  * Save liveMessages snapshot after a chat run completes.
  * Fire-and-forget: caller should .catch() errors.
+ *
+ * Safety: if the gateway returns fewer user messages than currently stored
+ * in liveMessages, the gateway session was likely reset (SIGUSR1, reconnect, etc.).
+ * In that case, archive the old messages to ChatMessageSnapshot first
+ * to prevent data loss, then store the new (smaller) set as liveMessages.
  */
 export async function saveLiveSnapshot(
   chatSessionId: string,
@@ -302,6 +307,26 @@ export async function saveLiveSnapshot(
   if (rawMessages.length === 0) return
 
   const liveMessages = transformToLiveMessages(rawMessages)
+
+  // Count user messages in new vs existing liveMessages to detect session reset
+  const newUserCount = liveMessages.filter(m => m.role === 'user').length
+  const session = await prisma.chatSession.findUnique({
+    where: { id: chatSessionId },
+    select: { liveMessages: true },
+  })
+  const existingLive = (session?.liveMessages ?? []) as unknown as ChatMessage[]
+  const oldUserCount = Array.isArray(existingLive)
+    ? existingLive.filter(m => m.role === 'user').length
+    : 0
+
+  if (oldUserCount > 0 && newUserCount < oldUserCount) {
+    // Gateway session was reset — archive old messages before overwriting
+    console.warn(
+      `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
+      `old=${oldUserCount} user msgs, new=${newUserCount}. Archiving old messages.`,
+    )
+    await persistLiveAsSnapshot(chatSessionId, existingLive)
+  }
 
   await prisma.chatSession.update({
     where: { id: chatSessionId },
