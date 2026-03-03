@@ -1,92 +1,92 @@
-import { Role } from '@/generated/prisma'
+type Role = 'SYSTEM_ADMIN' | 'DEPT_ADMIN' | 'USER'
 
 export interface PermissionConfig {
   roles: Role[]
   resourceCheck?: boolean
 }
 
-const ALL_ROLES: Role[] = [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN, Role.USER]
+const ALL_ROLES: Role[] = ['SYSTEM_ADMIN', 'DEPT_ADMIN', 'USER']
 
 export const ROUTE_PERMISSIONS: Record<string, PermissionConfig> = {
   // Users
-  'users:create': { roles: [Role.SYSTEM_ADMIN] },
-  'users:update': { roles: [Role.SYSTEM_ADMIN] },
-  'users:delete': { roles: [Role.SYSTEM_ADMIN] },
-  'users:list': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
-  'users:reset_password': { roles: [Role.SYSTEM_ADMIN] },
+  'users:create': { roles: ['SYSTEM_ADMIN'] },
+  'users:update': { roles: ['SYSTEM_ADMIN'] },
+  'users:delete': { roles: ['SYSTEM_ADMIN'] },
+  'users:list': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
+  'users:reset_password': { roles: ['SYSTEM_ADMIN'] },
 
   // Departments
-  'departments:manage': { roles: [Role.SYSTEM_ADMIN] },
-  'departments:view': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'departments:manage': { roles: ['SYSTEM_ADMIN'] },
+  'departments:view': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
 
   // Instance Access
-  'instance_access:manage': { roles: [Role.SYSTEM_ADMIN] },
+  'instance_access:manage': { roles: ['SYSTEM_ADMIN'] },
 
   // Agents
-  'agents:manage': { roles: [Role.SYSTEM_ADMIN] },
+  'agents:manage': { roles: ['SYSTEM_ADMIN'] },
   'agents:view': { roles: ALL_ROLES },
   'agents:create': { roles: ALL_ROLES },
-  'agents:classify': { roles: [Role.SYSTEM_ADMIN] },
-  'agents:manage_dept': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'agents:classify': { roles: ['SYSTEM_ADMIN'] },
+  'agents:manage_dept': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
 
   // Sessions
-  'sessions:view_all': { roles: [Role.SYSTEM_ADMIN] },
+  'sessions:view_all': { roles: ['SYSTEM_ADMIN'] },
   'sessions:view_dept': {
-    roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN],
+    roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
     resourceCheck: true,
   },
   'sessions:view_own': { roles: ALL_ROLES },
 
   // Skills
-  'skills:manage_global': { roles: [Role.SYSTEM_ADMIN] },
-  'skills:manage_dept': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'skills:manage_global': { roles: ['SYSTEM_ADMIN'] },
+  'skills:manage_dept': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
   'skills:develop': { roles: ALL_ROLES },
 
   // Models
-  'models:manage': { roles: [Role.SYSTEM_ADMIN] },
+  'models:manage': { roles: ['SYSTEM_ADMIN'] },
   'models:view': { roles: ALL_ROLES },
 
   // Config
-  'config:manage': { roles: [Role.SYSTEM_ADMIN] },
+  'config:manage': { roles: ['SYSTEM_ADMIN'] },
 
   // Audit
-  'audit:view_all': { roles: [Role.SYSTEM_ADMIN] },
-  'audit:view_dept': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'audit:view_all': { roles: ['SYSTEM_ADMIN'] },
+  'audit:view_dept': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
 
   // Approvals
-  'approvals:review': { roles: [Role.SYSTEM_ADMIN] },
+  'approvals:review': { roles: ['SYSTEM_ADMIN'] },
   'approvals:create': { roles: ALL_ROLES },
 
   // Channels
-  'channels:manage': { roles: [Role.SYSTEM_ADMIN] },
-  'channels:view': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'channels:manage': { roles: ['SYSTEM_ADMIN'] },
+  'channels:view': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
 
   // Chat
   'chat:use': { roles: ALL_ROLES },
 
   // Monitor
-  'monitor:view': { roles: [Role.SYSTEM_ADMIN] },
-  'monitor:view_basic': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'monitor:view': { roles: ['SYSTEM_ADMIN'] },
+  'monitor:view_basic': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
 
   // Usage
-  'usage:view_all': { roles: [Role.SYSTEM_ADMIN] },
-  'usage:view_dept': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'usage:view_all': { roles: ['SYSTEM_ADMIN'] },
+  'usage:view_dept': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
   'usage:view_own': { roles: ALL_ROLES },
 
   // Instances
-  'instances:manage': { roles: [Role.SYSTEM_ADMIN] },
-  'instances:view': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'instances:manage': { roles: ['SYSTEM_ADMIN'] },
+  'instances:view': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
 
   // API Keys
   'api_keys:manage': { roles: ALL_ROLES },
 
   // Knowledge
-  'knowledge:manage_global': { roles: [Role.SYSTEM_ADMIN] },
-  'knowledge:manage_dept': { roles: [Role.SYSTEM_ADMIN, Role.DEPT_ADMIN] },
+  'knowledge:manage_global': { roles: ['SYSTEM_ADMIN'] },
+  'knowledge:manage_dept': { roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'] },
   'knowledge:view': { roles: ALL_ROLES },
 
   // Resources
-  'resources:manage': { roles: [Role.SYSTEM_ADMIN] },
+  'resources:manage': { roles: ['SYSTEM_ADMIN'] },
 }
 
 export function hasPermission(role: string, permission: string): boolean {

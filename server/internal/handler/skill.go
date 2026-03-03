@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/szsip239/teamclaw/server/internal/middleware"
@@ -44,39 +45,74 @@ type UpdateSkillRequest struct {
 	Frontmatter json.RawMessage      `json:"frontmatter"`
 }
 
-// SkillResponse is the API representation of a Skill.
-type SkillResponse struct {
-	ID          string               `json:"id"`
-	Slug        string               `json:"slug"`
-	Name        string               `json:"name"`
-	Description *string              `json:"description"`
-	Emoji       *string              `json:"emoji"`
-	Homepage    *string              `json:"homepage"`
-	Category    model.SkillCategory  `json:"category"`
-	Source      model.SkillSource    `json:"source"`
-	ClawHubSlug *string              `json:"clawhubSlug"`
-	Version     string               `json:"version"`
-	CreatorID   string               `json:"creatorId"`
-	CreatorName string               `json:"creatorName"`
-	Tags        *string              `json:"tags"`
-	Frontmatter *string              `json:"frontmatter"`
+// skillDeptRef is a minimal department reference.
+type skillDeptRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
-func toSkillResponse(s model.Skill) SkillResponse {
+// SkillVersionResponse is the API representation of a SkillVersion.
+type SkillVersionResponse struct {
+	ID              string    `json:"id"`
+	Version         string    `json:"version"`
+	Changelog       *string   `json:"changelog"`
+	PublishedByName string    `json:"publishedByName"`
+	PublishedAt     time.Time `json:"publishedAt"`
+}
+
+// SkillDetailResponse extends SkillResponse with full version history.
+type SkillDetailResponse struct {
+	SkillResponse
+	Versions []SkillVersionResponse `json:"versions"`
+}
+
+// SkillResponse is the API representation of a Skill.
+type SkillResponse struct {
+	ID                string               `json:"id"`
+	Slug              string               `json:"slug"`
+	Name              string               `json:"name"`
+	Description       *string              `json:"description"`
+	Emoji             *string              `json:"emoji"`
+	Homepage          *string              `json:"homepage"`
+	Category          model.SkillCategory  `json:"category"`
+	Source            model.SkillSource    `json:"source"`
+	ClawHubSlug       *string              `json:"clawhubSlug"`
+	Version           string               `json:"version"`
+	CreatorID         string               `json:"creatorId"`
+	CreatorName       string               `json:"creatorName"`
+	Tags              json.RawMessage      `json:"tags"`
+	Frontmatter       *string              `json:"frontmatter"`
+	InstallationCount int64                `json:"installationCount"`
+	Departments       []skillDeptRef       `json:"departments"`
+	CreatedAt         time.Time            `json:"createdAt"`
+	UpdatedAt         time.Time            `json:"updatedAt"`
+}
+
+func toSkillResponse(s model.Skill, installCount int64) SkillResponse {
+	// Convert stored JSONB *string → json.RawMessage so frontend receives []
+	tags := json.RawMessage("[]")
+	if s.Tags != nil && *s.Tags != "" {
+		tags = json.RawMessage(*s.Tags)
+	}
+
 	r := SkillResponse{
-		ID:          s.ID,
-		Slug:        s.Slug,
-		Name:        s.Name,
-		Description: s.Description,
-		Emoji:       s.Emoji,
-		Homepage:    s.Homepage,
-		Category:    s.Category,
-		Source:      s.Source,
-		ClawHubSlug: s.ClawHubSlug,
-		Version:     s.Version,
-		CreatorID:   s.CreatorID,
-		Tags:        s.Tags,
-		Frontmatter: s.Frontmatter,
+		ID:                s.ID,
+		Slug:              s.Slug,
+		Name:              s.Name,
+		Description:       s.Description,
+		Emoji:             s.Emoji,
+		Homepage:          s.Homepage,
+		Category:          s.Category,
+		Source:            s.Source,
+		ClawHubSlug:       s.ClawHubSlug,
+		Version:           s.Version,
+		CreatorID:         s.CreatorID,
+		Tags:              tags,
+		Frontmatter:       s.Frontmatter,
+		InstallationCount: installCount,
+		Departments:       []skillDeptRef{},
+		CreatedAt:         s.CreatedAt,
+		UpdatedAt:         s.UpdatedAt,
 	}
 	if s.Creator.ID != "" {
 		r.CreatorName = s.Creator.Name
@@ -132,11 +168,33 @@ func (h *SkillHandler) List(c *gin.Context) {
 		Limit(pageSize).
 		Find(&skills)
 
+	// Batch-count installations to avoid N+1.
+	installCountMap := make(map[string]int64)
+	if len(skills) > 0 {
+		skillIDs := make([]string, len(skills))
+		for i, s := range skills {
+			skillIDs[i] = s.ID
+		}
+		type countRow struct {
+			SkillID string
+			Count   int64
+		}
+		var rows []countRow
+		h.db.Model(&model.SkillInstallation{}).
+			Select("skill_id, count(*) as count").
+			Where("skill_id IN ?", skillIDs).
+			Group("skill_id").
+			Scan(&rows)
+		for _, row := range rows {
+			installCountMap[row.SkillID] = row.Count
+		}
+	}
+
 	items := make([]SkillResponse, len(skills))
 	for i, s := range skills {
-		items[i] = toSkillResponse(s)
+		items[i] = toSkillResponse(s, installCountMap[s.ID])
 	}
-	response.List(c, items, total, page, pageSize)
+	response.NamedList(c, "skills", items, total, page, pageSize)
 }
 
 // Get handles GET /api/v1/skills/:id
@@ -153,7 +211,32 @@ func (h *SkillHandler) Get(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, toSkillResponse(skill))
+	var versionModels []model.SkillVersion
+	h.db.Preload("PublishedBy").
+		Where("skill_id = ?", id).
+		Order("published_at DESC").
+		Find(&versionModels)
+
+	versions := make([]SkillVersionResponse, len(versionModels))
+	for i, v := range versionModels {
+		versions[i] = SkillVersionResponse{
+			ID:          v.ID,
+			Version:     v.Version,
+			Changelog:   v.Changelog,
+			PublishedAt: v.PublishedAt,
+		}
+		if v.PublishedBy.ID != "" {
+			versions[i].PublishedByName = v.PublishedBy.Name
+		}
+	}
+
+	var installCount int64
+	h.db.Model(&model.SkillInstallation{}).Where("skill_id = ?", id).Count(&installCount)
+
+	response.OK(c, SkillDetailResponse{
+		SkillResponse: toSkillResponse(skill, installCount),
+		Versions:      versions,
+	})
 }
 
 // Create handles POST /api/v1/skills
@@ -206,7 +289,7 @@ func (h *SkillHandler) Create(c *gin.Context) {
 	}
 
 	h.db.Preload("Creator").First(&skill, "id = ?", skill.ID)
-	response.Created(c, toSkillResponse(skill))
+	response.Created(c, toSkillResponse(skill, 0))
 }
 
 // Update handles PATCH /api/v1/skills/:id
@@ -269,7 +352,9 @@ func (h *SkillHandler) Update(c *gin.Context) {
 	}
 
 	h.db.Preload("Creator").First(&skill, "id = ?", id)
-	response.OK(c, toSkillResponse(skill))
+	var installCount int64
+	h.db.Model(&model.SkillInstallation{}).Where("skill_id = ?", id).Count(&installCount)
+	response.OK(c, toSkillResponse(skill, installCount))
 }
 
 // Delete handles DELETE /api/v1/skills/:id

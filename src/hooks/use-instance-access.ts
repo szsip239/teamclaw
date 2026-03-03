@@ -75,7 +75,7 @@ export function useUpdateAccess(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateAccessInput) =>
-      api.put<{ grant: InstanceAccessGrant }>(
+      api.patch<{ grant: InstanceAccessGrant }>(
         `/api/v1/instance-access/${id}`,
         data,
       ),

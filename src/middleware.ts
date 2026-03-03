@@ -1,8 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { jwtVerify, importSPKI } from 'jose'
-
-const ALG = 'RS256'
-const ISSUER = 'teamclaw'
 
 const PUBLIC_PATHS = [
   '/login',
@@ -12,18 +8,8 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/refresh',
   '/_next',
   '/favicon.ico',
+  '/healthz',
 ]
-
-let cachedPublicKey: CryptoKey | null = null
-
-async function getPublicKey(): Promise<CryptoKey> {
-  if (cachedPublicKey) return cachedPublicKey
-  const pem = Buffer.from(process.env.JWT_PUBLIC_KEY!, 'base64').toString(
-    'utf-8'
-  )
-  cachedPublicKey = await importSPKI(pem, ALG)
-  return cachedPublicKey
-}
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p))
@@ -33,6 +19,14 @@ function isApiRoute(pathname: string): boolean {
   return pathname.startsWith('/api/')
 }
 
+/**
+ * Lightweight middleware — only checks for the presence of the access_token cookie.
+ * JWT verification is delegated to the Go backend (api:3200) for API routes.
+ * For page routes, we redirect to /login if no token cookie exists.
+ *
+ * The Go backend sets an httpOnly `access_token` cookie on login/refresh,
+ * so cookie-based routing still works without the middleware doing verification.
+ */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -40,42 +34,19 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  const token = req.cookies.get('access_token')?.value
+  const hasToken = !!req.cookies.get('access_token')?.value
 
-  if (!token) {
+  if (!hasToken) {
     if (isApiRoute(pathname)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      // API calls without a cookie are rejected at the Go backend level.
+      // Let them through here so the Go backend can return a proper 401.
+      return NextResponse.next()
     }
     const loginUrl = new URL('/login', req.url)
     return NextResponse.redirect(loginUrl)
   }
 
-  try {
-    const key = await getPublicKey()
-    const { payload } = await jwtVerify(token, key, { issuer: ISSUER })
-
-    if (!payload.userId || !payload.role) {
-      throw new Error('Invalid token payload')
-    }
-
-    const headers = new Headers(req.headers)
-    headers.set('x-user-id', payload.userId as string)
-    headers.set('x-user-role', payload.role as string)
-    if (payload.email) {
-      headers.set('x-user-email', payload.email as string)
-    }
-
-    return NextResponse.next({ request: { headers } })
-  } catch {
-    if (isApiRoute(pathname)) {
-      return NextResponse.json(
-        { error: 'Invalid or expired token' },
-        { status: 401 }
-      )
-    }
-    const loginUrl = new URL('/login', req.url)
-    return NextResponse.redirect(loginUrl)
-  }
+  return NextResponse.next()
 }
 
 export const config = {

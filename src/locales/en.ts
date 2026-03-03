@@ -738,6 +738,7 @@ const en: Record<TranslationKey, string> = {
   'user.roleUser': 'User',
   'user.statusActive': 'Active',
   'user.statusDisabled': 'Disabled',
+  'user.statusPending': 'Pending',
   'user.createdMsg': 'User created successfully',
   'user.editTitle': 'Edit User',
   'user.editDesc': 'Modify user {name} information',

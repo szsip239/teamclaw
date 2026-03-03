@@ -125,7 +125,7 @@ func (h *AuditLogHandler) List(c *gin.Context) {
 	for i, l := range logs {
 		items[i] = toAuditLogResponse(l)
 	}
-	response.List(c, items, total, page, pageSize)
+	response.NamedList(c, "logs", items, total, page, pageSize)
 }
 
 // Export handles GET /api/v1/audit-logs/export

@@ -106,6 +106,24 @@ export function ChatMain() {
 }
 
 /**
+ * Normalize a message from the history API.
+ * toolCalls may arrive as a JSON string (legacy Go serialization) — parse it back to an array.
+ * contentBlocks may also arrive as a string — same treatment.
+ */
+function normalizeMessage(msg: ChatMessage): ChatMessage {
+  let { toolCalls, contentBlocks } = msg
+  if (toolCalls !== undefined && !Array.isArray(toolCalls)) {
+    try { toolCalls = JSON.parse(toolCalls as unknown as string) } catch { toolCalls = [] }
+  }
+  if (contentBlocks !== undefined && !Array.isArray(contentBlocks)) {
+    try { contentBlocks = JSON.parse(contentBlocks as unknown as string) } catch { contentBlocks = [] }
+  }
+  return (toolCalls !== msg.toolCalls || contentBlocks !== msg.contentBlocks)
+    ? { ...msg, toolCalls, contentBlocks }
+    : msg
+}
+
+/**
  * Assemble snapshots and current messages into a single list,
  * inserting separator markers between context resets.
  */
@@ -117,7 +135,7 @@ function assembleMessages(
   const result: ChatMessage[] = []
 
   for (let i = 0; i < snapshots.length; i++) {
-    result.push(...snapshots[i].messages)
+    result.push(...snapshots[i].messages.map(normalizeMessage))
 
     // Insert separator after each batch
     const isLastBatch = i === snapshots.length - 1
@@ -128,7 +146,7 @@ function assembleMessages(
   }
 
   if (isActive && currentMessages.length > 0) {
-    result.push(...currentMessages)
+    result.push(...currentMessages.map(normalizeMessage))
   } else if (!isActive && snapshots.length > 0) {
     // Non-active session — show "context restart" separator if new messages arrive later
     // (handled by the store when streaming starts on a reactivated session)

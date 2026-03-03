@@ -13,7 +13,35 @@ class ApiError extends Error {
   }
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? ""
+// In development: NEXT_PUBLIC_API_URL=http://localhost:3200 points directly to Go backend.
+// In production: empty string — nginx proxies /api/v1/* to Go backend.
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? ""
+
+// Go backend wraps all responses in { code, message, data }.
+// This unwraps the envelope so callers receive `data` directly.
+function unwrapGoResponse(json: unknown): unknown {
+  if (
+    json !== null &&
+    typeof json === "object" &&
+    "code" in (json as Record<string, unknown>) &&
+    "data" in (json as Record<string, unknown>)
+  ) {
+    return (json as { code: number; data: unknown }).data
+  }
+  return json
+}
+
+// Token storage — kept in memory; survives page navigations but not hard refreshes.
+// Hard refresh: fetchUser() re-authenticates via the httpOnly access_token cookie.
+let _accessToken: string | null = null
+
+export function setAccessToken(token: string | null) {
+  _accessToken = token
+}
+
+export function getAccessToken(): string | null {
+  return _accessToken
+}
 
 async function request<T>(
   endpoint: string,
@@ -26,10 +54,15 @@ async function request<T>(
     ...customHeaders,
   }
 
+  // Attach Bearer token when available (Go backend prefers this over cookie).
+  if (_accessToken) {
+    (headers as Record<string, string>)["Authorization"] = `Bearer ${_accessToken}`
+  }
+
   const config: RequestInit = {
     ...rest,
     headers,
-    credentials: "include",
+    credentials: "include", // keep sending cookie for Next.js middleware
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }
 
@@ -40,10 +73,25 @@ async function request<T>(
     const refreshRes = await fetch(`${BASE_URL}/api/v1/auth/refresh`, {
       method: "POST",
       credentials: "include",
+      headers: _accessToken
+        ? { Authorization: `Bearer ${_accessToken}` }
+        : {},
     })
 
     if (refreshRes.ok) {
-      response = await fetch(`${BASE_URL}${endpoint}`, config)
+      const refreshJson = await refreshRes.json()
+      const refreshData = unwrapGoResponse(refreshJson) as {
+        accessToken?: string
+        refreshToken?: string
+      } | null
+
+      if (refreshData?.accessToken) {
+        _accessToken = refreshData.accessToken
+        ;(headers as Record<string, string>)["Authorization"] = `Bearer ${_accessToken}`
+        config.headers = headers
+      }
+
+      response = await fetch(endpoint, config)
     }
   }
 
@@ -62,7 +110,8 @@ async function request<T>(
     return undefined as T
   }
 
-  return response.json() as Promise<T>
+  const json = await response.json()
+  return unwrapGoResponse(json) as T
 }
 
 export const api = {

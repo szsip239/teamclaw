@@ -91,7 +91,7 @@ func (h *UserHandler) List(c *gin.Context) {
 		userResponses[i] = u.ToResponse()
 	}
 
-	response.List(c, userResponses, total, page, pageSize)
+	response.NamedList(c, "users", userResponses, total, page, pageSize)
 }
 
 // Create handles POST /api/v1/users
@@ -234,4 +234,58 @@ func (h *UserHandler) Delete(c *gin.Context) {
 	}
 
 	response.OK(c, nil)
+}
+
+// Get handles GET /api/v1/users/:id
+func (h *UserHandler) Get(c *gin.Context) {
+	id := c.Param("id")
+	var user model.User
+	if err := h.db.Preload("Department").First(&user, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "user not found")
+		return
+	}
+	response.OK(c, gin.H{"user": user.ToResponse()})
+}
+
+// ResetPassword handles POST /api/v1/users/:id/reset-password
+func (h *UserHandler) ResetPassword(c *gin.Context) {
+	id := c.Param("id")
+
+	var req struct {
+		Password    string `json:"password"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	// Accept either "password" or "newPassword" field name.
+	pwd := req.Password
+	if pwd == "" {
+		pwd = req.NewPassword
+	}
+	if len(pwd) < 8 {
+		response.BadRequest(c, "password must be at least 8 characters")
+		return
+	}
+
+	var user model.User
+	if err := h.db.First(&user, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "user not found")
+		return
+	}
+
+	hash, err := HashPassword(pwd)
+	if err != nil {
+		response.InternalError(c, "failed to hash password")
+		return
+	}
+
+	if err := h.db.Model(&user).Update("password_hash", hash).Error; err != nil {
+		response.InternalError(c, "failed to update password")
+		return
+	}
+
+	response.OK(c, gin.H{"ok": true})
 }

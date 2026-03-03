@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { streamChat } from '@/lib/chat-stream'
+import { getAccessToken } from '@/lib/api-client'
 import type { ChatAgentInfo, ChatMessage, ChatToolCall, ChatHistoryResponse, ChatAttachment, ChatContentBlock } from '@/types/chat'
 
 interface ChatState {
@@ -62,11 +63,19 @@ async function syncFromHistory(
   set: (fn: (s: ChatState) => Partial<ChatState>) => void,
 ) {
   try {
-    const res = await fetch(`/api/v1/chat/sessions/${activeSessionId}/history`, {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ""
+    const token = getAccessToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(`${apiUrl}/api/v1/chat/sessions/${activeSessionId}/history`, {
       credentials: 'include',
+      headers,
     })
     if (!res.ok) return
-    const data: ChatHistoryResponse = await res.json()
+    const json = await res.json()
+    // Unwrap Go response envelope { code, message, data }
+    const data: ChatHistoryResponse = json?.data ?? json
 
     const snapshots = data.snapshots ?? []
     const currentMessages = data.currentMessages ?? []

@@ -579,9 +579,11 @@ func (h *ChatHandler) ListSessions(c *gin.Context) {
 
 	type sessionItem struct {
 		ID            string     `json:"id"`
+		SessionID     string     `json:"sessionId"`
 		InstanceID    string     `json:"instanceId"`
 		InstanceName  string     `json:"instanceName"`
 		AgentID       string     `json:"agentId"`
+		AgentName     string     `json:"agentName"`
 		Title         *string    `json:"title"`
 		LastMessageAt *time.Time `json:"lastMessageAt"`
 		MessageCount  int        `json:"messageCount"`
@@ -598,13 +600,29 @@ func (h *ChatHandler) ListSessions(c *gin.Context) {
 		return
 	}
 
+	// Build agent name lookup from AgentMeta (batch to avoid N+1).
+	agentNameMap := make(map[string]string) // key: instanceId+":"+agentId
+	if len(sessions) > 0 {
+		var metas []model.AgentMeta
+		h.db.Select("instance_id, agent_id").Find(&metas)
+		for _, m := range metas {
+			agentNameMap[m.InstanceID+":"+m.AgentID] = m.AgentID
+		}
+	}
+
 	items := make([]sessionItem, 0, len(sessions))
 	for _, s := range sessions {
+		agentName := agentNameMap[s.InstanceID+":"+s.AgentID]
+		if agentName == "" {
+			agentName = s.AgentID
+		}
 		items = append(items, sessionItem{
 			ID:            s.ID,
+			SessionID:     s.SessionID,
 			InstanceID:    s.InstanceID,
 			InstanceName:  s.Instance.Name,
 			AgentID:       s.AgentID,
+			AgentName:     agentName,
 			Title:         s.Title,
 			LastMessageAt: s.LastMessageAt,
 			MessageCount:  s.MessageCount,
@@ -641,13 +659,13 @@ func (h *ChatHandler) GetHistory(c *gin.Context) {
 		Find(&snapRows)
 
 	type snapMessage struct {
-		ID            string  `json:"id"`
-		Role          string  `json:"role"`
-		Content       string  `json:"content"`
-		ContentBlocks *string `json:"contentBlocks,omitempty"`
-		Thinking      *string `json:"thinking,omitempty"`
-		ToolCalls     *string `json:"toolCalls,omitempty"`
-		CreatedAt     string  `json:"createdAt"`
+		ID            string          `json:"id"`
+		Role          string          `json:"role"`
+		Content       string          `json:"content"`
+		ContentBlocks json.RawMessage `json:"contentBlocks,omitempty"`
+		Thinking      *string         `json:"thinking,omitempty"`
+		ToolCalls     json.RawMessage `json:"toolCalls,omitempty"`
+		CreatedAt     string          `json:"createdAt"`
 	}
 	type snapBatch struct {
 		BatchID   string        `json:"batchId"`
@@ -666,15 +684,22 @@ func (h *ChatHandler) GetHistory(c *gin.Context) {
 				Messages:  []snapMessage{},
 			}
 		}
-		batchMap[row.BatchID].Messages = append(batchMap[row.BatchID].Messages, snapMessage{
-			ID:            row.ID,
-			Role:          row.Role,
-			Content:       row.Content,
-			ContentBlocks: row.ContentBlocks,
-			Thinking:      row.Thinking,
-			ToolCalls:     row.ToolCalls,
-			CreatedAt:     row.CreatedAt.Format(time.RFC3339),
-		})
+		snap := snapMessage{
+			ID:        row.ID,
+			Role:      row.Role,
+			Content:   row.Content,
+			Thinking:  row.Thinking,
+			CreatedAt: row.CreatedAt.Format(time.RFC3339),
+		}
+		// ContentBlocks and ToolCalls are stored as JSON strings in DB;
+		// embed them as raw JSON so the frontend receives proper arrays/objects.
+		if row.ContentBlocks != nil {
+			snap.ContentBlocks = json.RawMessage(*row.ContentBlocks)
+		}
+		if row.ToolCalls != nil {
+			snap.ToolCalls = json.RawMessage(*row.ToolCalls)
+		}
+		batchMap[row.BatchID].Messages = append(batchMap[row.BatchID].Messages, snap)
 	}
 
 	snapshots := make([]snapBatch, 0, len(batchOrder))
@@ -1171,4 +1196,63 @@ func randomHex() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// ── GetSession ─────────────────────────────────────────────────────────────
+
+// GetSession handles GET /api/v1/chat/sessions/:id
+func (h *ChatHandler) GetSession(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id := c.Param("id")
+
+	var session model.ChatSession
+	if err := h.db.Preload("Instance").First(&session, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "session not found")
+		return
+	}
+	if session.UserID != userID {
+		response.Forbidden(c, "no access to this session")
+		return
+	}
+
+	response.OK(c, gin.H{"session": gin.H{
+		"id":            session.ID,
+		"instanceId":    session.InstanceID,
+		"instanceName":  session.Instance.Name,
+		"agentId":       session.AgentID,
+		"title":         session.Title,
+		"lastMessageAt": session.LastMessageAt,
+		"messageCount":  session.MessageCount,
+		"isActive":      session.IsActive,
+		"createdAt":     session.CreatedAt,
+	}})
+}
+
+// ── DeleteSession ──────────────────────────────────────────────────────────
+
+// DeleteSession handles DELETE /api/v1/chat/sessions/:id
+func (h *ChatHandler) DeleteSession(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id := c.Param("id")
+
+	var session model.ChatSession
+	if err := h.db.First(&session, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "session not found")
+		return
+	}
+	if session.UserID != userID {
+		response.Forbidden(c, "no access to this session")
+		return
+	}
+
+	if session.IsActive {
+		client := h.registry.GetClient(session.InstanceID)
+		if client != nil && client.IsConnected() {
+			sessionKey := fmt.Sprintf("agent:%s:tc:%s", session.AgentID, session.UserID)
+			_ = h.snapshotAndDeleteSession(c.Request.Context(), client, session, sessionKey, true)
+		}
+	}
+
+	h.db.Delete(&session)
+	c.Status(http.StatusNoContent)
 }

@@ -736,6 +736,7 @@ const zhCN = {
   'user.roleUser': '普通用户',
   'user.statusActive': '正常',
   'user.statusDisabled': '已禁用',
+  'user.statusPending': '待激活',
   'user.createdMsg': '用户创建成功',
   'user.editTitle': '编辑用户',
   'user.editDesc': '修改用户 {name} 的信息',

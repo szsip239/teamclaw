@@ -39,13 +39,25 @@ func Created(c *gin.Context, data interface{}) {
 	})
 }
 
-// List sends a paginated list response.
+// List sends a paginated list response (generic field name "items").
 func List(c *gin.Context, items interface{}, total int64, page, pageSize int) {
 	OK(c, ListResponse{
 		Items:    items,
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
+	})
+}
+
+// NamedList sends a paginated list response with a resource-specific field name.
+// Example: NamedList(c, "instances", items, total, page, pageSize)
+// returns { "instances": [...], "total": N, "page": P, "pageSize": PS }.
+func NamedList(c *gin.Context, field string, items interface{}, total int64, page, pageSize int) {
+	OK(c, gin.H{
+		field:      items,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
 	})
 }
 

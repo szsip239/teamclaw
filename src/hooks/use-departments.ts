@@ -65,7 +65,7 @@ export function useUpdateDepartment(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateDepartmentInput) =>
-      api.put<{ department: DepartmentResponse }>(
+      api.patch<{ department: DepartmentResponse }>(
         `/api/v1/departments/${id}`,
         data,
       ),

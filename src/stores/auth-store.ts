@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { api, ApiError } from "@/lib/api-client"
+import { api, ApiError, setAccessToken } from "@/lib/api-client"
 
 export interface AuthUser {
   id: string
@@ -9,6 +9,13 @@ export interface AuthUser {
   departmentId: string | null
   departmentName: string | null
   avatar: string | null
+}
+
+// Go backend login/refresh response shape (after unwrapping `data`).
+interface TokenResponse {
+  accessToken: string
+  refreshToken: string
+  user: AuthUser
 }
 
 interface AuthState {
@@ -37,6 +44,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
           set({ user, isLoading: false })
         } else if (type === "logout") {
           set({ user: null, isLoading: false })
+          setAccessToken(null)
         }
       }
     } catch {
@@ -64,28 +72,57 @@ export const useAuthStore = create<AuthState>((set, get) => {
     fetchUser: async () => {
       try {
         set({ isLoading: true })
-        const data = await api.get<{ user: AuthUser }>("/api/v1/auth/me")
-        const user = data.user
-        set({ user, isLoading: false })
+        // Go backend returns the user object directly inside the `data` envelope (unwrapped by api-client).
+        const data = await api.get<AuthUser>("/api/v1/auth/me")
+        set({ user: data, isLoading: false })
       } catch {
         set({ user: null, isLoading: false })
       }
     },
 
     login: async (email, password) => {
-      await api.post("/api/v1/auth/login", { email, password })
-      await get().fetchUser()
+      // Go backend returns { accessToken, refreshToken, user } inside `data` envelope.
+      const data = await api.post<TokenResponse>("/api/v1/auth/login", {
+        email,
+        password,
+      })
+      // Store access token for Bearer auth on subsequent requests.
+      if (data?.accessToken) {
+        setAccessToken(data.accessToken)
+      }
+      // Use user from login response directly to skip an extra round-trip.
+      if (data?.user) {
+        set({ user: data.user, isLoading: false })
+      } else {
+        await get().fetchUser()
+      }
       broadcast("login", get().user)
     },
 
     register: async (email, password, name) => {
-      await api.post("/api/v1/auth/register", { email, password, name })
-      await get().fetchUser()
+      const data = await api.post<TokenResponse>("/api/v1/auth/register", {
+        email,
+        password,
+        name,
+      })
+      if (data?.accessToken) {
+        setAccessToken(data.accessToken)
+      }
+      if (data?.user) {
+        set({ user: data.user, isLoading: false })
+      } else {
+        await get().fetchUser()
+      }
       broadcast("login", get().user)
     },
 
     logout: async () => {
-      await api.post("/api/v1/auth/logout")
+      try {
+        await api.post("/api/v1/auth/logout")
+      } catch {
+        // Best-effort; clear local state regardless.
+      }
+      setAccessToken(null)
       set({ user: null })
       broadcast("logout", null)
     },

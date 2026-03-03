@@ -27,9 +27,11 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Frame-Options DENY always;
     add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
-    # ── Request body size (file uploads / attachments) ───
-    client_max_body_size 10m;
+    # ── Request body size ─────────────────────────────────
+    client_max_body_size 50m;
 
     # ── Static assets (Next.js _next/static) ─────────────
     location /_next/static/ {
@@ -38,9 +40,9 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    # ── SSE streaming: chat/send ─────────────────────────
-    location ~ ^/api/v1/chat/.+/send$ {
-        proxy_pass http://app:3100;
+    # ── SSE: chat/send ───────────────────────────────────
+    location ~ ^/api/v1/chat/.*/send$ {
+        proxy_pass http://api:3200;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -54,9 +56,9 @@ server {
         proxy_send_timeout 300s;
     }
 
-    # ── SSE streaming: files/watch ───────────────────────
-    location ~ ^/api/v1/instances/.+/files/watch$ {
-        proxy_pass http://app:3100;
+    # ── SSE: session files/watch ─────────────────────────
+    location ~ ^/api/v1/chat/sessions/.*/files/watch$ {
+        proxy_pass http://api:3200;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -70,7 +72,27 @@ server {
         proxy_send_timeout 300s;
     }
 
-    # ── Default proxy ────────────────────────────────────
+    # ── Go API backend ───────────────────────────────────
+    location /api/v1/ {
+        proxy_pass http://api:3200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    # ── Health check (Go backend) ────────────────────────
+    location /healthz {
+        proxy_pass http://api:3200;
+        proxy_http_version 1.1;
+        access_log off;
+    }
+
+    # ── Default: Next.js frontend ─────────────────────────
     location / {
         proxy_pass http://app:3100;
         proxy_http_version 1.1;

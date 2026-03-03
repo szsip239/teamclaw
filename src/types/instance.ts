@@ -1,4 +1,4 @@
-import type { InstanceStatus } from '@/generated/prisma'
+export type InstanceStatus = 'ONLINE' | 'OFFLINE' | 'DEGRADED' | 'ERROR'
 
 // ─── API Response Types ──────────────────────────────────────────────
 

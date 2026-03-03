@@ -24,6 +24,7 @@ import { Loader2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { useUpdateUser } from "@/hooks/use-users"
 import { api } from "@/lib/api-client"
+import type { UpdateUserInput } from "@/lib/validations/user"
 import type { UserResponse } from "@/types/user"
 import { useT } from "@/stores/language-store"
 
@@ -81,14 +82,7 @@ export function UserEditDialog({
         payload.departmentId = departmentId || null
       if (status !== user.status) payload.status = status
 
-      await updateUser.mutateAsync(
-        payload as {
-          name?: string
-          role?: "SYSTEM_ADMIN" | "DEPT_ADMIN" | "USER"
-          departmentId?: string | null
-          status?: "ACTIVE" | "DISABLED"
-        },
-      )
+      await updateUser.mutateAsync(payload as UpdateUserInput)
       toast.success(t('user.updatedMsg'))
       onOpenChange(false)
     } catch (err) {
@@ -178,6 +172,7 @@ export function UserEditDialog({
               <SelectContent>
                 <SelectItem value="ACTIVE">{t('user.statusActive')}</SelectItem>
                 <SelectItem value="DISABLED">{t('user.statusDisabledShort')}</SelectItem>
+                <SelectItem value="PENDING">{t('user.statusPending')}</SelectItem>
               </SelectContent>
             </Select>
           </div>

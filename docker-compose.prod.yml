@@ -5,8 +5,6 @@ services:
       dockerfile: Dockerfile
       target: init
     container_name: teamclaw-init
-    environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
     depends_on:
       postgres:
         condition: service_healthy
@@ -14,16 +12,15 @@ services:
       - data-net
     restart: "no"
 
-  app:
+  # ── Go API backend ────────────────────────────────────────────────────
+  api:
     build:
-      context: .
+      context: ./server
       dockerfile: Dockerfile
-    container_name: teamclaw-app
+    container_name: teamclaw-api
     restart: unless-stopped
-    ports:
-      - "${APP_PORT:-3100}:3100"
     environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?sslmode=disable"
       REDIS_URL: "redis://redis:6379"
       JWT_PRIVATE_KEY: "${JWT_PRIVATE_KEY}"
       JWT_PUBLIC_KEY: "${JWT_PUBLIC_KEY}"
@@ -31,15 +28,8 @@ services:
       JWT_REFRESH_EXPIRY: "${JWT_REFRESH_EXPIRY:-7d}"
       JWT_ISSUER: "${JWT_ISSUER:-teamclaw}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
-      NEXT_PUBLIC_APP_URL: ""
-      NODE_ENV: production
-      DEFAULT_MODEL_PROVIDER: "${DEFAULT_MODEL_PROVIDER:-anthropic}"
-      DEFAULT_MODEL_API_KEY: "${DEFAULT_MODEL_API_KEY:-}"
-      DEFAULT_MODEL_BASE_URL: "${DEFAULT_MODEL_BASE_URL:-https://api.anthropic.com}"
-      DEFAULT_MODEL_API_TYPE: "${DEFAULT_MODEL_API_TYPE:-anthropic-messages}"
-      TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/data/teamclaw}"
-      DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
-      DOCKER_NETWORK: "teamclaw-net"
+      PORT: "3200"
+      GIN_MODE: "release"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -52,7 +42,34 @@ services:
     networks:
       - data-net
     volumes:
+      - ./server/configs:/app/configs:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # ── Next.js frontend ──────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: teamclaw-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3100}:3100"
+    environment:
+      NODE_ENV: production
+      # Server-side rewrite target — Next.js proxies /api/v1/* to the Go backend.
+      # The browser always uses relative URLs (/api/v1/...) which Next.js forwards here.
+      INTERNAL_API_URL: "http://api:3200"
+      # NEXT_PUBLIC_API_URL left unset so browser uses relative URLs (proxied by Next.js or Nginx).
+      NEXT_PUBLIC_API_URL: ""
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    networks:
+      - data-net
 
   postgres:
     image: postgres:17-alpine
@@ -107,6 +124,7 @@ services:
       - ./nginx/cert:/etc/nginx/cert:ro
     depends_on:
       - app
+      - api
     networks:
       - data-net
 

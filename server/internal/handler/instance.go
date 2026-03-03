@@ -84,12 +84,12 @@ func (h *InstanceHandler) List(c *gin.Context) {
 	if isDeptAdmin(c) {
 		deptID := h.currentUserDeptID(c)
 		if deptID == nil {
-			response.List(c, []model.InstanceResponse{}, 0, page, pageSize)
+			response.NamedList(c, "instances", []model.InstanceResponse{}, 0, page, pageSize)
 			return
 		}
 		ids := h.deptInstanceIDs(*deptID)
 		if len(ids) == 0 {
-			response.List(c, []model.InstanceResponse{}, 0, page, pageSize)
+			response.NamedList(c, "instances", []model.InstanceResponse{}, 0, page, pageSize)
 			return
 		}
 		query = query.Where("id IN ?", ids)
@@ -115,7 +115,7 @@ func (h *InstanceHandler) List(c *gin.Context) {
 	for i, inst := range instances {
 		items[i] = inst.ToResponse()
 	}
-	response.List(c, items, total, page, pageSize)
+	response.NamedList(c, "instances", items, total, page, pageSize)
 }
 
 // Get handles GET /api/v1/instances/:id
@@ -146,7 +146,7 @@ func (h *InstanceHandler) Get(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, instance.ToResponse())
+	response.OK(c, gin.H{"instance": instance.ToResponse()})
 }
 
 // Create handles POST /api/v1/instances
@@ -369,6 +369,159 @@ func (h *InstanceHandler) RevokeAccess(c *gin.Context) {
 
 	var access model.InstanceAccess
 	if err := h.db.First(&access, "id = ? AND instance_id = ?", accessID, id).Error; err != nil {
+		response.NotFound(c, "access record not found")
+		return
+	}
+
+	if err := h.db.Delete(&access).Error; err != nil {
+		response.InternalError(c, "failed to revoke access")
+		return
+	}
+
+	response.OK(c, nil)
+}
+
+// ─── Flat /instance-access routes (frontend-compatible) ─────────────
+
+// ListAccessFlat handles GET /api/v1/instance-access
+// Accepts optional ?instanceId=...&departmentId=... query params.
+func (h *InstanceHandler) ListAccessFlat(c *gin.Context) {
+	instanceID := c.Query("instanceId")
+	departmentID := c.Query("departmentId")
+
+	q := h.db.Model(&model.InstanceAccess{}).
+		Preload("Department").
+		Preload("Instance").
+		Preload("GrantedBy")
+
+	if instanceID != "" {
+		q = q.Where("instance_id = ?", instanceID)
+	}
+	if departmentID != "" {
+		q = q.Where("department_id = ?", departmentID)
+	}
+
+	var accesses []model.InstanceAccess
+	q.Order("created_at DESC").Find(&accesses)
+
+	items := make([]model.InstanceAccessResponse, len(accesses))
+	for i, a := range accesses {
+		items[i] = a.ToResponse()
+	}
+	response.OK(c, gin.H{"grants": items})
+}
+
+type GrantAccessFlatRequest struct {
+	InstanceID   string   `json:"instanceId" binding:"required"`
+	DepartmentID string   `json:"departmentId" binding:"required"`
+	AgentIDs     []string `json:"agentIds"`
+}
+
+// GrantAccessFlat handles POST /api/v1/instance-access
+func (h *InstanceHandler) GrantAccessFlat(c *gin.Context) {
+	var req GrantAccessFlatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	if err := h.db.First(&model.Instance{}, "id = ?", req.InstanceID).Error; err != nil {
+		response.BadRequest(c, "instance not found")
+		return
+	}
+	if err := h.db.First(&model.Department{}, "id = ?", req.DepartmentID).Error; err != nil {
+		response.BadRequest(c, "department not found")
+		return
+	}
+
+	var count int64
+	h.db.Model(&model.InstanceAccess{}).
+		Where("instance_id = ? AND department_id = ?", req.InstanceID, req.DepartmentID).
+		Count(&count)
+	if count > 0 {
+		response.Conflict(c, "department already has access to this instance")
+		return
+	}
+
+	var agentIDsPtr *string
+	if len(req.AgentIDs) > 0 {
+		b, err := json.Marshal(req.AgentIDs)
+		if err != nil {
+			response.InternalError(c, "failed to serialize agent IDs")
+			return
+		}
+		s := string(b)
+		agentIDsPtr = &s
+	}
+
+	access := model.InstanceAccess{
+		BaseModel:    newBaseModel(),
+		InstanceID:   req.InstanceID,
+		DepartmentID: req.DepartmentID,
+		AgentIDs:     agentIDsPtr,
+		GrantedByID:  middleware.GetUserID(c),
+	}
+
+	if err := h.db.Create(&access).Error; err != nil {
+		response.InternalError(c, "failed to grant access")
+		return
+	}
+
+	h.db.Preload("Department").Preload("Instance").Preload("GrantedBy").
+		First(&access, "id = ?", access.ID)
+	response.Created(c, gin.H{"grant": access.ToResponse()})
+}
+
+type UpdateAccessRequest struct {
+	AgentIDs []string `json:"agentIds"`
+}
+
+// UpdateAccessFlat handles PATCH /api/v1/instance-access/:id
+func (h *InstanceHandler) UpdateAccessFlat(c *gin.Context) {
+	id := c.Param("id")
+
+	var access model.InstanceAccess
+	if err := h.db.First(&access, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "access record not found")
+		return
+	}
+
+	var req UpdateAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	var agentIDsPtr *string
+	if req.AgentIDs == nil {
+		// null means all agents — clear the restriction
+		agentIDsPtr = nil
+	} else {
+		b, err := json.Marshal(req.AgentIDs)
+		if err != nil {
+			response.InternalError(c, "failed to serialize agent IDs")
+			return
+		}
+		s := string(b)
+		agentIDsPtr = &s
+	}
+
+	if err := h.db.Model(&access).Update("agent_ids", agentIDsPtr).Error; err != nil {
+		response.InternalError(c, "failed to update access")
+		return
+	}
+
+	h.db.Preload("Department").Preload("Instance").Preload("GrantedBy").
+		First(&access, "id = ?", id)
+	response.OK(c, gin.H{"grant": access.ToResponse()})
+}
+
+// RevokeAccessFlat handles DELETE /api/v1/instance-access/:id
+func (h *InstanceHandler) RevokeAccessFlat(c *gin.Context) {
+	id := c.Param("id")
+
+	var access model.InstanceAccess
+	if err := h.db.First(&access, "id = ?", id).Error; err != nil {
 		response.NotFound(c, "access record not found")
 		return
 	}

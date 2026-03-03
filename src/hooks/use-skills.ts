@@ -183,7 +183,7 @@ export function useUpdateSkill(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateSkillInput & { departmentIds?: string[] }) =>
-      api.put<{ status: string }>(`/api/v1/skills/${id}`, data),
+      api.patch<{ status: string }>(`/api/v1/skills/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: skillKeys.lists() })
       qc.invalidateQueries({ queryKey: skillKeys.detail(id) })

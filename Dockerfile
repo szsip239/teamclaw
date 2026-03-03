@@ -21,16 +21,13 @@ RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-# ── Stage 3: DB init (migration + seed) ──────────────
-FROM node:20-alpine AS init
-WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/src/generated/prisma ./src/generated/prisma
-
-CMD ["sh", "-c", "npx prisma db push && npx tsx prisma/seed.ts"]
+# ── Stage 3: DB init ─────────────────────────────────
+# The Go API (api service) handles schema migration via GORM AutoMigrate
+# and seeds the default admin user on first run.
+# This init stage only needs to wait for Postgres — it is a no-op placeholder
+# kept for docker-compose dependency ordering.
+FROM alpine:3.20 AS init
+CMD ["echo", "Init complete — Go API handles migration and seeding on startup."]
 
 # ── Stage 4: Production runner ─────────────────────────
 FROM node:20-alpine AS runner

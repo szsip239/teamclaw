@@ -109,7 +109,7 @@ export function useUpdateAgentConfig(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateAgentConfigInput) =>
-      api.put<{ status: string; agentId: string }>(
+      api.patch<{ status: string; agentId: string }>(
         `/api/v1/agents/${encodeAgentId(id)}`,
         data,
       ),

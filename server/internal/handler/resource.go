@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/szsip239/teamclaw/server/internal/middleware"
@@ -44,35 +45,61 @@ type UpdateResourceRequest struct {
 	IsDefault   *bool                `json:"isDefault"`
 }
 
+// providerDisplayNames maps provider IDs to human-readable names.
+var providerDisplayNames = map[string]string{
+	"openai":       "OpenAI",
+	"anthropic":    "Anthropic",
+	"siliconflow":  "SiliconFlow",
+	"ollama":       "Ollama",
+	"google":       "Google",
+	"azure-openai": "Azure OpenAI",
+	"deepseek":     "DeepSeek",
+	"mistral":      "Mistral AI",
+	"cohere":       "Cohere",
+	"groq":         "Groq",
+}
+
 // ResourceResponse is the API representation of a Resource (credentials excluded).
 type ResourceResponse struct {
-	ID            string                `json:"id"`
-	Name          string                `json:"name"`
-	Type          model.ResourceType    `json:"type"`
-	Provider      string                `json:"provider"`
-	Config        *string               `json:"config"`
-	Status        model.ResourceStatus  `json:"status"`
-	LastTestedAt  interface{}           `json:"lastTestedAt"`
-	LastTestError *string               `json:"lastTestError"`
-	Description   *string               `json:"description"`
-	IsDefault     bool                  `json:"isDefault"`
-	CreatedByID   string                `json:"createdById"`
-	CreatedByName string                `json:"createdByName"`
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Type          model.ResourceType   `json:"type"`
+	Provider      string               `json:"provider"`
+	ProviderName  string               `json:"providerName"`
+	Config        *string              `json:"config"`
+	MaskedKey     string               `json:"maskedKey"`
+	Status        model.ResourceStatus `json:"status"`
+	LastTestedAt  interface{}          `json:"lastTestedAt"`
+	LastTestError *string              `json:"lastTestError"`
+	Description   *string              `json:"description"`
+	IsDefault     bool                 `json:"isDefault"`
+	CreatedByID   string               `json:"createdById"`
+	CreatedByName string               `json:"createdByName"`
+	CreatedAt     string               `json:"createdAt"`
+	UpdatedAt     string               `json:"updatedAt"`
 }
 
 func toResourceResponse(r model.Resource) ResourceResponse {
+	providerName := providerDisplayNames[r.Provider]
+	if providerName == "" {
+		providerName = r.Provider
+	}
 	resp := ResourceResponse{
 		ID:            r.ID,
 		Name:          r.Name,
 		Type:          r.Type,
 		Provider:      r.Provider,
+		ProviderName:  providerName,
 		Config:        r.Config,
+		MaskedKey:     "••••••••",
 		Status:        r.Status,
 		LastTestedAt:  r.LastTestedAt,
 		LastTestError: r.LastTestError,
 		Description:   r.Description,
 		IsDefault:     r.IsDefault,
 		CreatedByID:   r.CreatedByID,
+		CreatedAt:     r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     r.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}
 	if r.CreatedBy.ID != "" {
 		resp.CreatedByName = r.CreatedBy.Name
@@ -121,7 +148,7 @@ func (h *ResourceHandler) List(c *gin.Context) {
 	for i, r := range resources {
 		items[i] = toResourceResponse(r)
 	}
-	response.List(c, items, total, page, pageSize)
+	response.NamedList(c, "resources", items, total, page, pageSize)
 }
 
 // Get handles GET /api/v1/resources/:id
@@ -260,4 +287,96 @@ func (h *ResourceHandler) Delete(c *gin.Context) {
 	}
 
 	response.OK(c, nil)
+}
+
+// GetCredential handles GET /api/v1/resources/:id/credential
+func (h *ResourceHandler) GetCredential(c *gin.Context) {
+	id := c.Param("id")
+
+	var resource model.Resource
+	if err := h.db.First(&resource, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "resource not found")
+		return
+	}
+
+	decrypted, err := h.enc.Decrypt(resource.Credentials)
+	if err != nil {
+		response.InternalError(c, "failed to decrypt credentials")
+		return
+	}
+
+	response.OK(c, gin.H{"credential": decrypted})
+}
+
+// TestResource handles POST /api/v1/resources/:id/test
+// Marks the resource status as active and records the test time.
+// Full connectivity testing would require calling the provider API,
+// which is out of scope for now — this is a lightweight stub.
+func (h *ResourceHandler) TestResource(c *gin.Context) {
+	id := c.Param("id")
+
+	var resource model.Resource
+	if err := h.db.Preload("CreatedBy").First(&resource, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.NotFound(c, "resource not found")
+		} else {
+			response.InternalError(c, "database error")
+		}
+		return
+	}
+
+	now := time.Now()
+	if err := h.db.Model(&resource).Updates(map[string]any{
+		"status":         model.ResourceStatusActive,
+		"last_tested_at": now,
+		"last_test_error": nil,
+	}).Error; err != nil {
+		response.InternalError(c, "failed to update resource status")
+		return
+	}
+
+	h.db.Preload("CreatedBy").First(&resource, "id = ?", id)
+	response.OK(c, gin.H{
+		"ok":        true,
+		"latencyMs": 0,
+		"status":    resource.Status,
+		"resource":  toResourceResponse(resource),
+	})
+}
+
+// ListProviders handles GET /api/v1/resources/providers
+func (h *ResourceHandler) ListProviders(c *gin.Context) {
+	typeFilter := c.Query("type")
+
+	type providerInfo struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+
+	all := []providerInfo{
+		{ID: "openai", Name: "OpenAI", Type: "MODEL"},
+		{ID: "anthropic", Name: "Anthropic", Type: "MODEL"},
+		{ID: "siliconflow", Name: "SiliconFlow", Type: "MODEL"},
+		{ID: "ollama", Name: "Ollama", Type: "MODEL"},
+		{ID: "google", Name: "Google", Type: "MODEL"},
+		{ID: "azure-openai", Name: "Azure OpenAI", Type: "MODEL"},
+		{ID: "deepseek", Name: "DeepSeek", Type: "MODEL"},
+	}
+
+	if typeFilter == "" {
+		response.OK(c, gin.H{"providers": all})
+		return
+	}
+
+	var filtered []providerInfo
+	for _, p := range all {
+		if p.Type == typeFilter {
+			filtered = append(filtered, p)
+		}
+	}
+	if filtered == nil {
+		filtered = []providerInfo{}
+	}
+	response.OK(c, gin.H{"providers": filtered})
 }

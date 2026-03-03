@@ -9,6 +9,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -20,6 +21,47 @@ import (
 	"github.com/szsip239/teamclaw/server/internal/pkg/crypto"
 	gatewaySvc "github.com/szsip239/teamclaw/server/internal/service/gateway"
 )
+
+// seedDefaultAdmin creates a default SYSTEM_ADMIN account on first run.
+// It is idempotent — if any admin already exists, it does nothing.
+func seedDefaultAdmin(db *gorm.DB, logger *zap.Logger) {
+	var count int64
+	db.Model(&model.User{}).Where("role = ?", model.RoleSystemAdmin).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	const defaultEmail = "admin@teamclaw.local"
+	const defaultPassword = "Admin@123456"
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(defaultPassword), 12)
+	if err != nil {
+		logger.Error("Failed to hash default admin password", zap.Error(err))
+		return
+	}
+
+	now := time.Now()
+	admin := model.User{
+		BaseModel: model.BaseModel{
+			ID:        model.GenerateID(),
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		Email:        defaultEmail,
+		Name:         "Admin",
+		PasswordHash: string(hash),
+		Role:         model.RoleSystemAdmin,
+		Status:       model.UserStatusActive,
+	}
+	if err := db.Create(&admin).Error; err != nil {
+		logger.Error("Failed to create default admin", zap.Error(err))
+		return
+	}
+	logger.Info("Default admin account created",
+		zap.String("email", defaultEmail),
+		zap.String("password", defaultPassword),
+	)
+}
 
 func main() {
 	// ── Load config ────────────────────────────────────
@@ -63,6 +105,41 @@ func main() {
 		log.Fatalf("Failed to auto-migrate: %v", err)
 	}
 	logger.Info("Database migrated successfully")
+
+	// Fix unique indexes to use partial indexes (exclude soft-deleted rows).
+	// GORM's `uniqueIndex` tag creates plain unique indexes which conflict with
+	// soft-deleted records sharing the same name/email/slug.
+	type migration struct{ drop, create string }
+	partialIndexMigrations := []migration{
+		{
+			"DROP INDEX IF EXISTS idx_departments_name",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_name ON departments (name) WHERE deleted_at IS NULL",
+		},
+		{
+			"DROP INDEX IF EXISTS idx_instances_name",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_name ON instances (name) WHERE deleted_at IS NULL",
+		},
+		{
+			"DROP INDEX IF EXISTS idx_users_email",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email) WHERE deleted_at IS NULL",
+		},
+		{
+			"DROP INDEX IF EXISTS idx_skills_slug",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_slug ON skills (slug) WHERE deleted_at IS NULL",
+		},
+	}
+	for _, m := range partialIndexMigrations {
+		if err := db.Exec(m.drop).Error; err != nil {
+			logger.Warn("Failed to drop index", zap.String("sql", m.drop), zap.Error(err))
+		}
+		if err := db.Exec(m.create).Error; err != nil {
+			logger.Warn("Failed to create partial index", zap.String("sql", m.create), zap.Error(err))
+		}
+	}
+	logger.Info("Partial unique indexes applied")
+
+	// ── Seed default admin (first-run only) ────────────
+	seedDefaultAdmin(db, logger)
 
 	// ── Casbin ─────────────────────────────────────────
 	enforcer, err := casbin.NewEnforcer("configs/rbac_model.conf", "configs/rbac_policy.csv")
@@ -120,8 +197,10 @@ func main() {
 	{
 		users.GET("", middleware.RequirePermission(enforcer, "users", "list"), userHandler.List)
 		users.POST("", middleware.RequirePermission(enforcer, "users", "create"), userHandler.Create)
+		users.GET("/:id", middleware.RequirePermission(enforcer, "users", "list"), userHandler.Get)
 		users.PATCH("/:id", middleware.RequirePermission(enforcer, "users", "update"), userHandler.Update)
 		users.DELETE("/:id", middleware.RequirePermission(enforcer, "users", "delete"), userHandler.Delete)
+		users.POST("/:id/reset-password", middleware.RequirePermission(enforcer, "users", "update"), userHandler.ResetPassword)
 	}
 
 	departmentHandler := handler.NewDepartmentHandler(db)
@@ -155,6 +234,7 @@ func main() {
 		agents.POST("", middleware.RequirePermission(enforcer, "agents", "create"), agentHandler.Create)
 		agents.POST("/clone", middleware.RequirePermission(enforcer, "agents", "create"), agentHandler.Clone)
 		agents.PATCH("/:id", middleware.RequirePermission(enforcer, "agents", "manage"), agentHandler.Update)
+		agents.PATCH("/:id/classify", middleware.RequirePermission(enforcer, "agents", "manage"), agentHandler.Classify)
 		agents.DELETE("/:id", middleware.RequirePermission(enforcer, "agents", "manage"), agentHandler.Delete)
 	}
 
@@ -170,7 +250,7 @@ func main() {
 	dashboardHandler := handler.NewDashboardHandler(db)
 	dashboard := protected.Group("/dashboard")
 	{
-		dashboard.GET("/stats", middleware.RequirePermission(enforcer, "monitor", "view_basic"), dashboardHandler.Stats)
+		dashboard.GET("", middleware.RequirePermission(enforcer, "monitor", "view_basic"), dashboardHandler.Stats)
 	}
 
 	skillHandler := handler.NewSkillHandler(db)
@@ -187,10 +267,22 @@ func main() {
 	resources := protected.Group("/resources")
 	{
 		resources.GET("", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.List)
+		resources.GET("/providers", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.ListProviders)
 		resources.GET("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Get)
+		resources.GET("/:id/credential", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.GetCredential)
 		resources.POST("", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Create)
+		resources.POST("/:id/test", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.TestResource)
 		resources.PATCH("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Update)
 		resources.DELETE("/:id", middleware.RequirePermission(enforcer, "resources", "manage"), resourceHandler.Delete)
+	}
+
+	// Flat instance-access routes (used by frontend hooks)
+	instanceAccess := protected.Group("/instance-access")
+	{
+		instanceAccess.GET("", middleware.RequirePermission(enforcer, "instances", "manage"), instanceHandler.ListAccessFlat)
+		instanceAccess.POST("", middleware.RequirePermission(enforcer, "instances", "manage"), instanceHandler.GrantAccessFlat)
+		instanceAccess.PATCH("/:id", middleware.RequirePermission(enforcer, "instances", "manage"), instanceHandler.UpdateAccessFlat)
+		instanceAccess.DELETE("/:id", middleware.RequirePermission(enforcer, "instances", "manage"), instanceHandler.RevokeAccessFlat)
 	}
 
 	rbacHandler := handler.NewRBACHandler(enforcer)
@@ -225,6 +317,31 @@ func main() {
 		go checker.Start(healthCtx)
 	}()
 
+	// ── Instance Extras (需要 gateway registry) ────────
+	instanceExtrasHandler := handler.NewInstanceExtrasHandler(db, enc, gatewayRegistry)
+	instances.GET("/:id/health", middleware.RequirePermission(enforcer, "instances", "view"), instanceExtrasHandler.GetHealth)
+	instances.GET("/:id/dashboard", middleware.RequirePermission(enforcer, "instances", "view"), instanceExtrasHandler.GetDashboard)
+	instances.GET("/:id/schema", middleware.RequirePermission(enforcer, "instances", "manage"), instanceExtrasHandler.GetSchema)
+	instances.GET("/:id/config", middleware.RequirePermission(enforcer, "instances", "manage"), instanceExtrasHandler.GetConfig)
+	instances.PUT("/:id/config", middleware.RequirePermission(enforcer, "instances", "manage"), instanceExtrasHandler.UpdateConfig)
+	instances.POST("/:id/config-patch", middleware.RequirePermission(enforcer, "instances", "manage"), instanceExtrasHandler.ConfigPatch)
+	instances.GET("/:id/agent-defaults", middleware.RequirePermission(enforcer, "instances", "view"), instanceExtrasHandler.GetAgentDefaults)
+	instances.PUT("/:id/agent-defaults", middleware.RequirePermission(enforcer, "instances", "manage"), instanceExtrasHandler.UpdateAgentDefaults)
+
+	// ── Session Files ───────────────────────────────────
+	sessionFilesHandler := handler.NewSessionFilesHandler(db)
+	sessionFiles := protected.Group("/chat/sessions/:id/files")
+	{
+		sessionFiles.GET("", middleware.RequirePermission(enforcer, "sessions", "view_own"), sessionFilesHandler.List)
+		sessionFiles.GET("/watch", middleware.RequirePermission(enforcer, "sessions", "view_own"), sessionFilesHandler.Watch)
+		sessionFiles.GET("/download-all", middleware.RequirePermission(enforcer, "sessions", "view_own"), sessionFilesHandler.DownloadAll)
+		sessionFiles.GET("/:zone/*path", middleware.RequirePermission(enforcer, "sessions", "view_own"), sessionFilesHandler.Download)
+		sessionFiles.POST("/upload", middleware.RequirePermission(enforcer, "chat", "use"), sessionFilesHandler.Upload)
+		sessionFiles.POST("/mkdir", middleware.RequirePermission(enforcer, "chat", "use"), sessionFilesHandler.Mkdir)
+		sessionFiles.POST("/move", middleware.RequirePermission(enforcer, "chat", "use"), sessionFilesHandler.Move)
+		sessionFiles.DELETE("/input/*path", middleware.RequirePermission(enforcer, "chat", "use"), sessionFilesHandler.Delete)
+	}
+
 	// Gateway management endpoints (status + manual connect/disconnect)
 	gatewayHandler := handler.NewGatewayHandler(db, enc, gatewayRegistry)
 	gw := protected.Group("/gateway")
@@ -242,6 +359,8 @@ func main() {
 		chat.POST("/send", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.Send)
 		chat.GET("/agents", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.ListAgents)
 		chat.GET("/sessions", middleware.RequirePermission(enforcer, "sessions", "view_own"), chatHandler.ListSessions)
+		chat.GET("/sessions/:id", middleware.RequirePermission(enforcer, "sessions", "view_own"), chatHandler.GetSession)
+		chat.DELETE("/sessions/:id", middleware.RequirePermission(enforcer, "sessions", "view_own"), chatHandler.DeleteSession)
 		chat.GET("/sessions/:id/history", middleware.RequirePermission(enforcer, "sessions", "view_own"), chatHandler.GetHistory)
 		chat.POST("/sessions/:id/clear-context", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.ClearContext)
 		chat.POST("/conversations/new", middleware.RequirePermission(enforcer, "chat", "use"), chatHandler.NewConversation)

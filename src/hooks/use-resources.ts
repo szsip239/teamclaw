@@ -6,11 +6,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { api } from "@/lib/api-client"
+import { getProviderInfoList } from "@/lib/resources/providers"
 import type {
   ResourceListResponse,
   ResourceDetail,
   TestConnectionResult,
-  ProviderListResponse,
+  ResourceType,
 } from "@/types/resource"
 import type {
   CreateResourceInput,
@@ -69,13 +70,15 @@ export function useResource(id: string | null) {
 }
 
 // ─── Providers ───────────────────────────────────────────────────────
+// Uses the local registry (providers.ts) — no API call needed since
+// the provider list is static and the local registry has full metadata.
 
 export function useProviders(type?: string) {
-  const qs = type && type !== "all" ? `?type=${type}` : ""
+  const resourceType = (type && type !== "all") ? type as ResourceType : undefined
   return useQuery({
     queryKey: [...resourceKeys.providers(), type ?? "all"],
-    queryFn: () =>
-      api.get<ProviderListResponse>(`/api/v1/resources/providers${qs}`),
+    queryFn: () => ({ providers: getProviderInfoList(resourceType) }),
+    staleTime: Infinity, // static data, never stale
   })
 }
 
@@ -96,7 +99,7 @@ export function useUpdateResource(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateResourceInput) =>
-      api.put<ResourceDetail>(`/api/v1/resources/${id}`, data),
+      api.patch<ResourceDetail>(`/api/v1/resources/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: resourceKeys.lists() })
       qc.invalidateQueries({ queryKey: resourceKeys.detail(id) })

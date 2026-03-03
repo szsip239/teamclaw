@@ -17,7 +17,7 @@ export const updateUserSchema = z.object({
   name: z.string().min(2, '姓名至少2个字符').max(50, '姓名最多50个字符').optional(),
   role: z.enum(['SYSTEM_ADMIN', 'DEPT_ADMIN', 'USER']).optional(),
   departmentId: z.string().nullable().optional(),
-  status: z.enum(['ACTIVE', 'DISABLED']).optional(),
+  status: z.enum(['ACTIVE', 'DISABLED', 'PENDING']).optional(),
 })
 
 export const resetPasswordSchema = z.object({

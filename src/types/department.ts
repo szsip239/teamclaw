@@ -8,6 +8,7 @@ export interface DepartmentResponse {
   updatedAt: string
 }
 
+
 export interface DepartmentDetailResponse extends DepartmentResponse {
   users: {
     id: string

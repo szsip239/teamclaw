@@ -122,7 +122,7 @@ export function useUpdateInstance(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateInstanceInput) =>
-      api.put<{ instance: InstanceResponse }>(`/api/v1/instances/${id}`, data),
+      api.patch<{ instance: InstanceResponse }>(`/api/v1/instances/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: instanceKeys.lists() })
       qc.invalidateQueries({ queryKey: instanceKeys.detail(id) })

@@ -98,8 +98,9 @@ export function ChatSessionList() {
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
+              className="size-6 shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
               onClick={(e) => handleDelete(session.id, e)}
+              aria-label="Delete session"
             >
               <Trash2 className="size-3" />
             </Button>

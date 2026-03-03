@@ -1,4 +1,5 @@
-import type { Role, UserStatus } from '@/generated/prisma'
+export type Role = 'SYSTEM_ADMIN' | 'DEPT_ADMIN' | 'USER'
+export type UserStatus = 'ACTIVE' | 'DISABLED' | 'PENDING'
 
 export interface UserResponse {
   id: string

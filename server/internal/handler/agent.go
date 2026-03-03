@@ -20,7 +20,8 @@ func NewAgentHandler(db *gorm.DB) *AgentHandler { return &AgentHandler{db: db} }
 
 type CreateAgentRequest struct {
 	InstanceID string               `json:"instanceId" binding:"required"`
-	AgentID    string               `json:"agentId" binding:"required,min=1,max=100"`
+	AgentID    string               `json:"agentId"`   // primary field name
+	ID         string               `json:"id"`        // alias used by frontend
 	Category   model.AgentCategory  `json:"category" binding:"omitempty,oneof=DEFAULT DEPARTMENT PERSONAL"`
 	DeptID     *string              `json:"departmentId"`
 	OwnerID    *string              `json:"ownerId"`
@@ -81,7 +82,7 @@ func (h *AgentHandler) List(c *gin.Context) {
 	if model.Role(middleware.GetUserRole(c)) != model.RoleSystemAdmin {
 		ids, hasAccess := h.accessibleInstanceIDs(c)
 		if !hasAccess {
-			response.List(c, []model.AgentMetaResponse{}, 0, page, pageSize)
+			response.NamedList(c, "agents", []model.AgentMetaResponse{}, 0, page, pageSize)
 			return
 		}
 		query = query.Where("instance_id IN ?", ids)
@@ -107,7 +108,7 @@ func (h *AgentHandler) List(c *gin.Context) {
 	for i, a := range agents {
 		items[i] = a.ToResponse()
 	}
-	response.List(c, items, total, page, pageSize)
+	response.NamedList(c, "agents", items, total, page, pageSize)
 }
 
 // Get handles GET /api/v1/agents/:id
@@ -165,6 +166,16 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// Resolve agentId: accept either "agentId" or "id" field (frontend uses "id").
+	agentID := req.AgentID
+	if agentID == "" {
+		agentID = req.ID
+	}
+	if agentID == "" {
+		response.BadRequest(c, "agentId is required")
+		return
+	}
+
 	// Verify the instance exists.
 	if err := h.db.First(&model.Instance{}, "id = ?", req.InstanceID).Error; err != nil {
 		response.BadRequest(c, "instance not found")
@@ -174,7 +185,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 	// Check for duplicate agentId on the same instance.
 	var count int64
 	h.db.Model(&model.AgentMeta{}).
-		Where("instance_id = ? AND agent_id = ?", req.InstanceID, req.AgentID).
+		Where("instance_id = ? AND agent_id = ?", req.InstanceID, agentID).
 		Count(&count)
 	if count > 0 {
 		response.Conflict(c, "agent already registered on this instance")
@@ -189,7 +200,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 	agent := model.AgentMeta{
 		BaseModel:    newBaseModel(),
 		InstanceID:   req.InstanceID,
-		AgentID:      req.AgentID,
+		AgentID:      agentID,
 		Category:     category,
 		DepartmentID: req.DeptID,
 		OwnerID:      req.OwnerID,
@@ -246,7 +257,11 @@ func (h *AgentHandler) Update(c *gin.Context) {
 	}
 
 	if len(updates) == 0 {
-		response.BadRequest(c, "no fields to update")
+		// No metadata fields to update (request may contain gateway config fields).
+		// Gracefully return current state without error.
+		h.db.Preload("Instance").Preload("Department").Preload("Owner").Preload("CreatedBy").
+			First(&agent, "id = ?", id)
+		response.OK(c, agent.ToResponse())
 		return
 	}
 
@@ -281,6 +296,41 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 
 // Clone handles POST /api/v1/agents/clone
 // Copies an existing agent meta record with a new agentId (and optionally different category/dept).
+// Classify handles PATCH /api/v1/agents/:id/classify
+func (h *AgentHandler) Classify(c *gin.Context) {
+	id := c.Param("id")
+
+	var req struct {
+		Category     model.AgentCategory `json:"category" binding:"required,oneof=DEFAULT DEPARTMENT PERSONAL"`
+		DepartmentID *string             `json:"departmentId"`
+		OwnerID      *string             `json:"ownerId"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	var meta model.AgentMeta
+	if err := h.db.First(&meta, "id = ?", id).Error; err != nil {
+		response.NotFound(c, "agent not found")
+		return
+	}
+
+	updates := map[string]any{
+		"category":      req.Category,
+		"department_id": req.DepartmentID,
+		"owner_id":      req.OwnerID,
+	}
+	if err := h.db.Model(&meta).Updates(updates).Error; err != nil {
+		response.InternalError(c, "failed to classify agent")
+		return
+	}
+
+	h.db.Preload("Instance").Preload("Department").Preload("Owner").Preload("CreatedBy").
+		First(&meta, "id = ?", id)
+	response.OK(c, meta.ToResponse())
+}
+
 func (h *AgentHandler) Clone(c *gin.Context) {
 	var req CloneAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

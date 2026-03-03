@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
 	"github.com/szsip239/teamclaw/server/internal/model"
 	"github.com/szsip239/teamclaw/server/internal/pkg/response"
@@ -31,9 +33,15 @@ type UpdateDepartmentRequest struct {
 
 // ─── Helpers ───────────────────────────────────────────
 
-func (h *DepartmentHandler) memberCount(deptID string) int64 {
+func (h *DepartmentHandler) userCount(deptID string) int64 {
 	var count int64
 	h.db.Model(&model.User{}).Where("department_id = ?", deptID).Count(&count)
+	return count
+}
+
+func (h *DepartmentHandler) accessCount(deptID string) int64 {
+	var count int64
+	h.db.Model(&model.InstanceAccess{}).Where("department_id = ?", deptID).Count(&count)
 	return count
 }
 
@@ -58,9 +66,10 @@ func (h *DepartmentHandler) List(c *gin.Context) {
 		Limit(pageSize).
 		Find(&depts)
 
-	// Batch-count members to avoid N+1.
+	// Batch-count members and instance accesses to avoid N+1.
 	// Guard against empty slice — IN () is invalid SQL.
-	countMap := make(map[string]int64)
+	userCountMap := make(map[string]int64)
+	accessCountMap := make(map[string]int64)
 	if len(depts) > 0 {
 		deptIDs := make([]string, len(depts))
 		for i, d := range depts {
@@ -71,27 +80,38 @@ func (h *DepartmentHandler) List(c *gin.Context) {
 			DepartmentID string
 			Count        int64
 		}
-		var counts []countRow
+
+		var userCounts []countRow
 		h.db.Model(&model.User{}).
 			Select("department_id, count(*) as count").
 			Where("department_id IN ?", deptIDs).
 			Group("department_id").
-			Scan(&counts)
+			Scan(&userCounts)
+		for _, row := range userCounts {
+			userCountMap[row.DepartmentID] = row.Count
+		}
 
-		for _, row := range counts {
-			countMap[row.DepartmentID] = row.Count
+		var accessCounts []countRow
+		h.db.Model(&model.InstanceAccess{}).
+			Select("department_id, count(*) as count").
+			Where("department_id IN ?", deptIDs).
+			Group("department_id").
+			Scan(&accessCounts)
+		for _, row := range accessCounts {
+			accessCountMap[row.DepartmentID] = row.Count
 		}
 	}
 
 	items := make([]model.DepartmentResponse, len(depts))
 	for i, d := range depts {
-		items[i] = d.ToResponse(countMap[d.ID])
+		items[i] = d.ToResponse(userCountMap[d.ID], accessCountMap[d.ID])
 	}
 
-	response.List(c, items, total, page, pageSize)
+	response.NamedList(c, "departments", items, total, page, pageSize)
 }
 
 // Get handles GET /api/v1/departments/:id
+// Returns DepartmentDetailResponse (includes users + instanceAccess lists).
 func (h *DepartmentHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 
@@ -101,7 +121,79 @@ func (h *DepartmentHandler) Get(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, dept.ToResponse(h.memberCount(id)))
+	// Load members.
+	var users []model.User
+	h.db.Where("department_id = ?", id).Find(&users)
+
+	type memberRef struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Email  string `json:"email"`
+		Role   string `json:"role"`
+		Status string `json:"status"`
+		Avatar *string `json:"avatar"`
+	}
+	members := make([]memberRef, len(users))
+	for i, u := range users {
+		members[i] = memberRef{
+			ID:     u.ID,
+			Name:   u.Name,
+			Email:  u.Email,
+			Role:   string(u.Role),
+			Status: string(u.Status),
+			Avatar: u.Avatar,
+		}
+	}
+
+	// Load instance accesses.
+	var accesses []model.InstanceAccess
+	h.db.Preload("Instance").Preload("GrantedBy").
+		Where("department_id = ?", id).Find(&accesses)
+
+	type accessRef struct {
+		ID             string   `json:"id"`
+		InstanceID     string   `json:"instanceId"`
+		InstanceName   string   `json:"instanceName"`
+		InstanceStatus string   `json:"instanceStatus"`
+		AgentIDs       []string `json:"agentIds"`
+		GrantedByName  string   `json:"grantedByName"`
+		CreatedAt      string   `json:"createdAt"`
+	}
+	accessList := make([]accessRef, len(accesses))
+	for i, a := range accesses {
+		ar := accessRef{
+			ID:         a.ID,
+			InstanceID: a.InstanceID,
+			AgentIDs:   []string{},
+			CreatedAt:  a.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		}
+		if a.Instance.ID != "" {
+			ar.InstanceName = a.Instance.Name
+			ar.InstanceStatus = string(a.Instance.Status)
+		}
+		if a.GrantedBy.ID != "" {
+			ar.GrantedByName = a.GrantedBy.Name
+		}
+		if a.AgentIDs != nil && *a.AgentIDs != "" {
+			_ = json.Unmarshal([]byte(*a.AgentIDs), &ar.AgentIDs)
+		}
+		accessList[i] = ar
+	}
+
+	base := dept.ToResponse(int64(len(members)), int64(len(accessList)))
+	response.OK(c, gin.H{
+		"department": gin.H{
+			"id":             base.ID,
+			"name":           base.Name,
+			"description":    base.Description,
+			"userCount":      base.UserCount,
+			"accessCount":    base.AccessCount,
+			"createdAt":      base.CreatedAt,
+			"updatedAt":      base.UpdatedAt,
+			"users":          members,
+			"instanceAccess": accessList,
+		},
+	})
 }
 
 // Create handles POST /api/v1/departments
@@ -129,7 +221,7 @@ func (h *DepartmentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Created(c, dept.ToResponse(0))
+	response.Created(c, dept.ToResponse(0, 0))
 }
 
 // Update handles PATCH /api/v1/departments/:id
@@ -175,7 +267,7 @@ func (h *DepartmentHandler) Update(c *gin.Context) {
 	// Re-fetch to get the updated values; Updates() does not mutate the struct.
 	h.db.First(&dept, "id = ?", id)
 
-	response.OK(c, dept.ToResponse(h.memberCount(id)))
+	response.OK(c, dept.ToResponse(h.userCount(id), h.accessCount(id)))
 }
 
 // Delete handles DELETE /api/v1/departments/:id
@@ -188,7 +280,7 @@ func (h *DepartmentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if h.memberCount(id) > 0 {
+	if h.userCount(id) > 0 {
 		response.BadRequest(c, "cannot delete department with existing members")
 		return
 	}

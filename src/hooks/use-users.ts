@@ -78,7 +78,7 @@ export function useUpdateUser(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UpdateUserInput) =>
-      api.put<{ user: UserResponse }>(`/api/v1/users/${id}`, data),
+      api.patch<{ user: UserResponse }>(`/api/v1/users/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: userKeys.lists() })
       qc.invalidateQueries({ queryKey: userKeys.detail(id) })

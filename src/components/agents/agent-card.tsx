@@ -92,14 +92,16 @@ export function AgentCard({ agent, index, onClick, onClone }: AgentCardProps) {
       )}
 
       {/* Info row */}
-      <div className="mt-3.5 space-y-1.5 text-[12px] text-muted-foreground">
-        <div className="flex items-center gap-1.5 truncate">
-          <span className="font-mono opacity-60">~/</span>
-          <span className="truncate font-mono">
-            {agent.workspace.replace(/^~\//, "")}
-          </span>
+      {agent.workspace && (
+        <div className="mt-3.5 space-y-1.5 text-[12px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 truncate">
+            <span className="font-mono opacity-60">~/</span>
+            <span className="truncate font-mono">
+              {agent.workspace.replace(/^~\//, "")}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tags + Clone button */}
       <div className="mt-3 flex items-center justify-between gap-2">

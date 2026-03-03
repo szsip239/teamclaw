@@ -158,19 +158,25 @@ func (Department) TableName() string { return "departments" }
 
 // DepartmentResponse is the API representation of a department.
 type DepartmentResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	MemberCount int64   `json:"memberCount"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+	UserCount   int64     `json:"userCount"`
+	AccessCount int64     `json:"accessCount"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // ToResponse converts Department to DepartmentResponse.
-func (d *Department) ToResponse(memberCount int64) DepartmentResponse {
+func (d *Department) ToResponse(userCount, accessCount int64) DepartmentResponse {
 	return DepartmentResponse{
 		ID:          d.ID,
 		Name:        d.Name,
 		Description: d.Description,
-		MemberCount: memberCount,
+		UserCount:   userCount,
+		AccessCount: accessCount,
+		CreatedAt:   d.CreatedAt,
+		UpdatedAt:   d.UpdatedAt,
 	}
 }
 
@@ -293,14 +299,17 @@ type InstanceAccessResponse struct {
 	DepartmentID   string    `json:"departmentId"`
 	DepartmentName string    `json:"departmentName"`
 	InstanceID     string    `json:"instanceId"`
+	InstanceName   string    `json:"instanceName"`
+	InstanceStatus string    `json:"instanceStatus"`
 	AgentIDs       []string  `json:"agentIds"`
 	GrantedByID    string    `json:"grantedById"`
 	GrantedByName  string    `json:"grantedByName"`
 	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // ToResponse converts InstanceAccess to InstanceAccessResponse.
-// Preload("Department") and Preload("GrantedBy") before calling.
+// Preload("Department"), Preload("Instance"), and Preload("GrantedBy") before calling.
 func (a *InstanceAccess) ToResponse() InstanceAccessResponse {
 	resp := InstanceAccessResponse{
 		ID:           a.ID,
@@ -309,9 +318,14 @@ func (a *InstanceAccess) ToResponse() InstanceAccessResponse {
 		AgentIDs:     []string{},
 		GrantedByID:  a.GrantedByID,
 		CreatedAt:    a.CreatedAt,
+		UpdatedAt:    a.UpdatedAt,
 	}
 	if a.Department.ID != "" {
 		resp.DepartmentName = a.Department.Name
+	}
+	if a.Instance.ID != "" {
+		resp.InstanceName = a.Instance.Name
+		resp.InstanceStatus = string(a.Instance.Status)
 	}
 	if a.GrantedBy.ID != "" {
 		resp.GrantedByName = a.GrantedBy.Name
@@ -382,6 +396,7 @@ type AgentMetaResponse struct {
 	InstanceID     string        `json:"instanceId"`
 	InstanceName   string        `json:"instanceName"`
 	AgentID        string        `json:"agentId"`
+	Name           string        `json:"name"` // display name; same as AgentID until enriched by gateway
 	Category       AgentCategory `json:"category"`
 	DepartmentID   *string       `json:"departmentId"`
 	DepartmentName *string       `json:"departmentName"`
@@ -400,6 +415,7 @@ func (a *AgentMeta) ToResponse() AgentMetaResponse {
 		ID:           a.ID,
 		InstanceID:   a.InstanceID,
 		AgentID:      a.AgentID,
+		Name:         a.AgentID, // fallback; overridden by gateway enrichment when available
 		Category:     a.Category,
 		DepartmentID: a.DepartmentID,
 		OwnerID:      a.OwnerID,

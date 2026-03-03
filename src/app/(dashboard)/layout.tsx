@@ -20,8 +20,8 @@ export default function DashboardLayout({
   const t = useT()
 
   useEffect(() => {
-    fetchUser()
-  }, [fetchUser])
+    if (!user) fetchUser()
+  }, [fetchUser, user])
 
   useEffect(() => {
     if (!isLoading && !user) {

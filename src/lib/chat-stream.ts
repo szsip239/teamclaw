@@ -1,4 +1,5 @@
 import type { ChatStreamEvent } from '@/types/chat'
+import { getAccessToken } from '@/lib/api-client'
 
 export async function* streamChat(
   body: {
@@ -10,9 +11,19 @@ export async function* streamChat(
   },
   signal?: AbortSignal,
 ): AsyncGenerator<ChatStreamEvent> {
-  const response = await fetch('/api/v1/chat/send', {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+
+  const token = getAccessToken()
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ""
+  const response = await fetch(`${apiUrl}/api/v1/chat/send`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     credentials: 'include',
     signal,
@@ -21,7 +32,9 @@ export async function* streamChat(
   if (!response.ok) {
     const data = await response.json().catch(() => null)
     throw new Error(
-      (data as { error?: string } | null)?.error || '发送消息失败',
+      (data as { message?: string; error?: string } | null)?.message ||
+        (data as { message?: string; error?: string } | null)?.error ||
+        '发送消息失败',
     )
   }
 
