@@ -295,12 +295,12 @@ func main() {
 	}
 
 	containerHandler := handler.NewContainerHandler(db)
-	// Nested under instances for clear resource ownership
-	instances.POST("/:id/container", middleware.RequirePermission(enforcer, "instances", "manage"), containerHandler.Start)
-	instances.DELETE("/:id/container", middleware.RequirePermission(enforcer, "instances", "manage"), containerHandler.Stop)
-	instances.POST("/:id/container/restart", middleware.RequirePermission(enforcer, "instances", "manage"), containerHandler.Restart)
+	// Action-style routes (matched by frontend)
+	instances.POST("/:id/start", middleware.RequirePermission(enforcer, "instances", "manage"), containerHandler.Start)
+	instances.POST("/:id/stop", middleware.RequirePermission(enforcer, "instances", "manage"), containerHandler.Stop)
+	instances.POST("/:id/restart", middleware.RequirePermission(enforcer, "instances", "manage"), containerHandler.Restart)
 	instances.GET("/:id/container/status", middleware.RequirePermission(enforcer, "instances", "view"), containerHandler.Status)
-	instances.GET("/:id/container/logs", middleware.RequirePermission(enforcer, "instances", "view"), containerHandler.Logs)
+	instances.GET("/:id/logs", middleware.RequirePermission(enforcer, "instances", "view"), containerHandler.Logs)
 
 	// ── Gateway Registry ───────────────────────────────
 	gatewayRegistry := gatewaySvc.NewRegistry(db, logger, enc)
