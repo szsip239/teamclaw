@@ -8,7 +8,7 @@ import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
 import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget } from '@/lib/session-files/helpers'
 import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
-import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl } from '@/lib/chat/image-helpers'
+import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import { Prisma } from '@/generated/prisma'
@@ -281,6 +281,8 @@ export async function POST(req: NextRequest) {
   let lastThinkingContent = ''
   let lastImageCount = 0
   const pendingImageReads: Promise<void>[] = []
+  // Resolved in the async IIFE below; used by fetchAndEmitImages + tool result handler
+  let containerId: string | null = null
 
   function write(event: ChatStreamEvent) {
     if (closed) return
@@ -364,12 +366,14 @@ export async function POST(req: NextRequest) {
       // History fetch failed — fall through with whatever paths we found
     }
 
-    // 3. Deduplicate and read images
+    // 3. Deduplicate and read images (container → dockerManager, external → host fs)
     const uniquePaths = [...new Set(allPaths)]
     if (uniquePaths.length > 0) {
       await Promise.all(
         uniquePaths.map(async (p) => {
-          const dataUrl = await readImageAsDataUrl(p)
+          const dataUrl = containerId
+            ? await readContainerImageAsDataUrl(containerId, p)
+            : await readImageAsDataUrl(p)
           if (dataUrl) {
             const ext = extname(p).toLowerCase()
             write({ type: 'image', imageUrl: dataUrl, mimeType: MIME_BY_EXT[ext] })
@@ -488,7 +492,9 @@ export async function POST(req: NextRequest) {
         if (mediaPaths.length > 0) {
           const imageReadPromise = Promise.all(
             mediaPaths.map(async (p) => {
-              const dataUrl = await readImageAsDataUrl(p)
+              const dataUrl = containerId
+                ? await readContainerImageAsDataUrl(containerId, p)
+                : await readImageAsDataUrl(p)
               if (dataUrl) {
                 const ext = extname(p).toLowerCase()
                 write({ type: 'image', imageUrl: dataUrl, mimeType: MIME_BY_EXT[ext] })
@@ -527,6 +533,7 @@ export async function POST(req: NextRequest) {
           where: { id: instanceId },
           select: { containerId: true },
         })
+        containerId = instance?.containerId ?? null
         if (instance?.containerId) {
           const inputPath = buildSessionInputPath(agentId, activeSession.id)
 

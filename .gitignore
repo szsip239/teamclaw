@@ -64,6 +64,9 @@ docs/DEVELOPMENT.md
 scripts/debug-*.ts
 scripts/rebuild-test-data.ts
 
+# Docker Compose local overrides (may contain host-specific paths)
+docker-compose.override.yml
+
 # Claude Code private config
 CLAUDE.md
 .claude/

@@ -13,7 +13,7 @@ import {
   splitThinkingFallback,
   persistLiveAsSnapshot,
 } from '@/lib/chat/snapshot-helpers'
-import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl } from '@/lib/chat/image-helpers'
+import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type { ChatMessage, ChatToolCall, ChatSnapshotBatch, ChatHistoryResponse, ChatContentBlock } from '@/types/chat'
 
@@ -184,10 +184,20 @@ export const GET = withAuth(
 
           // Load image files referenced in tool results
           if (pendingImages.length > 0) {
+            // Container instances: read via Docker API; external instances: read from host fs
+            let histContainerId: string | null = null
+            const inst = await prisma.instance.findUnique({
+              where: { id: session.instanceId },
+              select: { containerId: true },
+            })
+            histContainerId = inst?.containerId ?? null
+
             const loaded = await Promise.all(
               pendingImages.map(async ({ messageIndex, path: p }) => ({
                 messageIndex,
-                dataUrl: await readImageAsDataUrl(p),
+                dataUrl: histContainerId
+                  ? await readContainerImageAsDataUrl(histContainerId, p)
+                  : await readImageAsDataUrl(p),
                 mimeType: MIME_BY_EXT[extname(p).toLowerCase()] || 'image/png',
               })),
             )
