@@ -46,6 +46,8 @@ for pattern in $PRIVATE_PATTERNS; do
       if is_allowed "$file"; then
         continue
       fi
+      # Skip vendor directories — third-party code may contain .env* files
+      case "$file" in server/vendor/*) continue ;; esac
       echo "❌ BLOCKED: private file staged for commit:"
       echo "   $file"
       echo "   This file is for local development only and must not be pushed."
@@ -56,11 +58,17 @@ for pattern in $PRIVATE_PATTERNS; do
 done
 
 # --- 2. Scan for hardcoded secrets ---
-SECRETS_REGEX='(PRIVATE_KEY|SECRET_KEY|ENCRYPTION_KEY|API_KEY|sk-[a-zA-Z0-9]{20,}|-----BEGIN\s*(RSA\s*)?PRIVATE\s*KEY)'
+# Only match lines where the keyword is followed by an actual value (=, :, or quote)
+# This avoids false positives in documentation and vendor constants.
+SECRETS_REGEX='(PRIVATE_KEY|SECRET_KEY|ENCRYPTION_KEY|API_KEY)\s*[=:]\s*["\x27]?[A-Za-z0-9+/]{20,}|sk-[a-zA-Z0-9]{20,}|-----BEGIN\s*(RSA\s*)?PRIVATE\s*KEY'
 
 for file in $STAGED; do
   # Skip the hook file itself to avoid self-detection
   case "$file" in .husky/*) continue ;; esac
+  # Skip vendor directory — third-party code is not our responsibility
+  case "$file" in server/vendor/*) continue ;; esac
+  # Skip documentation and agent workflow files — these only reference env var names
+  case "$file" in *.md) continue ;; esac
   if [ -f "$file" ]; then
     MATCH=$(git diff --cached -- "$file" | grep -E "^\+" | grep -iE "$SECRETS_REGEX" | head -3 || true)
     if [ -n "$MATCH" ]; then
