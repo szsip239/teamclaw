@@ -438,13 +438,13 @@ export async function POST(req: NextRequest) {
       fetchAndEmitImages(textContent).then(() => {
         write({ type: 'done' })
         // Post-run auto-snapshot (fire-and-forget)
-        saveLiveSnapshot(chatSessionId, client!, sessionKey).catch((err) =>
+        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId).catch((err) =>
           console.error('[live-snapshot] Save failed:', err),
         )
         cleanup()
       }).catch(() => {
         write({ type: 'done' })
-        saveLiveSnapshot(chatSessionId, client!, sessionKey).catch(() => {})
+        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId).catch(() => {})
         cleanup()
       })
     } else if (state === 'error') {
