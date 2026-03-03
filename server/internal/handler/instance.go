@@ -27,8 +27,11 @@ func NewInstanceHandler(db *gorm.DB, enc *crypto.Encryptor) *InstanceHandler {
 type CreateInstanceRequest struct {
 	Name         string          `json:"name" binding:"required,min=1,max=100"`
 	Description  *string         `json:"description" binding:"omitempty,max=500"`
-	GatewayURL   string          `json:"gatewayUrl" binding:"required"`
-	GatewayToken string          `json:"gatewayToken" binding:"required"`
+	// GatewayURL and GatewayToken are optional at creation time.
+	// Docker-launched instances receive these values once the container starts;
+	// externally-connected instances must supply them immediately.
+	GatewayURL   string          `json:"gatewayUrl"`
+	GatewayToken string          `json:"gatewayToken"`
 	ImageName    *string         `json:"imageName" binding:"omitempty,max=200"`
 	DockerConfig json.RawMessage `json:"dockerConfig"`
 }

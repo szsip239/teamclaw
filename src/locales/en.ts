@@ -729,6 +729,7 @@ const en: Record<TranslationKey, string> = {
   'user.namePlaceholder': 'User name',
   'user.passwordLabel': 'Password',
   'user.passwordPlaceholder': 'At least 8 characters with upper/lowercase and digits',
+  'user.passwordTooShort': 'Password must be at least 8 characters',
   'user.roleLabel': 'Role',
   'user.departmentLabel': 'Department',
   'user.selectDepartment': 'Select department',

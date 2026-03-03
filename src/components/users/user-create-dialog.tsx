@@ -149,6 +149,11 @@ export function UserCreateDialog({
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            {password.length > 0 && password.length < 8 && (
+              <p className="text-[12px] text-destructive">
+                {t('user.passwordTooShort')}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

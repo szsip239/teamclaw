@@ -727,6 +727,7 @@ const zhCN = {
   'user.namePlaceholder': '用户姓名',
   'user.passwordLabel': '密码',
   'user.passwordPlaceholder': '至少8个字符，含大小写字母和数字',
+  'user.passwordTooShort': '密码至少需要 8 个字符',
   'user.roleLabel': '角色',
   'user.departmentLabel': '部门',
   'user.selectDepartment': '选择部门',
