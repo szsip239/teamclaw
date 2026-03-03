@@ -398,36 +398,38 @@ export async function saveLiveSnapshot(
     mergeCapturedImages(liveMessages, capturedImages)
   }
 
-  // Carry forward contentBlocks from existing liveMessages.
-  // Previous runs' images are already persisted; don't lose them when
-  // saveLiveSnapshot overwrites with fresh (image-less) chat.history data.
+  // Detect session reset via gateway session ID.
+  // OpenClaw assigns an internal session ID (e.g. "16a0f62a") that changes
+  // when the session is rebuilt (SIGUSR1, reconnect, etc.). If it changes,
+  // archive the old liveMessages before overwriting.
+  const gwSessionId = historyResult.sessionId
   const session = await prisma.chatSession.findUnique({
     where: { id: chatSessionId },
-    select: { liveMessages: true },
+    select: { gwSessionId: true, liveMessages: true },
   })
   const existingLive = (session?.liveMessages ?? []) as unknown as ChatMessage[]
 
-  if (Array.isArray(existingLive)) {
+  if (session?.gwSessionId && gwSessionId && session.gwSessionId !== gwSessionId) {
+    if (Array.isArray(existingLive) && existingLive.length > 0) {
+      console.warn(
+        `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
+        `gwSessionId changed ${session.gwSessionId} → ${gwSessionId}. Archiving old messages.`,
+      )
+      await persistLiveAsSnapshot(chatSessionId, existingLive)
+    }
+  } else if (Array.isArray(existingLive)) {
+    // Same session — carry forward contentBlocks from existing liveMessages.
+    // Previous runs' images are already persisted; don't lose them when
+    // saveLiveSnapshot overwrites with fresh (image-less) chat.history data.
     mergeExistingContentBlocks(liveMessages, existingLive)
-  }
-
-  // Detect session reset (user message count decreased)
-  const newUserCount = liveMessages.filter(m => m.role === 'user').length
-  const oldUserCount = Array.isArray(existingLive)
-    ? existingLive.filter(m => m.role === 'user').length
-    : 0
-
-  if (oldUserCount > 0 && newUserCount < oldUserCount) {
-    console.warn(
-      `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
-      `old=${oldUserCount} user msgs, new=${newUserCount}. Archiving old messages.`,
-    )
-    await persistLiveAsSnapshot(chatSessionId, existingLive)
   }
 
   await prisma.chatSession.update({
     where: { id: chatSessionId },
-    data: { liveMessages: liveMessages as unknown as Prisma.InputJsonValue },
+    data: {
+      liveMessages: liveMessages as unknown as Prisma.InputJsonValue,
+      gwSessionId: gwSessionId || undefined,
+    },
   })
 }
 
