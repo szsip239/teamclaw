@@ -1,8 +1,5 @@
 import type { ChatMessage, ChatSnapshotBatch, ChatHistoryResponse } from '@/types/chat'
 
-/**
- * Create a separator marker message used by ChatMessageList to render dividers.
- */
 function createSeparator(
   type: 'context-reset' | 'context-restart',
   id: string,
@@ -16,10 +13,8 @@ function createSeparator(
 }
 
 /**
- * Assemble snapshots and current messages into a single list,
+ * Assemble snapshots and current messages into a flat list,
  * inserting separator markers between context resets.
- *
- * Shared by ChatMain (initial load) and syncFromHistory (streaming polls).
  */
 export function assembleHistoryMessages(
   snapshots: ChatSnapshotBatch[],
@@ -45,10 +40,6 @@ export function assembleHistoryMessages(
   return result
 }
 
-/**
- * Assemble a full ChatHistoryResponse into a flat message list.
- * Convenience wrapper for the common pattern.
- */
 export function assembleFromResponse(data: ChatHistoryResponse): ChatMessage[] {
   return assembleHistoryMessages(
     data.snapshots ?? [],

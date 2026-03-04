@@ -2,41 +2,20 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { computeImageId } from '@/lib/chat/image-helpers'
-import type { ChatMessage, ChatContentBlock } from '@/types/chat'
+import type { ChatContentBlock } from '@/types/chat'
 
 /**
- * Find an image data URL by its ID in an array of messages.
- * Uses pre-computed block.imageId when available (fast path),
- * falls back to computing the hash for legacy data without imageId.
+ * Find a data URL image by its hash across an array of content-block sources.
+ * Uses pre-computed block.imageId when available, falls back to computing the hash
+ * for legacy data without imageId.
  */
-function findImageInMessages(
-  messages: ChatMessage[],
+function findImageInBlocks(
+  sources: { contentBlocks?: unknown }[],
   targetHash: string,
 ): string | null {
-  for (const msg of messages) {
-    if (!msg.contentBlocks) continue
-    for (const block of msg.contentBlocks) {
-      if (block.type !== 'image' || !block.imageUrl?.startsWith('data:')) continue
-      // Fast path: pre-computed imageId
-      if (block.imageId === targetHash) return block.imageUrl
-      // Legacy fallback: compute hash on the fly
-      if (!block.imageId && computeImageId(block.imageUrl) === targetHash) return block.imageUrl
-    }
-  }
-  return null
-}
-
-/**
- * Find an image in snapshot contentBlocks.
- * Same dual-path logic: check block.imageId first, then compute hash.
- */
-function findImageInSnapshots(
-  snapshots: { contentBlocks: unknown }[],
-  targetHash: string,
-): string | null {
-  for (const snap of snapshots) {
-    if (!snap.contentBlocks) continue
-    const blocks = snap.contentBlocks as unknown as ChatContentBlock[]
+  for (const source of sources) {
+    if (!source.contentBlocks) continue
+    const blocks = source.contentBlocks as unknown as ChatContentBlock[]
     if (!Array.isArray(blocks)) continue
     for (const block of blocks) {
       if (block.type !== 'image' || !block.imageUrl?.startsWith('data:')) continue
@@ -47,9 +26,6 @@ function findImageInSnapshots(
   return null
 }
 
-/**
- * Parse a data URL into its MIME type and binary buffer.
- */
 function parseDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
   if (!match) throw new Error('Invalid data URL')
@@ -79,11 +55,11 @@ export const GET = withAuth(
 
     // 1. Search liveMessages
     let dataUrl: string | null = null
-    if (session.liveMessages) {
-      const live = session.liveMessages as unknown as ChatMessage[]
-      if (Array.isArray(live)) {
-        dataUrl = findImageInMessages(live, imageId)
-      }
+    if (Array.isArray(session.liveMessages)) {
+      dataUrl = findImageInBlocks(
+        session.liveMessages as unknown as { contentBlocks?: unknown }[],
+        imageId,
+      )
     }
 
     // 2. Fallback: search snapshots
@@ -92,7 +68,7 @@ export const GET = withAuth(
         where: { chatSessionId: id },
         select: { contentBlocks: true },
       })
-      dataUrl = findImageInSnapshots(snapshots, imageId)
+      dataUrl = findImageInBlocks(snapshots, imageId)
     }
 
     if (!dataUrl) {

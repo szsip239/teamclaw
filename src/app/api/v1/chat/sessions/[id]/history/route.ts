@@ -232,8 +232,6 @@ export const GET = withAuth(
       }
     }
 
-    // Replace inline base64 images with lightweight URL references
-    // to reduce response payload size (each image ~300KB base64)
     replaceInlineImages(currentMessages, id)
     for (const batch of snapshots) {
       replaceInlineImages(batch.messages, id)
