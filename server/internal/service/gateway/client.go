@@ -2,7 +2,10 @@ package gateway
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -26,7 +29,47 @@ const (
 	dialTimeout           = 10 * time.Second
 	clientID              = "gateway-client"
 	clientVersion         = "1.0.0"
+	// deviceSeedHex is a fixed 32-byte Ed25519 seed for this backend's device identity.
+	// This gives a stable deviceId so pairing survives API restarts.
+	deviceSeedHex = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
 )
+
+// deviceIdentity holds the computed Ed25519 device credentials derived from deviceSeedHex.
+var deviceIdentity struct {
+	privateKey   ed25519.PrivateKey
+	publicKeyB64 string // base64url of raw public key bytes
+	deviceID     string // hex(SHA-256(public key bytes))
+}
+
+func init() {
+	seed, err := hex.DecodeString(deviceSeedHex)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		panic("gateway: invalid deviceSeedHex constant")
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	hash := sha256.Sum256(pub)
+	deviceIdentity.privateKey = priv
+	deviceIdentity.publicKeyB64 = base64URLEncode(pub)
+	deviceIdentity.deviceID = hex.EncodeToString(hash[:])
+}
+
+// base64URLEncode encodes bytes to base64url without padding.
+func base64URLEncode(b []byte) string {
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// buildSigningPayload constructs the canonical v2 signing string for OpenClaw device auth.
+// Format: v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce
+func buildSigningPayload(deviceID, cID, mode, role string, scopes []string, signedAtMs int64, token, nonce string) string {
+	return strings.Join([]string{
+		"v2", deviceID, cID, mode, role,
+		strings.Join(scopes, ","),
+		fmt.Sprintf("%d", signedAtMs),
+		token,
+		nonce,
+	}, "|")
+}
 
 // ConnectionStatus represents the lifecycle state of a gateway connection.
 type ConnectionStatus string
@@ -95,9 +138,15 @@ type Client struct {
 
 	tickCancel context.CancelFunc // cancels the tick-watch goroutine
 
+	// challengeNonce is extracted from the connect.challenge event and used in signing.
+	challengeNonce string
+
 	// Callbacks set by Registry
-	OnStatusChange       func(ConnectionStatus)
+	OnStatusChange        func(ConnectionStatus)
 	OnPermanentDisconnect func()
+	// OnDeviceToken is called when OpenClaw issues a deviceToken after pairing.
+	// The caller should persist this token (replacing the shared gateway token).
+	OnDeviceToken func(token string)
 }
 
 // NewClient creates a new (disconnected) Client.
@@ -110,6 +159,13 @@ func NewClient(url, token string, logger *zap.Logger) *Client {
 		listeners:      make(map[string]map[int]EventHandler),
 		tickIntervalMs: 30 * time.Second,
 	}
+}
+
+// SetToken updates the auth token used for future connect handshakes.
+func (c *Client) SetToken(token string) {
+	c.mu.Lock()
+	c.token = token
+	c.mu.Unlock()
 }
 
 // Connect opens the WebSocket connection and completes the gateway handshake.
@@ -278,6 +334,17 @@ func (c *Client) readLoop(conn *websocket.Conn, connectDone chan<- error) {
 		switch frame.Type {
 		case "event":
 			if frame.Event == "connect.challenge" && !handshakeDone.Load() {
+				// Extract nonce from challenge payload before handshake.
+				var challengePayload struct {
+					Nonce string `json:"nonce"`
+				}
+				if frame.Payload != nil {
+					_ = json.Unmarshal(frame.Payload, &challengePayload)
+				}
+				c.mu.Lock()
+				c.challengeNonce = challengePayload.Nonce
+				c.mu.Unlock()
+
 				// Kick off handshake in a separate goroutine so readLoop
 				// can continue processing (the connect response comes back
 				// through this same loop via handleResponse).
@@ -298,6 +365,21 @@ func (c *Client) readLoop(conn *websocket.Conn, connectDone chan<- error) {
 
 // doHandshake sends the connect request and processes the hello-ok payload.
 func (c *Client) doHandshake(ctx context.Context) error {
+	c.mu.RLock()
+	nonce := c.challengeNonce
+	c.mu.RUnlock()
+
+	scopes := []string{"operator.read", "operator.write", "operator.admin"}
+	role := "operator"
+	signedAtMs := time.Now().UnixMilli()
+
+	// Build Ed25519 device signature per OpenClaw protocol v2.
+	sigPayload := buildSigningPayload(
+		deviceIdentity.deviceID, clientID, "backend", role,
+		scopes, signedAtMs, c.token, nonce,
+	)
+	sig := ed25519.Sign(deviceIdentity.privateKey, []byte(sigPayload))
+
 	params := map[string]any{
 		"minProtocol": protocolVersion,
 		"maxProtocol": protocolVersion,
@@ -307,8 +389,16 @@ func (c *Client) doHandshake(ctx context.Context) error {
 			"platform": "linux",
 			"mode":     "backend",
 		},
-		"auth":   map[string]any{"token": c.token},
-		"scopes": []string{"operator.read", "operator.write", "operator.admin"},
+		"auth": map[string]any{"token": c.token},
+		"role": role,
+		"device": map[string]any{
+			"id":        deviceIdentity.deviceID,
+			"publicKey": deviceIdentity.publicKeyB64,
+			"signature": base64URLEncode(sig),
+			"signedAt":  signedAtMs,
+			"nonce":     nonce,
+		},
+		"scopes": scopes,
 		"caps":   []any{},
 	}
 
@@ -324,6 +414,9 @@ func (c *Client) doHandshake(ctx context.Context) error {
 		Policy struct {
 			TickIntervalMs int64 `json:"tickIntervalMs"`
 		} `json:"policy"`
+		Auth struct {
+			DeviceToken string `json:"deviceToken"`
+		} `json:"auth"`
 	}
 	_ = json.Unmarshal(payload, &helloOk)
 
@@ -339,6 +432,11 @@ func (c *Client) doHandshake(ctx context.Context) error {
 	c.tickIntervalMs = tickMs
 	c.lastTick = time.Now()
 	c.mu.Unlock()
+
+	// If OpenClaw issued a device-specific token after pairing, notify the registry.
+	if helloOk.Auth.DeviceToken != "" && c.OnDeviceToken != nil {
+		c.OnDeviceToken(helloOk.Auth.DeviceToken)
+	}
 
 	c.startTickWatch()
 	c.notifyStatus(StatusConnected)

@@ -63,6 +63,26 @@ func (r *Registry) Connect(ctx context.Context, instanceID, url, token string) e
 			Update("status", model.InstanceStatusError)
 	}
 
+	client.OnDeviceToken = func(deviceToken string) {
+		// Persist the device-specific token so future connections use it.
+		encToken, err := r.enc.Encrypt(deviceToken)
+		if err != nil {
+			r.logger.Error("registry: failed to encrypt device token",
+				zap.String("instanceId", instanceID), zap.Error(err))
+			return
+		}
+		r.db.Model(&model.Instance{}).
+			Where("id = ?", instanceID).
+			Update("gateway_token", encToken)
+		// Also update in-memory token on the client so reconnects use the new token.
+		r.mu.Lock()
+		if c, ok := r.clients[instanceID]; ok {
+			c.SetToken(deviceToken)
+		}
+		r.mu.Unlock()
+		r.logger.Info("registry: device token updated", zap.String("instanceId", instanceID))
+	}
+
 	r.mu.Lock()
 	r.clients[instanceID] = client
 	r.status[instanceID] = StatusConnecting
