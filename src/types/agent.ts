@@ -42,9 +42,9 @@ export interface AgentOverview {
 
 /** Agent detail with full config (from gateway) */
 export interface AgentDetail extends AgentOverview {
-  config: AgentConfigEntry
-  defaults: AgentDefaults
-  workspaceFiles: WorkspaceFileEntry[]
+  config?: AgentConfigEntry
+  defaults?: AgentDefaults
+  workspaceFiles?: WorkspaceFileEntry[]
 }
 
 /** Agents list response (paginated, from Go backend metadata registry) */

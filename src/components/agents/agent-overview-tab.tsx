@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useT } from "@/stores/language-store"
 import type { AgentDetail } from "@/types/agent"
+import type { AgentConfigEntry, AgentDefaults } from "@/types/gateway"
 
 interface AgentOverviewTabProps {
   agent: AgentDetail
@@ -26,8 +27,8 @@ interface AgentOverviewTabProps {
 
 export function AgentOverviewTab({ agent, canManage, instanceId }: AgentOverviewTabProps) {
   const t = useT()
-  const config = agent.config
-  const defaults = agent.defaults
+  const config: AgentConfigEntry = agent.config ?? ({} as AgentConfigEntry)
+  const defaults: AgentDefaults = agent.defaults ?? ({} as AgentDefaults)
 
   const infoItems = [
     {

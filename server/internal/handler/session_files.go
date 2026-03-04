@@ -35,11 +35,11 @@ func NewSessionFilesHandler(db *gorm.DB) *SessionFilesHandler {
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 func sessionInputPath(agentID, sessionID string) string {
-	return fmt.Sprintf("/workspace/%s/sessions/%s/input", agentID, sessionID)
+	return fmt.Sprintf("/home/node/.openclaw/workspace/tc-sessions/%s/%s/input", agentID, sessionID)
 }
 
 func sessionOutputPath(agentID, sessionID string) string {
-	return fmt.Sprintf("/workspace/%s/sessions/%s/output", agentID, sessionID)
+	return fmt.Sprintf("/home/node/.openclaw/workspace/tc-sessions/%s/%s/output", agentID, sessionID)
 }
 
 func resolveSessionPath(agentID, sessionID, zone string, rel ...string) string {
