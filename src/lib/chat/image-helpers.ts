@@ -2,13 +2,26 @@ import { createHash } from 'crypto'
 import { readFile } from 'fs/promises'
 import { extname, resolve } from 'path'
 import { dockerManager } from '@/lib/docker/manager'
+import type { ChatMessage } from '@/types/chat'
 
-// ─── Image ID hashing ───────────────────────────────────────────────
+export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+
+export const MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+}
+
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024
+
+/** Allowed base directories for reading image files from the host. */
+const ALLOWED_IMAGE_DIRS = [
+  '/tmp', '/home', '/Users',
+  ...(process.env.IMAGE_ALLOWED_DIRS?.split(':').filter(Boolean) ?? []),
+]
 
 /**
  * Compute a short stable ID for an image data URL.
  * Uses SHA-256 of the first 500 chars + total length → 16 hex chars.
- * Same image always produces the same ID.
  */
 export function computeImageId(dataUrl: string): string {
   return createHash('sha256')
@@ -17,14 +30,10 @@ export function computeImageId(dataUrl: string): string {
     .slice(0, 16)
 }
 
-// ─── Image ID stamping ──────────────────────────────────────────────
-
-import type { ChatMessage } from '@/types/chat'
-
 /**
  * Stamp imageId on all image contentBlocks in a message array.
- * Pre-computing the hash at storage time avoids re-computing it
- * on every image endpoint request. Mutates in place.
+ * Pre-computing the hash at storage time avoids re-hashing on every image request.
+ * Mutates in place.
  */
 export function stampImageIds(messages: ChatMessage[]): void {
   for (const msg of messages) {
@@ -37,23 +46,9 @@ export function stampImageIds(messages: ChatMessage[]): void {
   }
 }
 
-// ─── Image constants ─────────────────────────────────────────────────
-
-export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
-
-export const MIME_BY_EXT: Record<string, string> = {
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
-}
-
-const IMAGE_MAX_BYTES = 10 * 1024 * 1024
-
-// ─── Path extraction ─────────────────────────────────────────────────
-
 /**
- * Extract MEDIA: paths from tool output text.
+ * Extract MEDIA: and "Image saved:" paths from tool output text.
  * OpenClaw skills output lines like: "MEDIA: /path/to/image.png"
- * Also handles "Image saved: /path/to/image.png" patterns.
  */
 export function extractMediaPaths(text: string): string[] {
   if (!text) return []
@@ -72,28 +67,11 @@ export function extractMediaPaths(text: string): string[] {
   return paths
 }
 
-// ─── Image file reading ──────────────────────────────────────────────
-
-/** Allowed base directories for reading image files from the host.
- *  Covers Linux (/tmp, /home), macOS (/Users), and any extra dirs via env. */
-const ALLOWED_IMAGE_DIRS = [
-  '/tmp', '/home', '/Users',
-  ...(process.env.IMAGE_ALLOWED_DIRS?.split(':').filter(Boolean) ?? []),
-]
-
-/**
- * Check if a file path is within an allowed directory.
- * Prevents arbitrary file reads from AI-generated paths.
- */
 export function isAllowedImagePath(filePath: string): boolean {
   const resolved = resolve(filePath)
   return ALLOWED_IMAGE_DIRS.some(dir => resolved.startsWith(dir + '/'))
 }
 
-/**
- * Convert a Buffer to a base64 data URL.
- * Returns null if the buffer exceeds the max size.
- */
 export function bufferToDataUrl(buf: Buffer, filePath: string): string | null {
   if (buf.byteLength > IMAGE_MAX_BYTES) return null
   const ext = extname(filePath).toLowerCase()
@@ -103,8 +81,7 @@ export function bufferToDataUrl(buf: Buffer, filePath: string): string | null {
 
 /**
  * Read a local image file and return as base64 data URL.
- * Returns null if the file can't be read, is too large (>10MB),
- * or is outside allowed directories.
+ * Returns null if the file can't be read, is too large, or is outside allowed directories.
  * Used for external instances (no containerId).
  */
 export async function readImageAsDataUrl(filePath: string): Promise<string | null> {

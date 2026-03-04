@@ -27,7 +27,6 @@ interface ChatState {
   appendThinking: (content: string) => void
   appendToolCall: (toolCall: ChatToolCall) => void
   setAssistantError: (error: string) => void
-  completeAssistantMessage: () => void
 
   // Streaming state
   isStreaming: boolean
@@ -66,15 +65,12 @@ interface ChatState {
  */
 async function syncFromHistory(
   activeSessionId: string,
-  set: (fn: (s: ChatState) => Partial<ChatState>) => void,
-  get: () => ChatState,
+  set: (partial: Partial<ChatState>) => void,
   opts?: { polling?: boolean },
 ) {
   try {
     const url = `/api/v1/chat/sessions/${activeSessionId}/history${opts?.polling ? '?polling=true' : ''}`
-    const res = await fetch(url, {
-      credentials: 'include',
-    })
+    const res = await fetch(url, { credentials: 'include' })
     if (!res.ok) return
     const data: ChatHistoryResponse = await res.json()
     const assembled = assembleFromResponse(data)
@@ -82,17 +78,7 @@ async function syncFromHistory(
     // Don't overwrite existing messages with empty history — gateway may temporarily
     // return empty results mid-run (race condition between tool calls).
     if (assembled.length > 0) {
-      set((s) => {
-        // During streaming polls, if history hasn't caught up yet (no assistant message),
-        // preserve the streaming message to keep the loading indicator visible.
-        if (opts?.polling && s.isStreaming) {
-          const lastAssembled = assembled[assembled.length - 1]
-          if (lastAssembled?.role !== 'assistant' && s.streamingMessage) {
-            return { messages: assembled }
-          }
-        }
-        return { messages: assembled }
-      })
+      set({ messages: assembled })
     }
   } catch {
     // Silently fail — sync is a non-critical UI enhancement
@@ -183,10 +169,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
   },
 
-  completeAssistantMessage: () => {
-    // No-op marker — streaming is done
-  },
-
   isStreaming: false,
   setStreaming: (v) => set({ isStreaming: v }),
   abortController: null,
@@ -229,7 +211,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const sid = capturedSessionId || get().activeSessionId
       if (sid && get().isStreaming && !syncing) {
         syncing = true
-        syncFromHistory(sid, set, get, { polling: true }).finally(() => { syncing = false })
+        syncFromHistory(sid, set, { polling: true }).finally(() => { syncing = false })
       }
     }, PROGRESS_POLL_INTERVAL)
 
@@ -281,7 +263,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().setAssistantError(event.error)
             break
           case 'done':
-            get().completeAssistantMessage()
             break
         }
       }
@@ -309,7 +290,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Use captured ID to avoid reading a stale/changed activeSessionId.
       // Skip if session was cleared (abort) — don't restore messages the user deliberately removed.
       if (capturedSessionId && get().activeSessionId) {
-        syncFromHistory(capturedSessionId, set, get)
+        syncFromHistory(capturedSessionId, set)
       }
     }
   },

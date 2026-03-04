@@ -45,7 +45,6 @@ function HistoryLoadingSkeleton() {
   )
 }
 
-/** Memoized wrapper — only re-renders when the message object changes. */
 const MemoizedMessage = memo(function MemoizedMessage({
   message,
 }: {
@@ -110,11 +109,9 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
             {t('chat.gatewayUnreachable')}
           </div>
         )}
-        {/* Completed messages — stable references, won't re-render on streaming deltas */}
         {messages.map((msg) => (
           <MemoizedMessage key={msg.id} message={msg} />
         ))}
-        {/* Streaming message — isolated, only this component re-renders per delta */}
         {streamingMessage && (
           <ChatAssistantMessage
             key={streamingMessage.id}
