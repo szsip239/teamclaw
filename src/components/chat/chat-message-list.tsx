@@ -1,12 +1,13 @@
 "use client"
 
-import { useRef, useEffect, useState, useCallback } from "react"
+import { memo, useRef, useEffect, useState, useCallback } from "react"
 import { Loader2 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useChatStore } from "@/stores/chat-store"
 import { useT } from "@/stores/language-store"
 import { ChatMessageBubble } from "./chat-message-bubble"
 import { ChatAssistantMessage } from "./chat-assistant-message"
+import type { ChatMessage } from "@/types/chat"
 
 const SEPARATOR_PREFIX = "__separator__:"
 
@@ -44,11 +45,33 @@ function HistoryLoadingSkeleton() {
   )
 }
 
-export function ChatMessageList() {
+/** Memoized wrapper — only re-renders when the message object changes. */
+const MemoizedMessage = memo(function MemoizedMessage({
+  message,
+}: {
+  message: ChatMessage
+}) {
+  const separatorType = isSeparator(message.content)
+  if (separatorType) {
+    return <ContextSeparator type={separatorType} />
+  }
+
+  return message.role === "user" ? (
+    <ChatMessageBubble message={message} />
+  ) : (
+    <ChatAssistantMessage message={message} isStreaming={false} />
+  )
+})
+
+interface ChatMessageListProps {
+  isLoadingHistory: boolean
+}
+
+export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
   const t = useT()
   const messages = useChatStore((s) => s.messages)
+  const streamingMessage = useChatStore((s) => s.streamingMessage)
   const isStreaming = useChatStore((s) => s.isStreaming)
-  const isLoadingHistory = useChatStore((s) => s.isLoadingHistory)
   const connectionStatus = useChatStore((s) => s.connectionStatus)
   const bottomRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -61,13 +84,14 @@ export function ChatMessageList() {
     setIsNearBottom(el.scrollHeight - el.scrollTop - el.clientHeight < threshold)
   }, [])
 
-  // Auto-scroll when near bottom: on new messages or streaming state changes
+  // Auto-scroll when near bottom: on new messages or streaming content changes
   const messageCount = messages.length
+  const streamingContent = streamingMessage?.content?.length ?? 0
   useEffect(() => {
     if (isNearBottom) {
       bottomRef.current?.scrollIntoView({ behavior: "instant" })
     }
-  }, [messageCount, isStreaming, isNearBottom])
+  }, [messageCount, streamingContent, isStreaming, isNearBottom])
 
   if (isLoadingHistory && messages.length === 0) {
     return (
@@ -86,26 +110,18 @@ export function ChatMessageList() {
             {t('chat.gatewayUnreachable')}
           </div>
         )}
-        {messages.map((msg) => {
-          // Check if this is a separator message
-          const separatorType = isSeparator(msg.content)
-          if (separatorType) {
-            return <ContextSeparator key={msg.id} type={separatorType} />
-          }
-
-          return msg.role === "user" ? (
-            <ChatMessageBubble key={msg.id} message={msg} />
-          ) : (
-            <ChatAssistantMessage
-              key={msg.id}
-              message={msg}
-              isStreaming={
-                isStreaming &&
-                msg.id === messages[messages.length - 1]?.id
-              }
-            />
-          )
-        })}
+        {/* Completed messages — stable references, won't re-render on streaming deltas */}
+        {messages.map((msg) => (
+          <MemoizedMessage key={msg.id} message={msg} />
+        ))}
+        {/* Streaming message — isolated, only this component re-renders per delta */}
+        {streamingMessage && (
+          <ChatAssistantMessage
+            key={streamingMessage.id}
+            message={streamingMessage}
+            isStreaming={isStreaming}
+          />
+        )}
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

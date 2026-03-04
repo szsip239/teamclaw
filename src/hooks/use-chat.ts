@@ -28,6 +28,7 @@ export function useChatAgents() {
     queryFn: () =>
       api.get<{ agents: ChatAgentInfo[] }>("/api/v1/chat/agents"),
     enabled: !!user,
+    staleTime: 60_000,
     select: (data) => data.agents,
   })
 }
@@ -41,6 +42,7 @@ export function useChatSessions() {
     queryFn: () =>
       api.get<{ sessions: ChatSessionResponse[] }>("/api/v1/chat/sessions"),
     enabled: !!user,
+    staleTime: 30_000,
     select: (data) => data.sessions,
   })
 }

@@ -1,4 +1,3 @@
-import { extname } from 'path'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { Prisma } from '@/generated/prisma'
@@ -12,8 +11,9 @@ import {
   stripFinalTags,
   splitThinkingFallback,
   persistLiveAsSnapshot,
+  mergeExistingContentBlocks,
 } from '@/lib/chat/snapshot-helpers'
-import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
+import { computeImageId } from '@/lib/chat/image-helpers'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type { ChatMessage, ChatToolCall, ChatSnapshotBatch, ChatHistoryResponse, ChatContentBlock } from '@/types/chat'
 
@@ -31,15 +31,8 @@ function stripMediaReferences(text: string): string {
     .trim()
 }
 
-/**
- * Collect all MEDIA: paths from tool results in the message list.
- * Used to batch-load images after initial message parsing.
- */
-interface PendingImage { messageIndex: number; path: string }
-
-function transformMessages(raw: ChatHistoryMessage[]): { messages: ChatMessage[]; pendingImages: PendingImage[] } {
+function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
-  const pendingImages: PendingImage[] = []
 
   for (const msg of raw) {
     if (msg.role === 'user') {
@@ -57,7 +50,6 @@ function transformMessages(raw: ChatHistoryMessage[]): { messages: ChatMessage[]
       let thinking = extractThinking(msg.content)
       const contentBlocks = extractContentBlocks(msg.content)
 
-      // Fallback: if model embedded response in thinking block (no text block)
       if (!text && thinking) {
         const split = splitThinkingFallback(thinking)
         if (split.text) {
@@ -74,12 +66,6 @@ function transformMessages(raw: ChatHistoryMessage[]): { messages: ChatMessage[]
         ...(thinking ? { thinking } : {}),
         createdAt: new Date().toISOString(),
       })
-
-      // Check for file:/// image paths in assistant text (use rawText before stripping)
-      const filePaths = extractFileProtocolPaths(rawText)
-      for (const p of filePaths) {
-        pendingImages.push({ messageIndex: result.length - 1, path: p })
-      }
     } else if (msg.role === 'toolResult') {
       const last = result[result.length - 1]
       if (last?.role === 'assistant') {
@@ -90,12 +76,6 @@ function transformMessages(raw: ChatHistoryMessage[]): { messages: ChatMessage[]
           toolOutput: outputText,
         }
         last.toolCalls = [...(last.toolCalls ?? []), tc]
-
-        // Check for image paths in tool result
-        const mediaPaths = extractMediaPaths(outputText)
-        for (const p of mediaPaths) {
-          pendingImages.push({ messageIndex: result.length - 1, path: p })
-        }
       }
     }
   }
@@ -111,7 +91,23 @@ function transformMessages(raw: ChatHistoryMessage[]): { messages: ChatMessage[]
     }
   }
 
-  return { messages: result, pendingImages }
+  return result
+}
+
+/**
+ * Replace inline base64 image data URLs with lightweight API references.
+ * Mutates messages in-place for efficiency.
+ */
+function replaceInlineImages(messages: ChatMessage[], sessionId: string): void {
+  for (const msg of messages) {
+    if (!msg.contentBlocks) continue
+    for (const block of msg.contentBlocks) {
+      if (block.type === 'image' && block.imageUrl?.startsWith('data:')) {
+        const hash = computeImageId(block.imageUrl)
+        block.imageUrl = `/api/v1/chat/sessions/${sessionId}/images/${hash}`
+      }
+    }
+  }
 }
 
 // GET /api/v1/chat/sessions/[id]/history — load snapshots + current messages
@@ -180,87 +176,67 @@ export const GET = withAuth(
           const sessionKey = `agent:${session.agentId}:tc:${session.userId}`
           const rawResult = await client.request('chat.history', { sessionKey, limit: 200 }, 10_000)
           const historyResult = rawResult as ChatHistoryResult
-          const { messages: msgs, pendingImages } = transformMessages(historyResult.messages ?? [])
+          const msgs = transformMessages(historyResult.messages ?? [])
 
-          // Load image files referenced in tool results
-          if (pendingImages.length > 0) {
-            // Container instances: read via Docker API; external instances: read from host fs
-            let histContainerId: string | null = null
-            const inst = await prisma.instance.findUnique({
-              where: { id: session.instanceId },
-              select: { containerId: true },
-            })
-            histContainerId = inst?.containerId ?? null
-
-            const loaded = await Promise.all(
-              pendingImages.map(async ({ messageIndex, path: p }) => ({
-                messageIndex,
-                dataUrl: histContainerId
-                  ? await readContainerImageAsDataUrl(histContainerId, p)
-                  : await readImageAsDataUrl(p),
-                mimeType: MIME_BY_EXT[extname(p).toLowerCase()] || 'image/png',
-              })),
-            )
-            for (const { messageIndex, dataUrl, mimeType } of loaded) {
-              if (!dataUrl) continue
-              const msg = msgs[messageIndex]
-              if (msg?.role === 'assistant') {
-                const blocks: ChatContentBlock[] = [...(msg.contentBlocks ?? [])]
-                blocks.push({ type: 'image', imageUrl: dataUrl, mimeType })
-                msg.contentBlocks = blocks
-              }
-            }
-          }
-
-          // Fallback: for images that failed to load from filesystem (e.g. external
-          // instance paths not mounted in container), supplement from liveMessages
-          // contentBlocks which may have been captured during SSE streaming.
+          // Merge image contentBlocks from liveMessages (captured during SSE streaming).
+          // chat.history doesn't return inline image blocks, so liveMessages is
+          // the primary source of image data for page refreshes.
           if (session.liveMessages) {
             const cached = session.liveMessages as unknown as ChatMessage[]
             if (Array.isArray(cached)) {
-              const limit = Math.min(msgs.length, cached.length)
-              for (let i = 0; i < limit; i++) {
-                if (msgs[i].role !== 'assistant' || msgs[i].role !== cached[i]?.role) continue
-                if (msgs[i].contentBlocks?.length) continue // already has images
-                if (cached[i].contentBlocks?.length) {
-                  msgs[i].contentBlocks = cached[i].contentBlocks
-                }
-              }
+              mergeExistingContentBlocks(msgs, cached)
             }
           }
 
           currentMessages = msgs
-        }
 
-        // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
-        // Skip for very recently created sessions — the gateway may not have received the
-        // first chat.send yet (race: SSE session event arrives before gateway processes message).
-        // Also skip during progress polling — the gateway may temporarily return empty results
-        // mid-run (race condition), and we don't want to destroy an active session.
-        const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
-        const sessionAgeMs = Date.now() - session.createdAt.getTime()
-        if (!isPolling && currentMessages.length === 0 && sessionAgeMs > 30_000) {
-          if (session.liveMessages) {
-            // Recover messages from liveMessages auto-snapshot
-            snapshots.push({
-              batchId: `recovered-${id}`,
-              createdAt: session.updatedAt.toISOString(),
-              messages: session.liveMessages as unknown as ChatMessage[],
-            })
-            // Persist as permanent snapshot before clearing liveMessages
-            await persistLiveAsSnapshot(id, session.liveMessages as unknown as ChatMessage[]).catch(() => {})
+          // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
+          // IMPORTANT: Only run when we successfully queried the gateway (client !== null)
+          // and got empty results. If client is null (instance not yet reconnected after
+          // container rebuild), we must NOT archive — the session is likely still valid
+          // on the OpenClaw side, we just can't reach it yet.
+          const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
+          const sessionAgeMs = Date.now() - session.createdAt.getTime()
+          if (!isPolling && currentMessages.length === 0 && sessionAgeMs > 30_000) {
+            if (session.liveMessages) {
+              // Recover messages from liveMessages auto-snapshot
+              snapshots.push({
+                batchId: `recovered-${id}`,
+                createdAt: session.updatedAt.toISOString(),
+                messages: session.liveMessages as unknown as ChatMessage[],
+              })
+              // Persist as permanent snapshot before clearing liveMessages
+              await persistLiveAsSnapshot(id, session.liveMessages as unknown as ChatMessage[]).catch(() => {})
+            }
+            // Mark session inactive + clear liveMessages
+            await prisma.chatSession.update({
+              where: { id },
+              data: { isActive: false, liveMessages: Prisma.DbNull },
+            }).catch(() => {})
+            sessionIsActive = false
           }
-          // Mark session inactive + clear liveMessages
-          await prisma.chatSession.update({
-            where: { id },
-            data: { isActive: false, liveMessages: Prisma.DbNull },
-          }).catch(() => {})
-          sessionIsActive = false
+        } else {
+          // Client not available (instance not yet reconnected after restart).
+          // Fall back to liveMessages for display without archiving the session.
+          connectionStatus = 'unreachable'
+          if (session.liveMessages) {
+            const cached = session.liveMessages as unknown as ChatMessage[]
+            if (Array.isArray(cached)) {
+              currentMessages = cached
+            }
+          }
         }
       } catch {
         // Gateway unreachable / timeout — show warning, keep session active for retry
         connectionStatus = 'unreachable'
       }
+    }
+
+    // Replace inline base64 images with lightweight URL references
+    // to reduce response payload size (each image ~300KB base64)
+    replaceInlineImages(currentMessages, id)
+    for (const batch of snapshots) {
+      replaceInlineImages(batch.messages, id)
     }
 
     const response: ChatHistoryResponse = {
