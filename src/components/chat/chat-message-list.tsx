@@ -1,9 +1,12 @@
 "use client"
 
 import { memo, useRef, useEffect, useState, useCallback } from "react"
-import { Loader2 } from "lucide-react"
+import { Loader2, RefreshCw, Plus } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
 import { useChatStore } from "@/stores/chat-store"
+import { chatKeys, useNewConversation } from "@/hooks/use-chat"
 import { useT } from "@/stores/language-store"
 import { ChatMessageBubble } from "./chat-message-bubble"
 import { ChatAssistantMessage } from "./chat-assistant-message"
@@ -29,6 +32,68 @@ function ContextSeparator({ type }: { type: string }) {
       <div className="h-px flex-1 bg-border" />
       <span>{label}</span>
       <div className="h-px flex-1 bg-border" />
+    </div>
+  )
+}
+
+function SessionLostBanner() {
+  const t = useT()
+  const qc = useQueryClient()
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const clearMessages = useChatStore((s) => s.clearMessages)
+  const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
+  const newConversation = useNewConversation()
+  const [retrying, setRetrying] = useState(false)
+
+  function handleRetry() {
+    if (!activeSessionId) return
+    setRetrying(true)
+    qc.invalidateQueries({ queryKey: chatKeys.history(activeSessionId) })
+      .finally(() => setRetrying(false))
+  }
+
+  function handleNewConversation() {
+    if (!selectedAgent) return
+    newConversation.mutate(
+      { instanceId: selectedAgent.instanceId, agentId: selectedAgent.agentId },
+      {
+        onSuccess: (data) => {
+          clearMessages()
+          setActiveSessionId(data.session.id)
+        },
+      },
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+      <div className="flex items-center gap-2">
+        <span className="size-2 shrink-0 rounded-full bg-amber-500" />
+        {t('chat.sessionLost')}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={handleRetry}
+          disabled={retrying}
+        >
+          {retrying ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+          {t('chat.sessionRetry')}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={handleNewConversation}
+          disabled={newConversation.isPending}
+        >
+          {newConversation.isPending ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+          {t('chat.sessionNewConversation')}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -109,6 +174,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
             {t('chat.gatewayUnreachable')}
           </div>
         )}
+        {connectionStatus === 'session-lost' && <SessionLostBanner />}
         {messages.map((msg) => (
           <MemoizedMessage key={msg.id} message={msg} />
         ))}

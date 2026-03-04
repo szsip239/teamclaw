@@ -53,7 +53,7 @@ export interface ChatHistoryResponse {
   snapshots: ChatSnapshotBatch[]
   currentMessages: ChatMessage[]
   isActive: boolean
-  connectionStatus?: 'ok' | 'unreachable'
+  connectionStatus?: 'ok' | 'unreachable' | 'session-lost'
 }
 
 export interface ChatMessage {

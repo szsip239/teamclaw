@@ -20,7 +20,8 @@ export function ChatMain() {
   const isStreaming = useChatStore((s) => s.isStreaming)
   const qc = useQueryClient()
 
-  // Find existing active session for the selected agent
+  // Find existing session for the selected agent.
+  // Prefer active session, fall back to the most recent inactive one (e.g. after gateway restart).
   const { data: sessions } = useChatSessions()
   const matchingSession = selectedAgent
     ? (activeSessionId
@@ -30,6 +31,11 @@ export function ChatMain() {
               s.instanceId === selectedAgent.instanceId &&
               s.agentId === selectedAgent.agentId &&
               s.isActive,
+          ) ??
+          sessions?.find(
+            (s) =>
+              s.instanceId === selectedAgent.instanceId &&
+              s.agentId === selectedAgent.agentId,
           )
       ) ?? null
     : null

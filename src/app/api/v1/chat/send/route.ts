@@ -288,6 +288,9 @@ export async function POST(req: NextRequest) {
   // chat.history doesn't return inline image blocks, so we must capture
   // them from the live chat events where OpenClaw embeds them.
   const capturedImages: { imageUrl: string; mimeType?: string }[] = []
+  // User-uploaded attachments (images) — passed to saveLiveSnapshot for persistence.
+  // Gateway chat.history strips user image attachments, so we save them in liveMessages.
+  const userImageAttachments: { name: string; mimeType: string; content: string }[] = []
 
   function write(event: ChatStreamEvent) {
     if (closed) return
@@ -428,13 +431,13 @@ export async function POST(req: NextRequest) {
       // Must run before 'done' so frontend displays images in the same streaming session.
       fetchAndEmitImages().then(() => {
         write({ type: 'done' })
-        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages).catch((err) =>
+        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments).catch((err) =>
           console.error('[live-snapshot] Save failed:', err),
         )
         cleanup()
       }).catch(() => {
         write({ type: 'done' })
-        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages).catch(() => {})
+        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments).catch(() => {})
         cleanup()
       })
     } else if (state === 'error') {
@@ -579,6 +582,13 @@ export async function POST(req: NextRequest) {
       ...(attachments?.map(a => ({ fileName: a.name, mimeType: a.mimeType, content: a.content })) ?? []),
       ...sessionFileAttachments,
     ]
+
+    // Capture user image attachments for liveMessages persistence
+    for (const a of mappedAttachments) {
+      if (a.mimeType.startsWith('image/')) {
+        userImageAttachments.push({ name: a.fileName, mimeType: a.mimeType, content: a.content })
+      }
+    }
 
     await adapter
       .sendMessage(client, sessionKey, message, idempotencyKey, {
