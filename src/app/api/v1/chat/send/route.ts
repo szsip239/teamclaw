@@ -8,9 +8,9 @@ import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
 import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget } from '@/lib/session-files/helpers'
 import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
-import { MIME_BY_EXT, extractMediaPaths, extractFileProtocolPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
+import { MIME_BY_EXT, extractMediaPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
-import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
+import type { ChatHistoryResult } from '@/types/gateway'
 import { Prisma } from '@/generated/prisma'
 
 function encodeSSE(event: ChatStreamEvent): string {
@@ -265,6 +265,7 @@ export async function POST(req: NextRequest) {
         lastMessageAt: new Date(),
         messageCount: 1,
         isActive: true,
+        title: message.slice(0, 50),
       },
     })
   })
@@ -326,53 +327,31 @@ export async function POST(req: NextRequest) {
   }
 
   /**
-   * After streaming ends, fetch chat.history to find generated images.
-   * Gateway doesn't emit tool agent events, so images in tool results
-   * (e.g. MEDIA: paths from exec/process tools) are only visible via history.
-   * Also checks the final text for file:/// embedded paths.
+   * Scan chat.history for MEDIA paths in tool results and emit as image SSE events.
+   * OpenClaw does NOT send image data in WebSocket chat events — images only exist
+   * as files referenced by MEDIA: paths in tool output text.
    */
-  async function fetchAndEmitImages(finalText: string) {
-    const allPaths: string[] = []
-
-    // 1. Check final text for file:/// paths
-    allPaths.push(...extractFileProtocolPaths(finalText))
-
-    // 2. Fetch chat.history and scan tool results for MEDIA: paths
+  async function fetchAndEmitImages() {
     try {
-      const rawResult = await client!.request('chat.history', {
-        sessionKey,
-        limit: 50,
-      }, 10_000) // 10s timeout for history fetch
+      const rawResult = await client!.request('chat.history', { sessionKey, limit: 50 }, 10_000)
       const historyResult = rawResult as ChatHistoryResult
       const messages = historyResult.messages ?? []
 
-      // Scan only the last few messages (this run's output)
-      for (const msg of messages.slice(-10)) {
-        if (msg.role === 'toolResult') {
-          const text = typeof msg.content === 'string'
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? msg.content.filter((b: Record<string, unknown>) => b.type === 'text').map((b: Record<string, unknown>) => b.text).join('\n')
-              : ''
-          allPaths.push(...extractMediaPaths(text))
-        }
-        if (msg.role === 'assistant') {
-          const text = typeof msg.content === 'string'
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? msg.content.filter((b: Record<string, unknown>) => b.type === 'text').map((b: Record<string, unknown>) => b.text).join('\n')
-              : ''
-          allPaths.push(...extractFileProtocolPaths(text))
-          allPaths.push(...extractMediaPaths(text))
-        }
+      // Collect MEDIA paths from tool results in the last few messages
+      const allPaths: string[] = []
+      for (const msg of messages.slice(-20)) {
+        if (msg.role !== 'toolResult') continue
+        const text = typeof msg.content === 'string'
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? (msg.content as Record<string, unknown>[]).filter(b => b.type === 'text').map(b => b.text as string).join('\n')
+            : ''
+        allPaths.push(...extractMediaPaths(text))
       }
-    } catch {
-      // History fetch failed — fall through with whatever paths we found
-    }
 
-    // 3. Deduplicate and read images (container → dockerManager, external → host fs)
-    const uniquePaths = [...new Set(allPaths)]
-    if (uniquePaths.length > 0) {
+      const uniquePaths = [...new Set(allPaths)]
+      if (uniquePaths.length === 0) return
+
       await Promise.all(
         uniquePaths.map(async (p) => {
           const dataUrl = containerId
@@ -383,9 +362,13 @@ export async function POST(req: NextRequest) {
             const mimeType = MIME_BY_EXT[ext]
             write({ type: 'image', imageUrl: dataUrl, mimeType })
             capturedImages.push({ imageUrl: dataUrl, mimeType })
+          } else {
+            console.warn(`[fetchAndEmitImages] Failed to read image: ${p} (containerId=${containerId ?? 'host'})`)
           }
         }),
       )
+    } catch (err) {
+      console.warn('[fetchAndEmitImages] chat.history failed:', (err as Error).message)
     }
   }
 
@@ -413,7 +396,7 @@ export async function POST(req: NextRequest) {
         lastTextContent = textContent
       }
 
-      // Emit new image blocks (these come from OpenClaw embedding MEDIA file data)
+      // Capture inline image blocks if OpenClaw embeds them in chat events
       const images = extractImagesFromMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
         write({ type: 'image', imageUrl: images[i].url, mimeType: images[i].mimeType, alt: images[i].alt })
@@ -434,18 +417,17 @@ export async function POST(req: NextRequest) {
         if (newText) write({ type: 'text', content: newText })
       }
 
-      // Emit any remaining image blocks from final message content
+      // Capture any remaining inline image blocks from final message
       const images = extractImagesFromMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
         write({ type: 'image', imageUrl: images[i].url, mimeType: images[i].mimeType, alt: images[i].alt })
         capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
       }
 
-      // After streaming completes, fetch chat.history to find images in tool results.
-      // Gateway doesn't emit tool agent events, so we must check history for MEDIA:/file:///paths.
-      fetchAndEmitImages(textContent).then(() => {
+      // Scan chat.history for MEDIA paths in tool results and emit as image events.
+      // Must run before 'done' so frontend displays images in the same streaming session.
+      fetchAndEmitImages().then(() => {
         write({ type: 'done' })
-        // Post-run auto-snapshot (fire-and-forget)
         saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages).catch((err) =>
           console.error('[live-snapshot] Save failed:', err),
         )
