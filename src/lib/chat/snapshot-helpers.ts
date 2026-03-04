@@ -405,6 +405,7 @@ export async function saveLiveSnapshot(
   sessionKey: string,
   containerId?: string | null,
   capturedImages?: { imageUrl: string; mimeType?: string }[],
+  userAttachments?: { name: string; mimeType: string; content: string }[],
 ): Promise<void> {
   const rawResult = await client.request('chat.history', { sessionKey, limit: 200 }, 10_000)
   const historyResult = rawResult as ChatHistoryResult
@@ -412,6 +413,27 @@ export async function saveLiveSnapshot(
   if (rawMessages.length === 0) return
 
   const liveMessages = transformToLiveMessages(rawMessages)
+
+  // Merge user-uploaded image attachments into the last user message's contentBlocks.
+  // Gateway chat.history strips user image attachments, so we must re-inject them
+  // to preserve images across page refreshes.
+  if (userAttachments?.length) {
+    for (let i = liveMessages.length - 1; i >= 0; i--) {
+      if (liveMessages[i].role === 'user') {
+        const blocks: ChatContentBlock[] = liveMessages[i].contentBlocks ?? []
+        for (const att of userAttachments) {
+          if (!att.mimeType.startsWith('image/')) continue
+          blocks.push({
+            type: 'image',
+            imageUrl: `data:${att.mimeType};base64,${att.content}`,
+            mimeType: att.mimeType,
+          })
+        }
+        if (blocks.length > 0) liveMessages[i].contentBlocks = blocks
+        break
+      }
+    }
+  }
 
   // Image capture (two complementary mechanisms, both always run):
   //

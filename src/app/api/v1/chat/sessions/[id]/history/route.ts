@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { Prisma } from '@/generated/prisma'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import {
@@ -10,7 +9,6 @@ import {
   stripUserMetadata,
   stripFinalTags,
   splitThinkingFallback,
-  persistLiveAsSnapshot,
   mergeExistingContentBlocks,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
@@ -33,12 +31,17 @@ function stripMediaReferences(text: string): string {
 
 function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
+  // Use index-based IDs so the same message gets the same ID across polls.
+  // Random UUIDs would change every poll → React key changes → component
+  // unmount/remount → collapsible sections (thinking, tools) lose their
+  // expanded state.
+  let orderIndex = 0
 
   for (const msg of raw) {
     if (msg.role === 'user') {
       const contentBlocks = extractContentBlocks(msg.content)
       result.push({
-        id: crypto.randomUUID(),
+        id: `current-${orderIndex++}`,
         role: 'user',
         content: stripUserMetadata(extractText(msg.content)),
         ...(contentBlocks ? { contentBlocks } : {}),
@@ -59,7 +62,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
       }
 
       result.push({
-        id: crypto.randomUUID(),
+        id: `current-${orderIndex++}`,
         role: 'assistant',
         content: text,
         ...(contentBlocks ? { contentBlocks } : {}),
@@ -165,7 +168,7 @@ export const GET = withAuth(
 
     // 3. If session is active, load current messages from OpenClaw
     let currentMessages: ChatMessage[] = []
-    let connectionStatus: 'ok' | 'unreachable' = 'ok'
+    let connectionStatus: 'ok' | 'unreachable' | 'session-lost' = 'ok'
     let sessionIsActive = session.isActive
 
     if (session.isActive) {
@@ -191,29 +194,18 @@ export const GET = withAuth(
           currentMessages = msgs
 
           // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
-          // IMPORTANT: Only run when we successfully queried the gateway (client !== null)
-          // and got empty results. If client is null (instance not yet reconnected after
-          // container rebuild), we must NOT archive — the session is likely still valid
-          // on the OpenClaw side, we just can't reach it yet.
+          // Don't auto-archive — let the user decide whether to retry or start a new conversation.
+          // The session stays active so the user can simply send a new message to continue.
           const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
           const sessionAgeMs = Date.now() - session.createdAt.getTime()
           if (!isPolling && currentMessages.length === 0 && sessionAgeMs > 30_000) {
+            connectionStatus = 'session-lost'
             if (session.liveMessages) {
-              // Recover messages from liveMessages auto-snapshot
-              snapshots.push({
-                batchId: `recovered-${id}`,
-                createdAt: session.updatedAt.toISOString(),
-                messages: session.liveMessages as unknown as ChatMessage[],
-              })
-              // Persist as permanent snapshot before clearing liveMessages
-              await persistLiveAsSnapshot(id, session.liveMessages as unknown as ChatMessage[]).catch(() => {})
+              const cached = session.liveMessages as unknown as ChatMessage[]
+              if (Array.isArray(cached)) {
+                currentMessages = cached
+              }
             }
-            // Mark session inactive + clear liveMessages
-            await prisma.chatSession.update({
-              where: { id },
-              data: { isActive: false, liveMessages: Prisma.DbNull },
-            }).catch(() => {})
-            sessionIsActive = false
           }
         } else {
           // Client not available (instance not yet reconnected after restart).
@@ -227,8 +219,15 @@ export const GET = withAuth(
           }
         }
       } catch {
-        // Gateway unreachable / timeout — show warning, keep session active for retry
+        // Gateway unreachable / timeout — show warning, keep session active for retry.
+        // Fall back to liveMessages so the user still sees their conversation.
         connectionStatus = 'unreachable'
+        if (session.liveMessages) {
+          const cached = session.liveMessages as unknown as ChatMessage[]
+          if (Array.isArray(cached)) {
+            currentMessages = cached
+          }
+        }
       }
     }
 

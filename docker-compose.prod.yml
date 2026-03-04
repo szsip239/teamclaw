@@ -56,8 +56,11 @@ services:
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
-      - ${HOME}/.openclaw/media:${HOME}/.openclaw/media:ro
+      - ${HOME}/.openclaw:${HOME}/.openclaw:ro
       - /tmp:/tmp:ro
+      # Mount for external instance MEDIA images (e.g. OpenClaw skills output).
+      # Set EXTERNAL_MEDIA_DIR to the OpenClaw installation's parent directory.
+      - ${EXTERNAL_MEDIA_DIR:-/tmp/no-extra-mount}:${EXTERNAL_MEDIA_DIR:-/tmp/no-extra-mount}:ro
 
   postgres:
     image: postgres:17-alpine

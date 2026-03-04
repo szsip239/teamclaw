@@ -46,8 +46,8 @@ interface ChatState {
   clearMessages: () => void
 
   // Gateway connection status
-  connectionStatus: 'ok' | 'unreachable'
-  setConnectionStatus: (v: 'ok' | 'unreachable') => void
+  connectionStatus: 'ok' | 'unreachable' | 'session-lost'
+  setConnectionStatus: (v: 'ok' | 'unreachable' | 'session-lost') => void
 
   // Sidebar
   sidebarOpen: boolean
@@ -78,6 +78,25 @@ async function syncFromHistory(
     // Don't overwrite existing messages with empty history — gateway may temporarily
     // return empty results mid-run (race condition between tool calls).
     if (assembled.length > 0) {
+      // Preserve user-uploaded attachments: gateway chat.history doesn't return
+      // image attachments in user messages, so we carry them forward from existing
+      // local messages. Match by message text content.
+      const existing = useChatStore.getState().messages
+      const attachmentsByContent = new Map<string, ChatAttachment[]>()
+      for (const msg of existing) {
+        if (msg.role === 'user' && msg.attachments?.length) {
+          attachmentsByContent.set(msg.content, msg.attachments)
+        }
+      }
+      if (attachmentsByContent.size > 0) {
+        for (const msg of assembled) {
+          if (msg.role === 'user' && !msg.attachments?.length) {
+            const att = attachmentsByContent.get(msg.content)
+            if (att) msg.attachments = att
+          }
+        }
+      }
+
       set({ messages: assembled })
     }
   } catch {
