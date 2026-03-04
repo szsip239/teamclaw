@@ -13,11 +13,22 @@ export function ChatImageBlock({ imageUrl, alt }: ChatImageBlockProps) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
 
-  function handleDownload() {
-    const a = document.createElement("a")
-    a.href = imageUrl
-    a.download = alt || "image"
-    a.click()
+  async function handleDownload() {
+    if (imageUrl.startsWith('data:')) {
+      const a = document.createElement("a")
+      a.href = imageUrl
+      a.download = alt || "image"
+      a.click()
+    } else {
+      const res = await fetch(imageUrl)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = alt || "image"
+      a.click()
+      URL.revokeObjectURL(url)
+    }
   }
 
   return (

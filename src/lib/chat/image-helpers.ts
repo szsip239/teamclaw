@@ -1,6 +1,41 @@
+import { createHash } from 'crypto'
 import { readFile } from 'fs/promises'
 import { extname, resolve } from 'path'
 import { dockerManager } from '@/lib/docker/manager'
+
+// ─── Image ID hashing ───────────────────────────────────────────────
+
+/**
+ * Compute a short stable ID for an image data URL.
+ * Uses SHA-256 of the first 500 chars + total length → 16 hex chars.
+ * Same image always produces the same ID.
+ */
+export function computeImageId(dataUrl: string): string {
+  return createHash('sha256')
+    .update(dataUrl.slice(0, 500) + ':' + dataUrl.length)
+    .digest('hex')
+    .slice(0, 16)
+}
+
+// ─── Image ID stamping ──────────────────────────────────────────────
+
+import type { ChatMessage } from '@/types/chat'
+
+/**
+ * Stamp imageId on all image contentBlocks in a message array.
+ * Pre-computing the hash at storage time avoids re-computing it
+ * on every image endpoint request. Mutates in place.
+ */
+export function stampImageIds(messages: ChatMessage[]): void {
+  for (const msg of messages) {
+    if (!msg.contentBlocks) continue
+    for (const block of msg.contentBlocks) {
+      if (block.type === 'image' && block.imageUrl?.startsWith('data:') && !block.imageId) {
+        block.imageId = computeImageId(block.imageUrl)
+      }
+    }
+  }
+}
 
 // ─── Image constants ─────────────────────────────────────────────────
 
@@ -33,23 +68,6 @@ export function extractMediaPaths(text: string): string[] {
   while ((match = savedRegex.exec(text)) !== null) {
     const p = match[1]
     if (p && IMAGE_EXTENSIONS.has(extname(p).toLowerCase()) && !paths.includes(p)) paths.push(p)
-  }
-  return paths
-}
-
-/**
- * Extract file:/// image paths from text content.
- * AI may embed local file references in markdown format: ![alt](file:///path/to/image.png)
- * or as plain file:///path/to/image.png references.
- */
-export function extractFileProtocolPaths(text: string): string[] {
-  if (!text) return []
-  const paths: string[] = []
-  const fileRegex = /file:\/\/\/([\S]+?\.(?:png|jpg|jpeg|gif|webp|bmp))(?:[)\s\]"]|$)/gi
-  let match: RegExpExecArray | null
-  while ((match = fileRegex.exec(text)) !== null) {
-    const p = '/' + match[1]
-    if (!paths.includes(p)) paths.push(p)
   }
   return paths
 }

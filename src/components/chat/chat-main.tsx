@@ -8,12 +8,11 @@ import { ChatHeader } from "./chat-header"
 import { ChatMessageList } from "./chat-message-list"
 import { ChatInput } from "./chat-input"
 import { ChatWelcome } from "./chat-welcome"
-import type { ChatMessage, ChatSnapshotBatch } from "@/types/chat"
+import { assembleHistoryMessages } from "@/lib/chat/message-assembly"
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const setMessages = useChatStore((s) => s.setMessages)
-  const setLoadingHistory = useChatStore((s) => s.setLoadingHistory)
   const setConnectionStatus = useChatStore((s) => s.setConnectionStatus)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
@@ -42,10 +41,6 @@ export function ChatMain() {
   // Track which session + data version we've already loaded to avoid
   // redundant re-applies while still picking up background refetch results.
   const loadedRef = useRef<{ sessionId: string; updatedAt: number } | null>(null)
-
-  useEffect(() => {
-    setLoadingHistory(isLoadingHistoryQuery)
-  }, [isLoadingHistoryQuery, setLoadingHistory])
 
   // Set activeSessionId when we find a matching session
   useEffect(() => {
@@ -79,7 +74,7 @@ export function ChatMain() {
 
     if (!alreadyLoaded) {
       loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
-      const assembled = assembleMessages(
+      const assembled = assembleHistoryMessages(
         historyData.snapshots,
         historyData.currentMessages,
         historyData.isActive,
@@ -105,55 +100,9 @@ export function ChatMain() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <ChatHeader />
-      <ChatMessageList />
+      <ChatMessageList isLoadingHistory={isLoadingHistoryQuery} />
       <ChatInput />
     </div>
   )
 }
 
-/**
- * Assemble snapshots and current messages into a single list,
- * inserting separator markers between context resets.
- */
-function assembleMessages(
-  snapshots: ChatSnapshotBatch[],
-  currentMessages: ChatMessage[],
-  isActive: boolean,
-): ChatMessage[] {
-  const result: ChatMessage[] = []
-
-  for (let i = 0; i < snapshots.length; i++) {
-    result.push(...snapshots[i].messages)
-
-    // Insert separator after each batch
-    const isLastBatch = i === snapshots.length - 1
-    const hasMoreContent = !isLastBatch || (isActive && currentMessages.length > 0)
-    if (hasMoreContent) {
-      result.push(createSeparator("context-reset", `sep-${snapshots[i].batchId}`))
-    }
-  }
-
-  if (isActive && currentMessages.length > 0) {
-    result.push(...currentMessages)
-  } else if (!isActive && snapshots.length > 0) {
-    // Non-active session — show "context restart" separator if new messages arrive later
-    // (handled by the store when streaming starts on a reactivated session)
-  }
-
-  return result
-}
-
-/**
- * Create a special "separator" message used by ChatMessageList to render dividers.
- */
-function createSeparator(
-  type: "context-reset" | "context-restart",
-  id: string,
-): ChatMessage {
-  return {
-    id,
-    role: "assistant" as const,
-    content: `__separator__:${type}`,
-    createdAt: new Date().toISOString(),
-  }
-}

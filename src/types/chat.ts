@@ -16,6 +16,7 @@ export interface ChatContentBlock {
   type: 'text' | 'image'
   text?: string           // type=text
   imageUrl?: string       // type=image (base64 data URL or http URL)
+  imageId?: string        // pre-computed hash for image endpoint lookup
   mimeType?: string       // image/png, image/jpeg, etc.
   alt?: string            // image description
 }

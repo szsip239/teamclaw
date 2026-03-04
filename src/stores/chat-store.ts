@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { streamChat } from '@/lib/chat-stream'
+import { assembleFromResponse } from '@/lib/chat/message-assembly'
 import type { ChatAgentInfo, ChatMessage, ChatToolCall, ChatHistoryResponse, ChatAttachment, ChatContentBlock } from '@/types/chat'
 
 interface ChatState {
@@ -11,8 +12,15 @@ interface ChatState {
   activeSessionId: string | null
   setActiveSessionId: (id: string | null) => void
 
-  // Messages for current conversation
+  // Completed messages (stable during streaming — no array copies per delta)
   messages: ChatMessage[]
+  setMessages: (messages: ChatMessage[]) => void
+
+  // Streaming message — isolated from messages[] to avoid full-list re-renders.
+  // Only components subscribing to streamingMessage re-render on each delta.
+  streamingMessage: ChatMessage | null
+
+  // Streaming mutations (operate on streamingMessage, not messages[])
   addUserMessage: (content: string, attachments?: ChatAttachment[]) => void
   appendAssistantContent: (content: string) => void
   appendAssistantImage: (imageUrl: string, mimeType?: string, alt?: string) => void
@@ -20,11 +28,6 @@ interface ChatState {
   appendToolCall: (toolCall: ChatToolCall) => void
   setAssistantError: (error: string) => void
   completeAssistantMessage: () => void
-
-  // History loading
-  isLoadingHistory: boolean
-  setLoadingHistory: (v: boolean) => void
-  setMessages: (messages: ChatMessage[]) => void
 
   // Streaming state
   isStreaming: boolean
@@ -64,6 +67,7 @@ interface ChatState {
 async function syncFromHistory(
   activeSessionId: string,
   set: (fn: (s: ChatState) => Partial<ChatState>) => void,
+  get: () => ChatState,
   opts?: { polling?: boolean },
 ) {
   try {
@@ -73,41 +77,18 @@ async function syncFromHistory(
     })
     if (!res.ok) return
     const data: ChatHistoryResponse = await res.json()
-
-    const snapshots = data.snapshots ?? []
-    const currentMessages = data.currentMessages ?? []
-    const assembled: ChatMessage[] = []
-
-    // Rebuild: snapshots + separators + currentMessages
-    for (let i = 0; i < snapshots.length; i++) {
-      assembled.push(...snapshots[i].messages)
-      const isLastBatch = i === snapshots.length - 1
-      const hasMoreContent = !isLastBatch || (data.isActive && currentMessages.length > 0)
-      if (hasMoreContent) {
-        assembled.push({
-          id: `sep-${snapshots[i].batchId}`,
-          role: 'assistant' as const,
-          content: `__separator__:context-reset`,
-          createdAt: new Date().toISOString(),
-        })
-      }
-    }
-
-    if (data.isActive && currentMessages.length > 0) {
-      assembled.push(...currentMessages)
-    }
+    const assembled = assembleFromResponse(data)
 
     // Don't overwrite existing messages with empty history — gateway may temporarily
     // return empty results mid-run (race condition between tool calls).
     if (assembled.length > 0) {
       set((s) => {
         // During streaming polls, if history hasn't caught up yet (no assistant message),
-        // preserve the in-progress assistant message to keep the loading indicator visible.
+        // preserve the streaming message to keep the loading indicator visible.
         if (opts?.polling && s.isStreaming) {
-          const lastCurrent = s.messages[s.messages.length - 1]
           const lastAssembled = assembled[assembled.length - 1]
-          if (lastCurrent?.role === 'assistant' && lastAssembled?.role !== 'assistant') {
-            return { messages: [...assembled, lastCurrent] }
+          if (lastAssembled?.role !== 'assistant' && s.streamingMessage) {
+            return { messages: assembled }
           }
         }
         return { messages: assembled }
@@ -126,9 +107,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveSessionId: (id) => set({ activeSessionId: id }),
 
   messages: [],
+  streamingMessage: null,
 
-  isLoadingHistory: false,
-  setLoadingHistory: (v) => set({ isLoadingHistory: v }),
   setMessages: (messages) => set({ messages }),
 
   addUserMessage: (content, attachments) => {
@@ -144,73 +124,62 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   appendAssistantImage: (imageUrl, mimeType, alt) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        const blocks: ChatContentBlock[] = [...(last.contentBlocks ?? [])]
-        blocks.push({ type: 'image', imageUrl, mimeType, alt })
-        msgs[msgs.length - 1] = { ...last, contentBlocks: blocks }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      const blocks: ChatContentBlock[] = [...(msg.contentBlocks ?? [])]
+      blocks.push({ type: 'image', imageUrl, mimeType, alt })
+      return { streamingMessage: { ...msg, contentBlocks: blocks } }
     })
   },
 
   appendAssistantContent: (content) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, content: last.content + content }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      return { streamingMessage: { ...msg, content: msg.content + content } }
     })
   },
 
   appendThinking: (content) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = {
-          ...last,
-          thinking: (last.thinking ?? '') + content,
-        }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      return {
+        streamingMessage: {
+          ...msg,
+          thinking: (msg.thinking ?? '') + content,
+        },
       }
-      return { messages: msgs }
     })
   },
 
   appendToolCall: (toolCall) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        // When a tool call arrives, any accumulated content is intermediate
-        // narration (e.g. "Let me calculate..."), not the final answer.
-        // Move it into thinking so it renders in the collapsible block.
-        const reclassifiedThinking =
-          last.content
-            ? last.content + (last.thinking ? '\n\n' + last.thinking : '')
-            : last.thinking
-        msgs[msgs.length - 1] = {
-          ...last,
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      // When a tool call arrives, any accumulated content is intermediate
+      // narration (e.g. "Let me calculate..."), not the final answer.
+      // Move it into thinking so it renders in the collapsible block.
+      const reclassifiedThinking =
+        msg.content
+          ? msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
+          : msg.thinking
+      return {
+        streamingMessage: {
+          ...msg,
           content: '',
           ...(reclassifiedThinking ? { thinking: reclassifiedThinking } : {}),
-          toolCalls: [...(last.toolCalls ?? []), toolCall],
-        }
+          toolCalls: [...(msg.toolCalls ?? []), toolCall],
+        },
       }
-      return { messages: msgs }
     })
   },
 
   setAssistantError: (error) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, error }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      return { streamingMessage: { ...msg, error } }
     })
   },
 
@@ -237,14 +206,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
     addUserMessage(message, uiAttachments)
 
-    // 2. Create assistant placeholder
+    // 2. Create assistant placeholder as streamingMessage (not in messages[])
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
       createdAt: new Date().toISOString(),
     }
-    set((s) => ({ messages: [...s.messages, assistantMsg] }))
+    set({ streamingMessage: assistantMsg })
 
     // 3. Set streaming state
     const controller = new AbortController()
@@ -260,7 +229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const sid = capturedSessionId || get().activeSessionId
       if (sid && get().isStreaming && !syncing) {
         syncing = true
-        syncFromHistory(sid, set, { polling: true }).finally(() => { syncing = false })
+        syncFromHistory(sid, set, get, { polling: true }).finally(() => { syncing = false })
       }
     }, PROGRESS_POLL_INTERVAL)
 
@@ -322,13 +291,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } finally {
       clearInterval(progressTimer)
-      set({ isStreaming: false, abortController: null })
+
+      // Merge streamingMessage into messages[] before clearing streaming state
+      const finalStreaming = get().streamingMessage
+      if (finalStreaming) {
+        set((s) => ({
+          messages: [...s.messages, finalStreaming],
+          streamingMessage: null,
+          isStreaming: false,
+          abortController: null,
+        }))
+      } else {
+        set({ streamingMessage: null, isStreaming: false, abortController: null })
+      }
 
       // 5. Sync with full history (gateway omits thinking + tool events during streaming)
       // Use captured ID to avoid reading a stale/changed activeSessionId.
       // Skip if session was cleared (abort) — don't restore messages the user deliberately removed.
       if (capturedSessionId && get().activeSessionId) {
-        syncFromHistory(capturedSessionId, set)
+        syncFromHistory(capturedSessionId, set, get)
       }
     }
   },
@@ -336,7 +317,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     const { abortController } = get()
     if (abortController) abortController.abort()
-    set({ messages: [], isStreaming: false, abortController: null, activeSessionId: null, connectionStatus: 'ok' })
+    set({ messages: [], streamingMessage: null, isStreaming: false, abortController: null, activeSessionId: null, connectionStatus: 'ok' })
   },
 
   connectionStatus: 'ok',
