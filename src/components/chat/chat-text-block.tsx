@@ -51,6 +51,19 @@ export function ChatTextBlock({ content }: ChatTextBlockProps) {
   )
 }
 
+const URL_SPLIT_RE = /(https?:\/\/[^\s)<>\]]+)/g
+
+function renderTextWithLinks(text: string, keyPrefix: string): React.ReactNode[] {
+  const parts = text.split(URL_SPLIT_RE)
+  // split with capturing group: even indices = text, odd indices = URL
+  return parts.map((p, k) =>
+    k % 2 === 1
+      ? <a key={`${keyPrefix}-${k}`} href={p} target="_blank" rel="noopener noreferrer"
+           className="text-primary underline hover:no-underline break-all">{p}</a>
+      : <span key={`${keyPrefix}-${k}`}>{p}</span>
+  )
+}
+
 function renderInline(text: string): React.ReactNode[] {
   // Handle inline code: `code`
   const parts = text.split(/(`[^`]+`)/g)
@@ -71,7 +84,7 @@ function renderInline(text: string): React.ReactNode[] {
       if (bp.startsWith("**") && bp.endsWith("**")) {
         return <strong key={`${i}-${j}`}>{bp.slice(2, -2)}</strong>
       }
-      return <span key={`${i}-${j}`}>{bp}</span>
+      return renderTextWithLinks(bp, `${i}-${j}`)
     })
   })
 }
