@@ -12,6 +12,7 @@ import {
   mergeExistingContentBlocks,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
+import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type { ChatMessage, ChatToolCall, ChatSnapshotBatch, ChatHistoryResponse, ChatContentBlock } from '@/types/chat'
 
@@ -241,6 +242,7 @@ export const GET = withAuth(
       currentMessages,
       isActive: sessionIsActive,
       ...(connectionStatus !== 'ok' ? { connectionStatus } : {}),
+      ...(activeRuns.has(id) ? { isRunning: true } : {}),
     }
 
     return NextResponse.json(response)

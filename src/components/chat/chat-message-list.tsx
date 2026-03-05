@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useRef, useEffect, useState, useCallback } from "react"
-import { Loader2, RefreshCw, Plus } from "lucide-react"
+import { Bot, Loader2, RefreshCw, Plus } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -136,6 +136,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
   const messages = useChatStore((s) => s.messages)
   const streamingMessage = useChatStore((s) => s.streamingMessage)
   const isStreaming = useChatStore((s) => s.isStreaming)
+  const remoteStreaming = useChatStore((s) => s.remoteStreaming)
   const connectionStatus = useChatStore((s) => s.connectionStatus)
   const bottomRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -155,7 +156,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
     if (isNearBottom) {
       bottomRef.current?.scrollIntoView({ behavior: "instant" })
     }
-  }, [messageCount, streamingContent, isStreaming, isNearBottom])
+  }, [messageCount, streamingContent, isStreaming, remoteStreaming, isNearBottom])
 
   if (isLoadingHistory && messages.length === 0) {
     return (
@@ -184,6 +185,20 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
             message={streamingMessage}
             isStreaming={isStreaming}
           />
+        )}
+        {remoteStreaming && !streamingMessage && (
+          <div className="flex justify-start">
+            <div className="flex max-w-[85%] items-start gap-2">
+              <div className="bg-muted flex size-7 shrink-0 items-center justify-center rounded-full">
+                <Bot className="size-3.5" />
+              </div>
+              <div className="flex items-center gap-1 py-2">
+                <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:0ms]" />
+                <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:150ms]" />
+                <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:300ms]" />
+              </div>
+            </div>
+          </div>
         )}
         <div ref={bottomRef} />
       </div>

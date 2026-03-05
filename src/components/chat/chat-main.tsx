@@ -18,6 +18,7 @@ export function ChatMain() {
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
   const messagesLength = useChatStore((s) => s.messages.length)
   const isStreaming = useChatStore((s) => s.isStreaming)
+  const setRemoteStreaming = useChatStore((s) => s.setRemoteStreaming)
   const qc = useQueryClient()
 
   // Find existing session for the selected agent.
@@ -91,8 +92,12 @@ export function ChatMain() {
         setMessages(assembled)
       }
       setConnectionStatus(historyData.connectionStatus ?? 'ok')
+      // Update remote streaming indicator only on FRESH data from a poll.
+      // When isStreaming transitions to false, the chat-store already clears
+      // remoteStreaming — don't override it with stale cached historyData.
+      setRemoteStreaming(!isStreaming && !!historyData?.isRunning)
     }
-  }, [historyData, matchingSession, setMessages, setConnectionStatus, messagesLength, dataUpdatedAt, isStreaming])
+  }, [historyData, matchingSession, setMessages, setConnectionStatus, setRemoteStreaming, messagesLength, dataUpdatedAt, isStreaming])
 
   if (!selectedAgent) {
     return (

@@ -33,6 +33,11 @@ interface ChatState {
   setStreaming: (v: boolean) => void
   abortController: AbortController | null
 
+  // Remote streaming: agent is running on the server but we're not streaming locally
+  // (e.g. user switched away and came back while the agent was still generating)
+  remoteStreaming: boolean
+  setRemoteStreaming: (v: boolean) => void
+
   // Send message action
   sendMessage: (
     instanceId: string,
@@ -78,22 +83,29 @@ async function syncFromHistory(
     // Don't overwrite existing messages with empty history — gateway may temporarily
     // return empty results mid-run (race condition between tool calls).
     if (assembled.length > 0) {
-      // Preserve user-uploaded attachments: gateway chat.history doesn't return
-      // image attachments in user messages, so we carry them forward from existing
-      // local messages. Match by message text content.
+      // Preserve user-uploaded attachments and contentBlocks: gateway chat.history
+      // doesn't return image attachments/blocks in user messages, so we carry them
+      // forward from existing local messages. Match by message text content.
       const existing = useChatStore.getState().messages
-      const attachmentsByContent = new Map<string, ChatAttachment[]>()
+      const preservedByContent = new Map<string, { attachments?: ChatAttachment[]; contentBlocks?: ChatContentBlock[] }>()
       for (const msg of existing) {
-        if (msg.role === 'user' && msg.attachments?.length) {
-          attachmentsByContent.set(msg.content, msg.attachments)
+        if (msg.role !== 'user') continue
+        if (!msg.attachments?.length && !msg.contentBlocks?.length) continue
+        const key = msg.content
+        if (!preservedByContent.has(key)) {
+          preservedByContent.set(key, {
+            ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
+            ...(msg.contentBlocks?.length ? { contentBlocks: msg.contentBlocks } : {}),
+          })
         }
       }
-      if (attachmentsByContent.size > 0) {
+      if (preservedByContent.size > 0) {
         for (const msg of assembled) {
-          if (msg.role === 'user' && !msg.attachments?.length) {
-            const att = attachmentsByContent.get(msg.content)
-            if (att) msg.attachments = att
-          }
+          if (msg.role !== 'user') continue
+          const saved = preservedByContent.get(msg.content)
+          if (!saved) continue
+          if (!msg.attachments?.length && saved.attachments) msg.attachments = saved.attachments
+          if (!msg.contentBlocks?.length && saved.contentBlocks) msg.contentBlocks = saved.contentBlocks
         }
       }
 
@@ -191,6 +203,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   setStreaming: (v) => set({ isStreaming: v }),
   abortController: null,
+
+  remoteStreaming: false,
+  setRemoteStreaming: (v) => set({ remoteStreaming: v }),
 
   sendMessage: async (instanceId, agentId, message, sessionId, attachments) => {
     const { addUserMessage } = get()
@@ -299,10 +314,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messages: [...s.messages, finalStreaming],
           streamingMessage: null,
           isStreaming: false,
+          remoteStreaming: false, // We just finished our own run — no remote streaming
           abortController: null,
         }))
       } else {
-        set({ streamingMessage: null, isStreaming: false, abortController: null })
+        set({ streamingMessage: null, isStreaming: false, remoteStreaming: false, abortController: null })
       }
 
       // 5. Sync with full history (gateway omits thinking + tool events during streaming)
@@ -317,7 +333,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     const { abortController } = get()
     if (abortController) abortController.abort()
-    set({ messages: [], streamingMessage: null, isStreaming: false, abortController: null, activeSessionId: null, connectionStatus: 'ok' })
+    set({ messages: [], streamingMessage: null, isStreaming: false, abortController: null, activeSessionId: null, connectionStatus: 'ok', remoteStreaming: false })
   },
 
   connectionStatus: 'ok',
