@@ -190,7 +190,6 @@ function mergeContentBlocksIntoSnapshots(
     if (snap.role !== live.role) continue
     liveIdx++
 
-    if (snap.role !== 'assistant') continue
     if (snap.contentBlocks) continue // already has content blocks
     const imageBlocks = live.contentBlocks?.filter(b => b.type === 'image')
     if (imageBlocks?.length) {
@@ -528,23 +527,34 @@ function mergeCapturedImages(
  * Carry forward contentBlocks from previous liveMessages.
  * When saveLiveSnapshot overwrites with fresh chat.history data,
  * images from earlier runs would be lost without this merge.
+ *
+ * Uses content-based matching (role + text) instead of pure index matching
+ * so that images survive even when message counts diverge (e.g. container
+ * rebuild interrupted saveLiveSnapshot, leaving liveMessages shorter than
+ * the gateway's current message list).
  */
 export function mergeExistingContentBlocks(
   newMessages: ChatMessage[],
   oldMessages: ChatMessage[],
 ): void {
-  // Match messages by index + role (chat.history order is stable)
-  const limit = Math.min(newMessages.length, oldMessages.length)
-  for (let i = 0; i < limit; i++) {
-    const newMsg = newMessages[i]
-    const oldMsg = oldMessages[i]
-    if (newMsg.role !== oldMsg.role) continue
-    if (newMsg.role !== 'assistant') continue
-    if (!oldMsg.contentBlocks?.length) continue
-    if (newMsg.contentBlocks?.length) continue // new data already has images
+  // Build a lookup: role + content → contentBlocks from old messages.
+  // Only include the FIRST match per key to avoid ambiguity.
+  const blocksByKey = new Map<string, ChatContentBlock[]>()
+  for (const old of oldMessages) {
+    if (!old.contentBlocks?.length) continue
+    const key = `${old.role}:${old.content}`
+    if (!blocksByKey.has(key)) {
+      blocksByKey.set(key, old.contentBlocks)
+    }
+  }
 
-    // Carry over old contentBlocks
-    newMsg.contentBlocks = oldMsg.contentBlocks
+  for (const msg of newMessages) {
+    if (msg.contentBlocks?.length) continue // already has images
+    const key = `${msg.role}:${msg.content}`
+    const blocks = blocksByKey.get(key)
+    if (blocks) {
+      msg.contentBlocks = blocks
+    }
   }
 }
 

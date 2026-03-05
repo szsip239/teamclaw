@@ -54,6 +54,7 @@ export interface ChatHistoryResponse {
   currentMessages: ChatMessage[]
   isActive: boolean
   connectionStatus?: 'ok' | 'unreachable' | 'session-lost'
+  isRunning?: boolean
 }
 
 export interface ChatMessage {

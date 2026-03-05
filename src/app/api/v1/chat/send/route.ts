@@ -9,6 +9,7 @@ import { dockerManager } from '@/lib/docker/manager'
 import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget } from '@/lib/session-files/helpers'
 import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
 import { MIME_BY_EXT, extractMediaPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
+import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult } from '@/types/gateway'
 import { Prisma } from '@/generated/prisma'
@@ -299,6 +300,9 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Track active run so the history API can report isRunning
+  activeRuns.add(chatSessionId)
+
   // Send session ID as the first event so the frontend can track this session
   write({ type: 'session', sessionId: chatSessionId })
 
@@ -429,15 +433,22 @@ export async function POST(req: NextRequest) {
 
       // Scan chat.history for MEDIA paths in tool results and emit as image events.
       // Must run before 'done' so frontend displays images in the same streaming session.
-      fetchAndEmitImages().then(() => {
+      fetchAndEmitImages().then(async () => {
+        // Await saveLiveSnapshot BEFORE sending 'done' so that when the client
+        // calls syncFromHistory (triggered by 'done'), liveMessages in the DB
+        // already contain user-uploaded images and resolved MEDIA images.
+        try {
+          await saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments)
+        } catch (err) {
+          console.error('[live-snapshot] Save failed:', err)
+        }
         write({ type: 'done' })
-        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments).catch((err) =>
-          console.error('[live-snapshot] Save failed:', err),
-        )
         cleanup()
-      }).catch(() => {
+      }).catch(async () => {
+        try {
+          await saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments)
+        } catch { /* non-fatal */ }
         write({ type: 'done' })
-        saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments).catch(() => {})
         cleanup()
       })
     } else if (state === 'error') {
@@ -503,6 +514,7 @@ export async function POST(req: NextRequest) {
   })
 
   async function cleanup() {
+    activeRuns.delete(chatSessionId)
     unsubChat()
     unsubAgent()
     await close()
@@ -587,6 +599,39 @@ export async function POST(req: NextRequest) {
     for (const a of mappedAttachments) {
       if (a.mimeType.startsWith('image/')) {
         userImageAttachments.push({ name: a.fileName, mimeType: a.mimeType, content: a.content })
+      }
+    }
+
+    // Early-save user image attachments to DB to prevent data loss.
+    // saveLiveSnapshot runs at run end, but if the container is rebuilt mid-run
+    // the image data is permanently lost. By eagerly appending a user message
+    // with contentBlocks to liveMessages, mergeExistingContentBlocks (content-based
+    // matching) can carry the image forward even if saveLiveSnapshot never runs.
+    if (userImageAttachments.length > 0) {
+      const imageBlocks: ChatContentBlock[] = userImageAttachments.map(a => ({
+        type: 'image' as const,
+        imageUrl: `data:${a.mimeType};base64,${a.content}`,
+        mimeType: a.mimeType,
+      }))
+      try {
+        const cur = await prisma.chatSession.findUnique({
+          where: { id: chatSessionId },
+          select: { liveMessages: true },
+        })
+        const live = (Array.isArray(cur?.liveMessages) ? cur!.liveMessages : []) as unknown as Record<string, unknown>[]
+        live.push({
+          id: randomUUID(),
+          role: 'user',
+          content: message,
+          contentBlocks: imageBlocks,
+          createdAt: new Date().toISOString(),
+        })
+        await prisma.chatSession.update({
+          where: { id: chatSessionId },
+          data: { liveMessages: live as unknown as Prisma.InputJsonValue },
+        })
+      } catch {
+        // Non-fatal: saveLiveSnapshot will handle it at run end
       }
     }
 
