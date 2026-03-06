@@ -537,23 +537,29 @@ export function mergeExistingContentBlocks(
   newMessages: ChatMessage[],
   oldMessages: ChatMessage[],
 ): void {
-  // Build a lookup: role + content → contentBlocks from old messages.
-  // Only include the FIRST match per key to avoid ambiguity.
-  const blocksByKey = new Map<string, ChatContentBlock[]>()
+  // Build ordered lookup: role + content → array of contentBlocks entries.
+  // Multiple messages with the same key (e.g., assistant messages with empty content
+  // due to tool-call reclassification) each get their OWN entry in order.
+  const blocksByKey = new Map<string, ChatContentBlock[][]>()
   for (const old of oldMessages) {
     if (!old.contentBlocks?.length) continue
     const key = `${old.role}:${old.content}`
-    if (!blocksByKey.has(key)) {
-      blocksByKey.set(key, old.contentBlocks)
-    }
+    const arr = blocksByKey.get(key) ?? []
+    arr.push(old.contentBlocks)
+    blocksByKey.set(key, arr)
   }
 
+  // Track consumption per key: each match is used exactly once, in order.
+  const consumed = new Map<string, number>()
   for (const msg of newMessages) {
     if (msg.contentBlocks?.length) continue // already has images
     const key = `${msg.role}:${msg.content}`
-    const blocks = blocksByKey.get(key)
-    if (blocks) {
-      msg.contentBlocks = blocks
+    const arr = blocksByKey.get(key)
+    if (!arr) continue
+    const idx = consumed.get(key) ?? 0
+    if (idx < arr.length) {
+      msg.contentBlocks = arr[idx]
+      consumed.set(key, idx + 1)
     }
   }
 }

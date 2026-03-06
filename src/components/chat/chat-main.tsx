@@ -79,6 +79,12 @@ export function ChatMain() {
       loadedRef.current?.updatedAt === dataUpdatedAt &&
       messagesLength > 0
 
+    // Always sync remote streaming state — must run outside the alreadyLoaded
+    // guard so that when isStreaming transitions false→true→false, stale cached
+    // isRunning=true doesn't re-enable remoteStreaming after the finally block
+    // already cleared it.
+    setRemoteStreaming(!isStreaming && !!historyData?.isRunning)
+
     if (!alreadyLoaded) {
       loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
       const assembled = assembleHistoryMessages(
@@ -92,10 +98,6 @@ export function ChatMain() {
         setMessages(assembled)
       }
       setConnectionStatus(historyData.connectionStatus ?? 'ok')
-      // Update remote streaming indicator only on FRESH data from a poll.
-      // When isStreaming transitions to false, the chat-store already clears
-      // remoteStreaming — don't override it with stale cached historyData.
-      setRemoteStreaming(!isStreaming && !!historyData?.isRunning)
     }
   }, [historyData, matchingSession, setMessages, setConnectionStatus, setRemoteStreaming, messagesLength, dataUpdatedAt, isStreaming])
 
