@@ -232,6 +232,25 @@ export const GET = withAuth(
       }
     }
 
+    // Deduplicate: if sessions.delete failed during clear-context,
+    // the gateway still has old messages that were already snapshotted.
+    // Detect and trim the overlapping prefix from currentMessages.
+    if (snapshots.length > 0 && currentMessages.length > 0) {
+      const lastBatch = snapshots[snapshots.length - 1].messages
+      let overlap = 0
+      for (let i = 0; i < Math.min(lastBatch.length, currentMessages.length); i++) {
+        if (lastBatch[i].role === currentMessages[i].role &&
+            lastBatch[i].content === currentMessages[i].content) {
+          overlap++
+        } else {
+          break
+        }
+      }
+      if (overlap === lastBatch.length && overlap > 0) {
+        currentMessages = currentMessages.slice(overlap)
+      }
+    }
+
     replaceInlineImages(currentMessages, id)
     for (const batch of snapshots) {
       replaceInlineImages(batch.messages, id)
