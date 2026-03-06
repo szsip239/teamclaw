@@ -199,7 +199,7 @@ export const GET = withAuth(
           // The session stays active so the user can simply send a new message to continue.
           const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
           const sessionAgeMs = Date.now() - session.createdAt.getTime()
-          if (!isPolling && currentMessages.length === 0 && sessionAgeMs > 30_000 && session.messageCount > 0) {
+          if (!isPolling && !activeRuns.has(id) && currentMessages.length === 0 && sessionAgeMs > 30_000 && session.messageCount > 0) {
             connectionStatus = 'session-lost'
             if (session.liveMessages) {
               const cached = session.liveMessages as unknown as ChatMessage[]
