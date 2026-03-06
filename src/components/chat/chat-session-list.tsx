@@ -91,7 +91,7 @@ export function ChatSessionList() {
                   "truncate text-sm",
                   !session.isActive && "text-muted-foreground",
                 )}>
-                  {session.title || session.agentName || session.agentId}
+                  {session.title || resolveAgentName(session)}
                 </p>
                 {session.isActive && (
                   <span className="size-1.5 shrink-0 rounded-full bg-green-500" />
