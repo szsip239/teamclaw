@@ -17,6 +17,7 @@ export function ChatFilePanel() {
   const t = useT()
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const isStreaming = useChatStore((s) => s.isStreaming)
+  const selectedAgent = useChatStore((s) => s.selectedAgent)
   const reset = useFilePanelStore((s) => s.reset)
   const qc = useQueryClient()
 
@@ -69,7 +70,7 @@ export function ChatFilePanel() {
               {t("filePanel.input")}
             </span>
           </div>
-          <FileUploadZone sessionId={activeSessionId}>
+          <FileUploadZone sessionId={activeSessionId} agentId={selectedAgent?.agentId}>
             <FileTree zone="input" sessionId={activeSessionId} />
           </FileUploadZone>
         </div>

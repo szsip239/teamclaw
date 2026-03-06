@@ -44,6 +44,11 @@ interface ChatState {
   // Session management
   clearMessages: () => void
 
+  // Pending session-uploaded file paths (injected into next outgoing message)
+  pendingFilePaths: Array<{ name: string; path: string }>
+  addPendingFilePath: (name: string, path: string) => void
+  clearPendingFilePaths: () => void
+
   // Sidebar
   sidebarOpen: boolean
   setSidebarOpen: (v: boolean) => void
@@ -216,6 +221,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // when the API creates a new session (activeSessionId was null)
     let capturedSessionId = get().activeSessionId
 
+    // Consume pending file paths — inject them into the gateway message so the
+    // agent can read the uploaded files. The UI still shows the original message.
+    const pendingPaths = get().pendingFilePaths
+    let gatewayMessage = message
+    if (pendingPaths.length > 0) {
+      const pathList = pendingPaths.map((f) => f.path).join('\n')
+      gatewayMessage = `[已上传文件，可通过以下路径直接读取：\n${pathList}]\n\n${message}`
+      get().clearPendingFilePaths()
+    }
+
     // 1. Add user message (with attachment previews for UI)
     const uiAttachments: ChatAttachment[] | undefined = attachments?.map(a => ({
       name: a.name,
@@ -248,7 +263,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }))
 
       for await (const event of streamChat(
-        { instanceId, agentId, message, sessionId, attachments: streamAttachments },
+        { instanceId, agentId, message: gatewayMessage, sessionId, attachments: streamAttachments },
         controller.signal,
       )) {
         switch (event.type) {
@@ -308,8 +323,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     const { abortController } = get()
     if (abortController) abortController.abort()
-    set({ messages: [], isStreaming: false, abortController: null, activeSessionId: null })
+    set({ messages: [], isStreaming: false, abortController: null, activeSessionId: null, pendingFilePaths: [] })
   },
+
+  pendingFilePaths: [],
+  addPendingFilePath: (name, path) =>
+    set((s) => ({ pendingFilePaths: [...s.pendingFilePaths, { name, path }] })),
+  clearPendingFilePaths: () => set({ pendingFilePaths: [] }),
 
   sidebarOpen: true,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),

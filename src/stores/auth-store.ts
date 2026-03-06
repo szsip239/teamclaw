@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { api, ApiError, setAccessToken } from "@/lib/api-client"
+import { api, ApiError, setAccessToken, setRefreshToken } from "@/lib/api-client"
 
 export interface AuthUser {
   id: string
@@ -90,6 +90,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (data?.accessToken) {
         setAccessToken(data.accessToken)
       }
+      if (data?.refreshToken) {
+        setRefreshToken(data.refreshToken)
+      }
       // Use user from login response directly to skip an extra round-trip.
       if (data?.user) {
         set({ user: data.user, isLoading: false })
@@ -108,6 +111,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (data?.accessToken) {
         setAccessToken(data.accessToken)
       }
+      if (data?.refreshToken) {
+        setRefreshToken(data.refreshToken)
+      }
       if (data?.user) {
         set({ user: data.user, isLoading: false })
       } else {
@@ -123,6 +129,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         // Best-effort; clear local state regardless.
       }
       setAccessToken(null)
+      setRefreshToken(null)
       set({ user: null })
       broadcast("logout", null)
     },

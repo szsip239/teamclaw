@@ -153,7 +153,10 @@ export function useUploadSessionFile(sessionId: string | null) {
           (data as { error?: string } | null)?.error || "Upload failed",
         )
       }
-      return res.json() as Promise<{ success: boolean }>
+      return res.json() as Promise<{
+        success: boolean
+        file: { name: string; path: string; type: string; size: number }
+      }>
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: sessionFileKeys.lists() })

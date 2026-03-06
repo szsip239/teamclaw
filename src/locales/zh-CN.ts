@@ -841,6 +841,8 @@ const zhCN = {
   'instance.stopFailed': '停止失败',
   'instance.restartFailed': '重启失败',
   'agent.connectionFailed': '以下实例连接失败：',
+  'agent.loadFailed': '加载 Agent 列表失败，请刷新重试',
+  'skill.loadFailed': '加载 Skill 列表失败，请刷新重试',
   'skill.deleteConfirmTitle': '确认删除',
   'skill.deleteConfirmMsg': '确定要删除 Skill「{name}」吗？此操作将删除所有文件和安装记录，且不可恢复。',
   'skill.deletedMsg': 'Skill "{name}" 已删除',

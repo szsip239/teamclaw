@@ -31,7 +31,7 @@ export default function AgentsPage() {
   const [cloneAgent, setCloneAgent] = useState<AgentOverview | null>(null)
   const [detailAgent, setDetailAgent] = useState<AgentOverview | null>(null)
 
-  const { data: agentsData, isLoading: agentsLoading } = useAgents(
+  const { data: agentsData, isLoading: agentsLoading, isError: agentsError } = useAgents(
     instanceFilter !== "all" ? instanceFilter : undefined,
   )
   const { data: instancesData } = useInstances()
@@ -97,6 +97,11 @@ export default function AgentsPage() {
 
       {agentsLoading ? (
         <AgentCardSkeleton />
+      ) : agentsError ? (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" />
+          {t('agent.loadFailed')}
+        </div>
       ) : agents.length === 0 ? (
         <AgentEmptyState />
       ) : (

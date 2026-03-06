@@ -10,10 +10,13 @@ import { SkillEmptyState } from "@/components/skills/skill-empty-state"
 import { SkillCreateDialog } from "@/components/skills/skill-create-dialog"
 import { useSkills } from "@/hooks/use-skills"
 import { useAuthStore } from "@/stores/auth-store"
+import { useT } from "@/stores/language-store"
+import { AlertTriangle } from "lucide-react"
 import type { SkillOverview } from "@/types/skill"
 
 export default function SkillsPage() {
   const router = useRouter()
+  const t = useT()
   const user = useAuthStore((s) => s.user)
 
   const [categoryFilter, setCategoryFilter] = useState("all")
@@ -24,7 +27,7 @@ export default function SkillsPage() {
   // Determine if user can create skills (all roles can create at least PERSONAL)
   const canCreate = !!user
 
-  const { data, isLoading } = useSkills({
+  const { data, isLoading, isError } = useSkills({
     category: categoryFilter !== "all" ? categoryFilter : undefined,
     source: sourceFilter !== "all" ? sourceFilter : undefined,
     search: search || undefined,
@@ -57,6 +60,11 @@ export default function SkillsPage() {
 
       {isLoading ? (
         <SkillCardSkeleton />
+      ) : isError ? (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" />
+          {t('skill.loadFailed')}
+        </div>
       ) : skills.length === 0 ? (
         <SkillEmptyState />
       ) : (

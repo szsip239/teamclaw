@@ -843,6 +843,8 @@ const en: Record<TranslationKey, string> = {
   'instance.stopFailed': 'Stop failed',
   'instance.restartFailed': 'Restart failed',
   'agent.connectionFailed': 'The following instances failed to connect:',
+  'agent.loadFailed': 'Failed to load agents. Please refresh and try again.',
+  'skill.loadFailed': 'Failed to load skills. Please refresh and try again.',
   'skill.deleteConfirmTitle': 'Confirm Delete',
   'skill.deleteConfirmMsg': 'Are you sure you want to delete Skill "{name}"? This will delete all files and installation records and cannot be undone.',
   'skill.deletedMsg': 'Skill "{name}" deleted',

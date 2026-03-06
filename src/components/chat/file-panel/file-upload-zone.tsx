@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { useUploadSessionFile } from "@/hooks/use-session-files"
+import { useChatStore } from "@/stores/chat-store"
 import { useT } from "@/stores/language-store"
 import { Button } from "@/components/ui/button"
 import { Upload } from "lucide-react"
@@ -12,12 +13,14 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
 interface FileUploadZoneProps {
   sessionId: string
+  agentId?: string
   dir?: string
   children: React.ReactNode
 }
 
 export function FileUploadZone({
   sessionId,
+  agentId,
   dir,
   children,
 }: FileUploadZoneProps) {
@@ -25,6 +28,7 @@ export function FileUploadZone({
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadMutation = useUploadSessionFile(sessionId)
+  const addPendingFilePath = useChatStore((s) => s.addPendingFilePath)
   const dragCountRef = useRef(0)
 
   const uploadFile = useCallback(
@@ -36,12 +40,21 @@ export function FileUploadZone({
       uploadMutation.mutate(
         { file, dir },
         {
-          onSuccess: () => toast.success(t("filePanel.uploadSuccess")),
+          onSuccess: (data) => {
+            toast.success(t("filePanel.uploadSuccess"))
+            // Register the full container path so the next chat message
+            // automatically tells the agent where to find the file.
+            if (agentId && data?.file?.path) {
+              const relativePath = data.file.path
+              const fullPath = `/home/node/.openclaw/workspace/tc-sessions/${agentId}/${sessionId}/input/${relativePath}`
+              addPendingFilePath(file.name, fullPath)
+            }
+          },
           onError: () => toast.error(t("filePanel.uploadFailed")),
         }
       )
     },
-    [uploadMutation, dir, t]
+    [uploadMutation, agentId, sessionId, dir, addPendingFilePath, t]
   )
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {

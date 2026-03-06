@@ -34,6 +34,7 @@ function unwrapGoResponse(json: unknown): unknown {
 // Token storage — kept in memory; survives page navigations but not hard refreshes.
 // Hard refresh: fetchUser() re-authenticates via the httpOnly access_token cookie.
 let _accessToken: string | null = null
+let _refreshToken: string | null = null
 
 export function setAccessToken(token: string | null) {
   _accessToken = token
@@ -41,6 +42,14 @@ export function setAccessToken(token: string | null) {
 
 export function getAccessToken(): string | null {
   return _accessToken
+}
+
+export function setRefreshToken(token: string | null) {
+  _refreshToken = token
+}
+
+export function getRefreshToken(): string | null {
+  return _refreshToken
 }
 
 async function request<T>(
@@ -70,12 +79,19 @@ async function request<T>(
 
   // On 401, try refreshing the token once
   if (response.status === 401 && !endpoint.includes("/auth/refresh")) {
+    const refreshBody = _refreshToken
+      ? JSON.stringify({ refreshToken: _refreshToken })
+      : undefined
+    const refreshHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+    if (_accessToken) refreshHeaders["Authorization"] = `Bearer ${_accessToken}`
+
     const refreshRes = await fetch(`${BASE_URL}/api/v1/auth/refresh`, {
       method: "POST",
       credentials: "include",
-      headers: _accessToken
-        ? { Authorization: `Bearer ${_accessToken}` }
-        : {},
+      headers: refreshHeaders,
+      body: refreshBody,
     })
 
     if (refreshRes.ok) {
@@ -90,8 +106,11 @@ async function request<T>(
         ;(headers as Record<string, string>)["Authorization"] = `Bearer ${_accessToken}`
         config.headers = headers
       }
+      if (refreshData?.refreshToken) {
+        _refreshToken = refreshData.refreshToken
+      }
 
-      response = await fetch(endpoint, config)
+      response = await fetch(`${BASE_URL}${endpoint}`, config)
     }
   }
 
