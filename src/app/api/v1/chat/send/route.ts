@@ -414,6 +414,10 @@ export async function POST(req: NextRequest) {
       }
       lastImageCount = images.length
     } else if (state === 'final') {
+      // Immediately clear active run status so history polls don't report
+      // isRunning=true during the (potentially slow) post-run cleanup.
+      activeRuns.delete(chatSessionId)
+
       const textContent = extractTextFromMessage(evt.message)
       const thinkingContent = extractThinkingFromMessage(evt.message)
 
@@ -455,12 +459,14 @@ export async function POST(req: NextRequest) {
         cleanup()
       })
     } else if (state === 'error') {
+      activeRuns.delete(chatSessionId)
       write({
         type: 'error',
         error: String(evt.errorMessage ?? 'Unknown error'),
       })
       cleanup()
     } else if (state === 'aborted') {
+      activeRuns.delete(chatSessionId)
       write({ type: 'error', error: 'Conversation aborted' })
       cleanup()
     }

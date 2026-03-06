@@ -98,7 +98,7 @@ export function ChatSessionList() {
                 )}
               </div>
               <p className="text-muted-foreground truncate text-[10px]">
-                {session.instanceName}
+                {resolveAgentName(session)} &middot; {session.instanceName}
                 {session.lastMessageAt && (
                   <> &middot; {formatRelative(session.lastMessageAt, t)}</>
                 )}
