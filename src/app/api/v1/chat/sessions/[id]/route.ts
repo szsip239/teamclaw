@@ -25,16 +25,21 @@ export const DELETE = withAuth(
       return NextResponse.json({ error: 'No access to delete this session' }, { status: 403 })
     }
 
-    // Try to delete the gateway session (best-effort)
-    try {
-      await ensureRegistryInitialized()
-      const adapter = registry.getAdapter(session.instanceId)
-      const client = registry.getClient(session.instanceId)
-      if (adapter && client) {
-        await adapter.deleteSession(client, session.sessionId)
+    // Only delete the gateway session if THIS session is the active one.
+    // Inactive (archived) sessions share the same sessionId (gateway key)
+    // with the active session — calling sessions.delete would destroy the
+    // active session's gateway context.
+    if (session.isActive) {
+      try {
+        await ensureRegistryInitialized()
+        const adapter = registry.getAdapter(session.instanceId)
+        const client = registry.getClient(session.instanceId)
+        if (adapter && client) {
+          await adapter.deleteSession(client, session.sessionId)
+        }
+      } catch {
+        // Gateway might be offline — continue with DB deletion
       }
-    } catch {
-      // Gateway might be offline — continue with DB deletion
     }
 
     // Clean up session files in the container (best-effort)
