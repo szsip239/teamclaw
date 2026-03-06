@@ -2,11 +2,23 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFile, mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
+import { unzipSync } from 'fflate'
 import type { ClawHubSearchResult } from '@/types/skill'
 
 const execFileAsync = promisify(execFile)
 
-const CLAWHUB_REGISTRY_URL = process.env.CLAWHUB_REGISTRY_URL || 'https://clawhub.ai'
+/** Site URL — used for homepage links displayed to users */
+const CLAWHUB_SITE_URL = process.env.CLAWHUB_REGISTRY_URL || 'https://clawhub.ai'
+
+/**
+ * API base URL — used for all ClawHub API calls (search, download, skill info).
+ *
+ * Defaults to the Convex backend directly instead of the clawhub.ai Vercel proxy.
+ * The proxy adds its own rate limiting layer (20 download req/60s) ON TOP of the
+ * Convex-level rate limit. Bypassing the proxy doubles the effective rate limit
+ * and eliminates the Vercel 429 bottleneck.
+ */
+const CLAWHUB_API_BASE = process.env.CLAWHUB_API_BASE || 'https://wry-manatee-359.convex.site'
 
 /* ─── Retry-aware fetch ─────────────────────────────────── */
 
@@ -186,7 +198,7 @@ export async function searchClawHub(query: string): Promise<ClawHubSearchResult[
   // Primary: HTTP API
   try {
     const res = await fetchWithRetry(
-      `${CLAWHUB_REGISTRY_URL}/api/v1/search?q=${encodeURIComponent(slug)}`,
+      `${CLAWHUB_API_BASE}/api/v1/search?q=${encodeURIComponent(slug)}`,
     )
     if (res.ok) {
       const data = await res.json() as {
@@ -206,7 +218,7 @@ export async function searchClawHub(query: string): Promise<ClawHubSearchResult[
           description: r.summary || '',
           author: '',
           tags: [],
-          homepage: `${CLAWHUB_REGISTRY_URL}/${r.slug}`,
+          homepage: `${CLAWHUB_SITE_URL}/${r.slug}`,
         }))
       }
     }
@@ -218,7 +230,7 @@ export async function searchClawHub(query: string): Promise<ClawHubSearchResult[
   try {
     const { stdout } = await execFileAsync('clawhub', ['search', slug, '--no-input'], {
       timeout: 30_000,
-      env: { ...process.env, CLAWHUB_REGISTRY: CLAWHUB_REGISTRY_URL },
+      env: { ...process.env, CLAWHUB_REGISTRY: CLAWHUB_API_BASE },
     })
     return parseSearchOutput(stdout)
   } catch (err) {
@@ -231,141 +243,119 @@ export async function searchClawHub(query: string): Promise<ClawHubSearchResult[
 
 /**
  * Install a skill from ClawHub to a local directory.
- * Tries CLI first, falls back to HTTP API for Docker environments.
+ *
+ * Strategy: HTTP ZIP download first (1 API call), CLI as fallback.
+ *
+ * The ClawHub download endpoint has a tight rate limit (20 req/60s).
+ * The CLI wastes this quota with internal retries (resolve + download,
+ * each with p-retry), so we prefer the HTTP path which makes exactly
+ * 1 download request — same as a browser would.
  */
 export async function pullClawHubSkill(
   slug: string,
   targetDir: string,
 ): Promise<{ name: string; version: string; description?: string } | null> {
-  const parentDir = dirname(targetDir)
-
-  // Try CLI first — it handles rate limiting and batched downloads internally
+  // Primary: direct HTTP ZIP download (most efficient — 1 download request)
   try {
-    await execFileAsync('clawhub', ['install', slug, '--dir', parentDir, '--force', '--no-input'], {
-      timeout: 60_000,
-      env: { ...process.env, CLAWHUB_REGISTRY: CLAWHUB_REGISTRY_URL },
-    })
+    return await pullViaHttpApi(slug, targetDir)
+  } catch (err) {
+    console.error('[clawhub:pull] HTTP download failed:', (err as Error).message)
+  }
 
+  // Fallback: CLI (handles authentication edge cases, but uses more rate limit quota).
+  // Use --workdir pointing to a writable directory so the CLI can create its
+  // .clawhub/ lockfile (default cwd /app is read-only in production containers).
+  const parentDir = dirname(targetDir)
+  const dataDir = dirname(parentDir) // e.g. /app/data — writable by nextjs user
+  try {
+    await execFileAsync('clawhub', ['install', slug, '--workdir', dataDir, '--force', '--no-input'], {
+      timeout: 60_000,
+      env: { ...process.env, CLAWHUB_REGISTRY: CLAWHUB_API_BASE },
+    })
     try {
-      const metaPath = join(parentDir, slug, '_meta.json')
+      const metaPath = join(targetDir, '_meta.json')
       const metaRaw = await readFile(metaPath, 'utf-8')
       const meta = JSON.parse(metaRaw) as { slug: string; version: string }
-      return {
-        name: meta.slug || slug,
-        version: meta.version || '1.0.0',
-      }
+      return { name: meta.slug || slug, version: meta.version || '1.0.0' }
     } catch {
       return { name: slug, version: '1.0.0' }
     }
   } catch (cliErr) {
-    console.error('[clawhub:install] CLI failed, trying HTTP fallback:', (cliErr as Error).message)
-  }
-
-  // Brief pause before HTTP fallback — CLI failure may have been due to rate limiting
-  await sleep(2000)
-
-  // Fallback: download files via HTTP API
-  try {
-    return await pullViaHttpApi(slug, targetDir)
-  } catch (err) {
-    console.error('[clawhub:install] HTTP fallback failed:', (err as Error).message)
+    console.error('[clawhub:pull] CLI fallback also failed:', (cliErr as Error).message)
     return null
   }
 }
 
 /**
- * Pull a skill by downloading individual files from the ClawHub HTTP API.
- * Uses throttled sequential downloads to avoid triggering rate limits.
+ * Pull a skill by downloading the ZIP archive from the ClawHub HTTP API.
+ *
+ * The /api/v1/download?slug=... endpoint returns the latest version as a ZIP
+ * (no version parameter needed). This uses exactly 1 request from the tight
+ * 20-req/60s download rate limit pool.
+ *
+ * Skill metadata (name, description) comes from the /api/v1/skills/... endpoint
+ * which has a separate, generous rate limit pool (120 req/60s).
  */
 async function pullViaHttpApi(
   slug: string,
   targetDir: string,
 ): Promise<{ name: string; version: string; description?: string } | null> {
-  // Get skill info (uses cache to avoid redundant calls)
-  const info = await getClawHubInfo(slug)
-  if (!info) {
-    throw new Error(`Skill "${slug}" not found on ClawHub`)
+  // Download the ZIP archive directly — no version needed, returns latest.
+  // Use maxRetries: 0 for 429 to avoid wasting the tight 20-request quota.
+  const downloadUrl = `${CLAWHUB_API_BASE}/api/v1/download?slug=${encodeURIComponent(slug)}`
+  const zipRes = await fetchWithRetry(downloadUrl, { timeoutMs: 60_000, maxRetries: 1 })
+  if (!zipRes.ok) {
+    throw new Error(`Failed to download skill ZIP: ${zipRes.status}`)
   }
 
-  // Small delay before next API call to avoid rate limiting
-  await sleep(500)
-
-  // Get version details with file list
-  const versionRes = await fetchWithRetry(
-    `${CLAWHUB_REGISTRY_URL}/api/v1/skills/${encodeURIComponent(slug)}/versions/${encodeURIComponent(info.version)}`,
-  )
-  if (!versionRes.ok) {
-    throw new Error(`Failed to get version info: ${versionRes.status}`)
+  const zipBytes = new Uint8Array(await zipRes.arrayBuffer())
+  if (zipBytes.length === 0) {
+    throw new Error('Downloaded ZIP is empty')
   }
 
-  const versionData = await versionRes.json() as {
-    version?: {
-      version: string
-      files?: Array<{ path: string; sha256: string; contentType: string; size: number }>
-    }
-  }
-
-  const files = versionData.version?.files
-  if (!files || files.length === 0) {
-    throw new Error('No files found in skill version')
-  }
-
-  // Ensure target directory exists
+  // Extract ZIP to target directory
+  const entries = unzipSync(zipBytes)
   await mkdir(targetDir, { recursive: true })
 
-  // Download files sequentially with throttling to avoid rate limits
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i]
+  let fileCount = 0
+  let metaJson: { slug?: string; version?: string } | null = null
 
-    // Throttle: 800ms delay between file downloads (except the first one)
-    if (i > 0) await sleep(800)
+  for (const [rawPath, data] of Object.entries(entries)) {
+    // Sanitize path: strip leading ./ or /, reject path traversal
+    const safePath = rawPath.replace(/^\.\/+/, '').replace(/^\/+/, '')
+    if (!safePath || safePath.endsWith('/') || safePath.includes('..')) continue
 
-    const fileUrl = `${CLAWHUB_REGISTRY_URL}/api/v1/skills/${encodeURIComponent(slug)}/versions/${encodeURIComponent(info.version)}/blob/${file.sha256}`
-    let downloaded = false
+    const outPath = join(targetDir, safePath)
+    await mkdir(dirname(outPath), { recursive: true })
+    await writeFile(outPath, data)
+    fileCount++
 
-    try {
-      const fileRes = await fetchWithRetry(fileUrl)
-      if (fileRes.ok) {
-        const content = await fileRes.text()
-        const filePath = join(targetDir, file.path)
-        await mkdir(dirname(filePath), { recursive: true })
-        await writeFile(filePath, content, 'utf-8')
-        downloaded = true
-      }
-    } catch {
-      // Primary URL failed, will try alternative below
-    }
-
-    if (!downloaded) {
-      await sleep(500)
-      try {
-        const altUrl = `${CLAWHUB_REGISTRY_URL}/api/v1/blobs/${file.sha256}`
-        const altRes = await fetchWithRetry(altUrl)
-        if (altRes.ok) {
-          const content = await altRes.text()
-          const filePath = join(targetDir, file.path)
-          await mkdir(dirname(filePath), { recursive: true })
-          await writeFile(filePath, content, 'utf-8')
-          downloaded = true
-        }
-      } catch {
-        // Both URLs failed
-      }
-    }
-
-    if (!downloaded) {
-      console.error(`[clawhub:pull] Failed to download ${file.path}, skipping`)
+    // Capture _meta.json from ZIP for version info
+    if (safePath === '_meta.json') {
+      try { metaJson = JSON.parse(new TextDecoder().decode(data)) } catch { /* ignore */ }
     }
   }
 
-  // Write _meta.json for compatibility with CLI-installed skills
-  const meta = { slug, version: info.version, source: 'clawhub-http' }
-  await writeFile(join(targetDir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf-8')
+  if (fileCount === 0) {
+    throw new Error('ZIP contained no extractable files')
+  }
+
+  const version = metaJson?.version || '1.0.0'
+
+  // Write _meta.json if not already present in ZIP
+  if (!metaJson) {
+    const meta = { slug, version, source: 'clawhub-http' }
+    await writeFile(join(targetDir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf-8')
+  }
+
+  // Get skill info for name/description (120-req pool — separate from download).
+  // Non-blocking: failure just means less metadata, the files are already extracted.
+  const info = await getClawHubInfo(slug).catch(() => null)
 
   return {
-    name: info.name,
-    version: info.version,
-    description: info.description,
+    name: info?.name || slug,
+    version: info?.version || version,
+    description: info?.description,
   }
 }
 
@@ -394,7 +384,7 @@ export async function getClawHubInfo(
 
   try {
     const res = await fetchWithRetry(
-      `${CLAWHUB_REGISTRY_URL}/api/v1/skills/${encodeURIComponent(slug)}`,
+      `${CLAWHUB_API_BASE}/api/v1/skills/${encodeURIComponent(slug)}`,
     )
     if (!res.ok) return null
     const data = await res.json() as {
@@ -411,8 +401,8 @@ export async function getClawHubInfo(
       description: data.skill?.summary || '',
       ownerHandle,
       homepage: ownerHandle
-        ? `${CLAWHUB_REGISTRY_URL}/${ownerHandle}/${skillSlug}`
-        : `${CLAWHUB_REGISTRY_URL}/${skillSlug}`,
+        ? `${CLAWHUB_SITE_URL}/${ownerHandle}/${skillSlug}`
+        : `${CLAWHUB_SITE_URL}/${skillSlug}`,
     }
     setCachedInfo(slug, info)
     return info

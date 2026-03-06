@@ -138,9 +138,15 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
   const isStreaming = useChatStore((s) => s.isStreaming)
   const remoteStreaming = useChatStore((s) => s.remoteStreaming)
   const connectionStatus = useChatStore((s) => s.connectionStatus)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
   const bottomRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
+
+  // Reset scroll-to-bottom when session changes (component stays mounted across switches)
+  useEffect(() => {
+    setIsNearBottom(true)
+  }, [activeSessionId])
 
   const handleScroll = useCallback(() => {
     const el = viewportRef.current

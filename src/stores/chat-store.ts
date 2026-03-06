@@ -87,23 +87,30 @@ async function syncFromHistory(
       // doesn't return image attachments/blocks in user messages, so we carry them
       // forward from existing local messages. Match by message text content.
       const existing = useChatStore.getState().messages
-      const preservedByContent = new Map<string, { attachments?: ChatAttachment[]; contentBlocks?: ChatContentBlock[] }>()
+      // Build ordered lookup: content → array of preserved data entries.
+      // Multiple user messages with the same text each keep their own images.
+      const preservedByContent = new Map<string, { attachments?: ChatAttachment[]; contentBlocks?: ChatContentBlock[] }[]>()
       for (const msg of existing) {
         if (msg.role !== 'user') continue
         if (!msg.attachments?.length && !msg.contentBlocks?.length) continue
         const key = msg.content
-        if (!preservedByContent.has(key)) {
-          preservedByContent.set(key, {
-            ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
-            ...(msg.contentBlocks?.length ? { contentBlocks: msg.contentBlocks } : {}),
-          })
-        }
+        const arr = preservedByContent.get(key) ?? []
+        arr.push({
+          ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
+          ...(msg.contentBlocks?.length ? { contentBlocks: msg.contentBlocks } : {}),
+        })
+        preservedByContent.set(key, arr)
       }
       if (preservedByContent.size > 0) {
+        const consumed = new Map<string, number>()
         for (const msg of assembled) {
           if (msg.role !== 'user') continue
-          const saved = preservedByContent.get(msg.content)
-          if (!saved) continue
+          const arr = preservedByContent.get(msg.content)
+          if (!arr) continue
+          const idx = consumed.get(msg.content) ?? 0
+          if (idx >= arr.length) continue
+          const saved = arr[idx]
+          consumed.set(msg.content, idx + 1)
           if (!msg.attachments?.length && saved.attachments) msg.attachments = saved.attachments
           if (!msg.contentBlocks?.length && saved.contentBlocks) msg.contentBlocks = saved.contentBlocks
         }

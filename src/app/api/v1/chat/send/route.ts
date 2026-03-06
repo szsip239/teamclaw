@@ -253,6 +253,9 @@ export async function POST(req: NextRequest) {
           sessionId: sessionKey,
           lastMessageAt: new Date(),
           messageCount: { increment: 1 },
+          // Set title from first user message if not yet set (e.g. session
+          // created via /conversations/new which leaves title null)
+          ...(!existing.title ? { title: message.slice(0, 50) } : {}),
         },
       })
       return existing
@@ -595,10 +598,12 @@ export async function POST(req: NextRequest) {
       ...sessionFileAttachments,
     ]
 
-    // Capture user image attachments for liveMessages persistence
-    for (const a of mappedAttachments) {
+    // Capture ONLY 📎 chat attachments for liveMessages persistence (not sidebar input/ files).
+    // Session file attachments are sent to the agent via mappedAttachments but should NOT
+    // appear as contentBlocks in chat message bubbles.
+    for (const a of (attachments ?? [])) {
       if (a.mimeType.startsWith('image/')) {
-        userImageAttachments.push({ name: a.fileName, mimeType: a.mimeType, content: a.content })
+        userImageAttachments.push({ name: a.name, mimeType: a.mimeType, content: a.content })
       }
     }
 
