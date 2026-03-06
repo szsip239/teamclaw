@@ -3,7 +3,7 @@
 import { MessageSquare, Trash2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useQueryClient } from "@tanstack/react-query"
-import { useChatSessions, useDeleteChatSession, chatKeys } from "@/hooks/use-chat"
+import { useChatAgents, useChatSessions, useDeleteChatSession, chatKeys } from "@/hooks/use-chat"
 import { useChatStore } from "@/stores/chat-store"
 import { useT } from "@/stores/language-store"
 import { toast } from "sonner"
@@ -12,6 +12,7 @@ import type { ChatSessionResponse } from "@/types/chat"
 
 export function ChatSessionList() {
   const t = useT()
+  const { data: agents } = useChatAgents()
   const { data: sessions, isLoading } = useChatSessions()
   const deleteMutation = useDeleteChatSession()
   const setSelectedAgent = useChatStore((s) => s.setSelectedAgent)
@@ -19,6 +20,14 @@ export function ChatSessionList() {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
   const qc = useQueryClient()
+
+  // Resolve agent display name from the cached agents list
+  function resolveAgentName(session: ChatSessionResponse): string {
+    const agent = agents?.find(
+      (a) => a.instanceId === session.instanceId && a.agentId === session.agentId,
+    )
+    return agent?.agentName ?? session.agentName ?? session.agentId
+  }
 
   function handleSelect(session: ChatSessionResponse) {
     clearMessages()
@@ -28,7 +37,7 @@ export function ChatSessionList() {
       instanceId: session.instanceId,
       instanceName: session.instanceName,
       agentId: session.agentId,
-      agentName: session.agentName ?? session.agentId,
+      agentName: resolveAgentName(session),
       status: "active",
     })
   }

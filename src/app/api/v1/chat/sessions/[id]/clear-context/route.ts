@@ -38,10 +38,12 @@ export const POST = withAuth(
       // Archive: snapshot messages + delete OpenClaw session (keeps DB session active)
       await archiveSession(id, session.instanceId, session.agentId, session.userId, client, { keepActive: true })
 
-      // Clear liveMessages since context was reset
+      // Clear liveMessages and reset messageCount since context was reset.
+      // messageCount must be reset to 0 so the session-lost detection
+      // (which checks messageCount > 0) doesn't fire a false alarm.
       await prisma.chatSession.update({
         where: { id },
-        data: { liveMessages: Prisma.DbNull },
+        data: { liveMessages: Prisma.DbNull, messageCount: 0 },
       })
 
       return NextResponse.json({ success: true })

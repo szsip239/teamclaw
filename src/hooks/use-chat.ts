@@ -59,10 +59,15 @@ export function useChatHistory(sessionId: string | null) {
       ),
     enabled: !!sessionId,
     refetchInterval: (query) => {
+      // Don't poll when the tab is hidden — saves battery and bandwidth
+      if (typeof document !== "undefined" && document.hidden) return false
       const data = query.state.data as ChatHistoryResponse | undefined
-      if (data?.isActive && !useChatStore.getState().isStreaming) {
-        return 5_000
-      }
+      if (!data?.isActive) return false
+      // During remote streaming (agent running but we're not SSE-connected),
+      // poll frequently to show progress
+      if (useChatStore.getState().remoteStreaming) return 5_000
+      // Idle active sessions: poll infrequently for session-lost detection
+      if (!useChatStore.getState().isStreaming) return 30_000
       return false
     },
   })
