@@ -48,6 +48,9 @@ export function ChatMain() {
   // Track which session + data version we've already loaded to avoid
   // redundant re-applies while still picking up background refetch results.
   const loadedRef = useRef<{ sessionId: string; updatedAt: number } | null>(null)
+  // Track whether we were streaming locally — used to prevent stale
+  // historyData.isRunning from re-enabling remoteStreaming after streaming ends.
+  const wasStreamingRef = useRef(false)
 
   // Set activeSessionId when we find a matching session
   useEffect(() => {
@@ -72,18 +75,27 @@ export function ChatMain() {
       loadedRef.current = null
       return
     }
-    if (!historyData || !dataUpdatedAt || isStreaming) return
+
+    // During streaming, mark the ref so we know cached data may be stale.
+    if (isStreaming) {
+      wasStreamingRef.current = true
+      return
+    }
+
+    if (!historyData || !dataUpdatedAt) return
 
     const alreadyLoaded =
       loadedRef.current?.sessionId === matchingSession.id &&
       loadedRef.current?.updatedAt === dataUpdatedAt &&
       messagesLength > 0
 
-    // Always sync remote streaming state — must run outside the alreadyLoaded
-    // guard so that when isStreaming transitions false→true→false, stale cached
-    // isRunning=true doesn't re-enable remoteStreaming after the finally block
-    // already cleared it.
-    setRemoteStreaming(!isStreaming && !!historyData?.isRunning)
+    // When streaming just ended, cached historyData.isRunning may be stale
+    // (it was fetched before/during our run and never refreshed while
+    // isStreaming was true). Skip re-enabling remoteStreaming until fresh
+    // data arrives from the next poll.
+    const justFinishedStreaming = wasStreamingRef.current
+    if (justFinishedStreaming) wasStreamingRef.current = false
+    setRemoteStreaming(!!historyData?.isRunning && !justFinishedStreaming)
 
     if (!alreadyLoaded) {
       loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
