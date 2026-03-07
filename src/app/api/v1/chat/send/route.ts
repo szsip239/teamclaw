@@ -6,7 +6,8 @@ import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
-import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget } from '@/lib/session-files/helpers'
+import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget, resolveExternalSessionFilePath, buildExternalCurrentSessionLinkPath } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
 import { MIME_BY_EXT, extractMediaPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
 import { activeRuns } from '@/lib/chat/active-runs'
@@ -105,7 +106,7 @@ async function switchActiveSession(
     const client = registry.getClient(instanceId)
 
     if (client) {
-      await archiveSession(activeSession.id, instanceId, agentId, userId, client)
+      await archiveSession(activeSession.id, instanceId, agentId, userId, client, { triggerMemoryDump: true, waitForNewCompletion: true })
     } else {
       await prisma.chatSession.update({
         where: { id: activeSession.id },
@@ -547,7 +548,7 @@ export async function POST(req: NextRequest) {
       if (activeSession) {
         const instance = await prisma.instance.findUnique({
           where: { id: instanceId },
-          select: { containerId: true },
+          select: { containerId: true, workspacePath: true },
         })
         containerId = instance?.containerId ?? null
         if (instance?.containerId) {
@@ -584,6 +585,43 @@ export async function POST(req: NextRequest) {
             try {
               const filePath = `${inputPath}${f.name}`
               const buf = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
+              sessionFileAttachments.push({
+                fileName: f.name,
+                mimeType: mime,
+                content: buf.toString('base64'),
+              })
+            } catch {
+              // Skip unreadable images
+            }
+          }
+        } else if (instance?.workspacePath) {
+          const wp = instance.workspacePath
+          const inputPath = resolveExternalSessionFilePath(wp, agentId, activeSession.id, 'input')
+          const outputPath = resolveExternalSessionFilePath(wp, agentId, activeSession.id, 'output')
+          const linkPath = buildExternalCurrentSessionLinkPath(wp, agentId)
+          const target = `sessions/${activeSession.id}`
+
+          try {
+            await Promise.all([
+              hostFileOps.ensureDir(inputPath, wp),
+              hostFileOps.ensureDir(outputPath, wp),
+              hostFileOps.createSymlink(target, linkPath, wp),
+            ])
+          } catch {
+            // Non-fatal: symlink/mkdir failure doesn't block chat
+          }
+
+          let inputFiles: { name: string; path: string; type: string; size: number }[] = []
+          try { inputFiles = await hostFileOps.listDir(inputPath, wp) } catch {}
+
+          for (const f of inputFiles) {
+            if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
+            const ext = ('.' + (f.name.split('.').pop() ?? '')).toLowerCase()
+            const mime = SESSION_IMAGE_EXTS[ext]
+            if (!mime) continue
+            try {
+              const filePath = `${inputPath}${f.name}`
+              const buf = await hostFileOps.readFile(filePath, wp)
               sessionFileAttachments.push({
                 fileName: f.name,
                 mimeType: mime,
