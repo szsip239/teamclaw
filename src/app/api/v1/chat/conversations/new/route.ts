@@ -64,7 +64,7 @@ export const POST = withAuth(
       const client = registry.getClient(instanceId)
 
       if (client) {
-        await archiveSession(activeSession.id, instanceId, agentId, user.id, client)
+        await archiveSession(activeSession.id, instanceId, agentId, user.id, client, { triggerMemoryDump: true })
       } else {
         // No client — just mark inactive + clear liveMessages
         await prisma.chatSession.update({

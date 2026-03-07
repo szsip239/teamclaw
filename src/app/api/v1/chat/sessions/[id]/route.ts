@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
@@ -25,17 +26,29 @@ export const DELETE = withAuth(
       return NextResponse.json({ error: 'No access to delete this session' }, { status: 403 })
     }
 
-    // Only delete the gateway session if THIS session is the active one.
+    // Only interact with the gateway if THIS session is the active one.
     // Inactive (archived) sessions share the same sessionId (gateway key)
     // with the active session — calling sessions.delete would destroy the
     // active session's gateway context.
     if (session.isActive) {
       try {
         await ensureRegistryInitialized()
-        const adapter = registry.getAdapter(session.instanceId)
         const client = registry.getClient(session.instanceId)
-        if (adapter && client) {
-          await adapter.deleteSession(client, session.sessionId)
+        if (client) {
+          // Send /new to trigger memory dump before losing the conversation.
+          try {
+            await client.request('chat.send', {
+              sessionKey: session.sessionId,
+              message: '/new',
+              idempotencyKey: randomUUID(),
+            })
+          } catch {
+            // /new failed — fall back to direct delete
+            try {
+              const adapter = registry.getAdapter(session.instanceId)
+              if (adapter) await adapter.deleteSession(client, session.sessionId)
+            } catch { /* offline */ }
+          }
         }
       } catch {
         // Gateway might be offline — continue with DB deletion
@@ -57,6 +70,21 @@ export const DELETE = withAuth(
     }
 
     await prisma.chatSession.delete({ where: { id } })
+
+    // If the deleted session was active and /new was sent, the gateway now has
+    // a fresh session with a greeting. Create a new DB session so the user
+    // sees it immediately when clicking this agent — no need to click "new conversation".
+    if (session.isActive) {
+      await prisma.chatSession.create({
+        data: {
+          userId: session.userId,
+          instanceId: session.instanceId,
+          agentId: session.agentId,
+          sessionId: session.sessionId,
+          isActive: true,
+        },
+      })
+    }
 
     return new NextResponse(null, { status: 204 })
   }),

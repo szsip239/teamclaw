@@ -210,7 +210,7 @@ export async function archiveSession(
   agentId: string,
   userId: string,
   client: GatewayClient,
-  opts?: { keepActive?: boolean },
+  opts?: { keepActive?: boolean; triggerMemoryDump?: boolean; waitForNewCompletion?: boolean },
 ): Promise<void> {
   const sessionKey = `agent:${agentId}:tc:${userId}`
 
@@ -264,11 +264,47 @@ export async function archiveSession(
     await persistLiveAsSnapshot(sessionId, liveMessages)
   }
 
-  // Delete OpenClaw session to reset context
-  try {
-    await client.request('sessions.delete', { key: sessionKey })
-  } catch {
-    // Gateway offline — session will be cleaned up on next connect
+  // Reset gateway session
+  if (opts?.triggerMemoryDump) {
+    // Send /new to trigger OpenClaw's memory dump before session destruction.
+    // OpenClaw saves conversation → memory/YYYY-MM-DD-*.md → destroys old session → creates new one.
+    try {
+      const newRunId = randomUUID()
+      await client.request('chat.send', {
+        sessionKey,
+        message: '/new',
+        idempotencyKey: newRunId,
+      })
+
+      if (opts.waitForNewCompletion) {
+        // Wait for /new run to fully complete before returning.
+        // Required when a follow-up message will be sent immediately (scenario 3: switchActiveSession),
+        // because /new destroys and recreates the gateway session — messages sent during this
+        // transition are silently dropped.
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => { unsub(); resolve() }, 30_000)
+          const unsub = client.on('chat', (payload: unknown) => {
+            const evt = payload as Record<string, unknown>
+            if (evt?.runId !== newRunId) return
+            const state = evt.state as string
+            if (state === 'final' || state === 'error' || state === 'aborted') {
+              clearTimeout(timeout)
+              unsub()
+              resolve()
+            }
+          })
+        })
+      }
+    } catch {
+      // /new failed — fall back to direct session delete (memory dump skipped)
+      try { await client.request('sessions.delete', { key: sessionKey }) } catch { /* offline */ }
+    }
+  } else {
+    try {
+      await client.request('sessions.delete', { key: sessionKey })
+    } catch {
+      // Gateway offline — session will be cleaned up on next connect
+    }
   }
 
   if (!opts?.keepActive) {
