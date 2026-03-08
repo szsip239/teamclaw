@@ -9,6 +9,7 @@ import type {
   ChatHistoryResult,
   ConfigSchemaResult,
 } from '@/types/gateway'
+import type { CronListResult, CronRunsResult } from '@/types/cron'
 import { GatewayClient } from './client'
 
 /**
@@ -48,7 +49,13 @@ export interface GatewayAdapter {
 
   // System
   getHealth(client: GatewayClient): Promise<HealthStatus>
-  getCronJobs(client: GatewayClient): Promise<unknown>
+
+  // Cron
+  listCronJobs(client: GatewayClient): Promise<CronListResult>
+  getCronRuns(client: GatewayClient, params?: { jobId?: string; limit?: number }): Promise<CronRunsResult>
+  toggleCronJob(client: GatewayClient, jobId: string, enabled: boolean): Promise<{ ok: boolean }>
+  runCronJob(client: GatewayClient, jobId: string): Promise<{ ok: boolean; runId?: string }>
+  deleteCronJob(client: GatewayClient, jobId: string): Promise<{ ok: boolean }>
 }
 
 /**
@@ -153,8 +160,91 @@ export class GatewayV1Adapter implements GatewayAdapter {
     return (await client.request('health')) as HealthStatus
   }
 
-  async getCronJobs(client: GatewayClient): Promise<unknown> {
-    return client.request('cron.list')
+  async listCronJobs(client: GatewayClient): Promise<CronListResult> {
+    const result = await client.request('cron.list', { includeDisabled: true })
+    // Normalize: response may be { jobs: [...] } or a raw array
+    const rawJobs: Record<string, unknown>[] = Array.isArray(result)
+      ? result
+      : ((result as Record<string, unknown>)?.jobs as Record<string, unknown>[]) ?? []
+
+    // Gateway returns `id` not `jobId`, and timestamps as epoch ms inside `state`
+    const jobs = rawJobs.map((raw) => {
+      const state = raw.state as Record<string, unknown> | undefined
+      return {
+        ...raw,
+        jobId: (raw.jobId as string) ?? (raw.id as string),
+        nextRunAt: state?.nextRunAtMs
+          ? new Date(state.nextRunAtMs as number).toISOString()
+          : (raw.nextRunAt as string | undefined),
+        lastRunAt: state?.lastRunAtMs
+          ? new Date(state.lastRunAtMs as number).toISOString()
+          : (raw.lastRunAt as string | undefined),
+        lastRunStatus: (state?.lastRunStatus as string) ?? (raw.lastRunStatus as string | undefined),
+        createdAt: raw.createdAtMs
+          ? new Date(raw.createdAtMs as number).toISOString()
+          : (raw.createdAt as string | undefined),
+      } as CronListResult['jobs'][number]
+    })
+
+    return { jobs }
+  }
+
+  async getCronRuns(
+    client: GatewayClient,
+    params?: { jobId?: string; limit?: number },
+  ): Promise<CronRunsResult> {
+    const rpcParams: Record<string, unknown> = {}
+    if (params?.jobId) rpcParams.jobId = params.jobId
+    if (params?.limit) rpcParams.limit = params.limit
+    const result = await client.request(
+      'cron.runs',
+      Object.keys(rpcParams).length > 0 ? rpcParams : undefined,
+    )
+    const rawRuns: Record<string, unknown>[] = Array.isArray(result)
+      ? result
+      : ((result as Record<string, unknown>)?.runs as Record<string, unknown>[]) ?? []
+
+    // Normalize: gateway may use `id`/`jobId` for the cron job reference,
+    // and epoch-ms timestamps
+    const runs = rawRuns.map((raw) => ({
+      ...raw,
+      jobId: (raw.jobId as string) ?? (raw.cronId as string) ?? (raw.id as string),
+      runId: (raw.runId as string) ?? (raw.id as string),
+      startedAt: raw.startedAtMs
+        ? new Date(raw.startedAtMs as number).toISOString()
+        : (raw.startedAt as string),
+      endedAt: raw.endedAtMs
+        ? new Date(raw.endedAtMs as number).toISOString()
+        : (raw.endedAt as string | undefined),
+    } as CronRunsResult['runs'][number]))
+
+    return { runs }
+  }
+
+  async toggleCronJob(
+    client: GatewayClient,
+    jobId: string,
+    enabled: boolean,
+  ): Promise<{ ok: boolean }> {
+    await client.request('cron.update', { jobId, patch: { enabled } })
+    return { ok: true }
+  }
+
+  async runCronJob(
+    client: GatewayClient,
+    jobId: string,
+  ): Promise<{ ok: boolean; runId?: string }> {
+    const result = await client.request('cron.run', { jobId, mode: 'force' })
+    const obj = result as Record<string, unknown> | null
+    return { ok: true, runId: obj?.runId as string | undefined }
+  }
+
+  async deleteCronJob(
+    client: GatewayClient,
+    jobId: string,
+  ): Promise<{ ok: boolean }> {
+    await client.request('cron.remove', { jobId })
+    return { ok: true }
   }
 }
 

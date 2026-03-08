@@ -5,6 +5,66 @@ import { getProvider } from '@/lib/resources/providers'
 // OpenClaw's default API type — omit when it matches
 const DEFAULT_API_TYPE = 'openai-completions'
 
+// ─── Google provider baseUrl fix ─────────────────────────────────────
+// pi-ai's Google provider createClient() sets apiVersion="" when baseUrl
+// is present, assuming the URL already includes the version path. But the
+// bare default endpoint doesn't include /v1beta, causing 404 errors for
+// preview models. Fix: append /v1beta so the full path is correct.
+const GOOGLE_GENAI_BARE_ENDPOINT = 'https://generativelanguage.googleapis.com'
+const GOOGLE_GENAI_PROVIDER_IDS = new Set(['google', 'google-gemini-cli'])
+
+function fixGoogleProviderBaseUrl(
+  providerId: string,
+  baseUrl: string,
+  apiType?: string,
+): string {
+  const isGoogleGenAI =
+    GOOGLE_GENAI_PROVIDER_IDS.has(providerId) || apiType === 'google-generative-ai'
+  if (!isGoogleGenAI) return baseUrl
+
+  const normalized = baseUrl.replace(/\/+$/, '')
+  if (normalized === GOOGLE_GENAI_BARE_ENDPOINT) {
+    return `${GOOGLE_GENAI_BARE_ENDPOINT}/v1beta`
+  }
+  return baseUrl
+}
+
+/**
+ * Sanitize models.providers in a config patch to fix known compatibility
+ * issues before sending to the gateway. Currently handles:
+ * - Google provider: appends /v1beta to bare default endpoint
+ */
+export function sanitizeProviderPatch(
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const models = patch.models as Record<string, unknown> | undefined
+  if (!models?.providers || typeof models.providers !== 'object') return patch
+
+  const providers = models.providers as Record<string, unknown>
+  let cloned = false
+
+  for (const [id, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== 'object') continue
+    const p = provider as Record<string, unknown>
+    if (typeof p.baseUrl !== 'string') continue
+
+    const fixed = fixGoogleProviderBaseUrl(id, p.baseUrl, p.api as string | undefined)
+    if (fixed !== p.baseUrl) {
+      if (!cloned) {
+        patch = structuredClone(patch)
+        cloned = true
+      }
+      const cp = (patch.models as Record<string, unknown>).providers as Record<
+        string,
+        Record<string, unknown>
+      >
+      cp[id].baseUrl = fixed
+    }
+  }
+
+  return patch
+}
+
 interface ProviderModelEntry {
   id: string
   name: string
@@ -96,8 +156,9 @@ export async function buildProviderEntries(
       continue
     }
 
+    const apiType = (resourceConfig?.apiType as string) || providerDef?.apiType
     const entry: ProviderEntry = {
-      baseUrl,
+      baseUrl: fixGoogleProviderBaseUrl(providerId, baseUrl, apiType),
       apiKey,
       models: models.map(m => {
         const entry: ProviderModelEntry = { id: m.id, name: m.name }
@@ -112,7 +173,6 @@ export async function buildProviderEntries(
 
     // Set api type — always include for custom/unknown providers (OpenClaw can't infer),
     // omit only for well-known providers using the default type
-    const apiType = (resourceConfig?.apiType as string) || providerDef?.apiType
     const isWellKnown = providerDef && providerDef.id !== 'custom' && providerDef.id !== 'opencode'
     if (apiType && (!isWellKnown || apiType !== DEFAULT_API_TYPE)) {
       entry.api = apiType

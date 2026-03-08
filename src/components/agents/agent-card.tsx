@@ -2,7 +2,7 @@
 
 import { motion } from "motion/react"
 import { Badge } from "@/components/ui/badge"
-import { Bot, Copy, Star, Server, Cpu, Shield, Globe, Building2, UserCircle } from "lucide-react"
+import { Bot, Copy, Star, Server, Cpu, Shield, Globe, Building2, UserCircle, Clock } from "lucide-react"
 import { useT } from "@/stores/language-store"
 import type { AgentOverview } from "@/types/agent"
 
@@ -17,9 +17,10 @@ interface AgentCardProps {
   index: number
   onClick: (agent: AgentOverview) => void
   onClone?: (agent: AgentOverview) => void
+  cronCount?: number
 }
 
-export function AgentCard({ agent, index, onClick, onClone }: AgentCardProps) {
+export function AgentCard({ agent, index, onClick, onClone, cronCount }: AgentCardProps) {
   const t = useT()
   const modelName = agent.models?.primary
     ? agent.models.primary.split("/").pop()
@@ -99,6 +100,13 @@ export function AgentCard({ agent, index, onClick, onClone }: AgentCardProps) {
             {agent.workspace.replace(/^~\//, "")}
           </span>
         </div>
+        {/* Cron indicator */}
+        {cronCount != null && cronCount > 0 && (
+          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Clock className="size-2.5 animate-pulse text-primary/60" />
+            {t('cron.cronBadge').replace('{n}', String(cronCount))}
+          </div>
+        )}
       </div>
 
       {/* Tags + Clone button */}
@@ -136,6 +144,7 @@ export function AgentCard({ agent, index, onClick, onClone }: AgentCardProps) {
           </button>
         )}
       </div>
+
     </motion.div>
   )
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
+import { useQueries } from "@tanstack/react-query"
 import { motion } from "motion/react"
 import { AlertTriangle } from "lucide-react"
 import { AgentPageHeader } from "@/components/agents/agent-page-header"
@@ -13,10 +14,43 @@ import { AgentCloneDialog } from "@/components/agents/agent-clone-dialog"
 import { AgentDetailSheet } from "@/components/agents/agent-detail-sheet"
 import { useAgents } from "@/hooks/use-agents"
 import { useInstances } from "@/hooks/use-instances"
+import { cronKeys } from "@/hooks/use-cron"
+import { api } from "@/lib/api-client"
 import { useAuthStore } from "@/stores/auth-store"
 import { useT } from "@/stores/language-store"
 import { hasPermission } from "@/lib/auth/permissions"
 import type { AgentOverview, AgentCategory } from "@/types/agent"
+import type { CronListResponse } from "@/types/cron"
+
+/** Aggregate cron job counts per agent across multiple instances.
+ *  Uses useQueries (single hook) to handle dynamic instance array safely. */
+function useCronCountMap(instanceIds: string[]): Map<string, number> {
+  const results = useQueries({
+    queries: instanceIds.map((id) => ({
+      queryKey: cronKeys.list(id),
+      queryFn: () =>
+        api.get<CronListResponse>(
+          `/api/v1/instances/${encodeURIComponent(id)}/cron`,
+        ),
+      staleTime: 60_000,
+    })),
+  })
+
+  return useMemo(() => {
+    const map = new Map<string, number>()
+    for (let i = 0; i < instanceIds.length; i++) {
+      const id = instanceIds[i]
+      const jobs = results[i]?.data?.jobs
+      if (!jobs) continue
+      for (const job of jobs) {
+        if (!job.agentId) continue
+        const key = `${id}:${job.agentId}`
+        map.set(key, (map.get(key) ?? 0) + 1)
+      }
+    }
+    return map
+  }, [instanceIds, results])
+}
 
 export default function AgentsPage() {
   const t = useT()
@@ -39,6 +73,13 @@ export default function AgentsPage() {
   const allAgents = agentsData?.agents ?? []
   const apiErrors = agentsData?.errors ?? []
   const instances = instancesData?.instances ?? []
+
+  // Fetch cron counts per instance for badge display
+  const onlineInstanceIds = useMemo(
+    () => instances.filter((i) => i.status === "ONLINE").map((i) => i.id),
+    [instances],
+  )
+  const cronCounts = useCronCountMap(onlineInstanceIds)
 
   // Client-side category filter (server also filters, but this is for snappy UI)
   const agents = categoryFilter === "all"
@@ -104,6 +145,7 @@ export default function AgentsPage() {
           agents={agents}
           onSelect={setDetailAgent}
           onClone={(agent) => setCloneAgent(agent)}
+          cronCounts={cronCounts}
         />
       )}
 

@@ -4,7 +4,7 @@ import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { auditLog } from '@/lib/audit'
 import { prisma } from '@/lib/db'
-import { buildProviderEntries, mergeProvidersIntoPatch } from '@/lib/config-editor/provider-sync'
+import { buildProviderEntries, mergeProvidersIntoPatch, sanitizeProviderPatch } from '@/lib/config-editor/provider-sync'
 import type { ConfigGetResult } from '@/types/gateway'
 
 const patchSchema = z.object({
@@ -46,6 +46,9 @@ export const POST = withAuth(
             console.warn('[config-patch] Provider sync failed:', err)
           }
         }
+
+        // Sanitize provider entries (e.g. fix Google baseUrl v1beta path)
+        finalPatch = sanitizeProviderPatch(finalPatch)
 
         await registry.request(id, 'config.patch', {
           raw: JSON.stringify(finalPatch),

@@ -1,6 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
+import { Github } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -8,12 +9,15 @@ import { LanguageToggle } from "@/components/language-toggle"
 import { useT } from "@/stores/language-store"
 import type { TranslationKey } from "@/locales/zh-CN"
 
+const GITHUB_URL = "https://github.com/szsip239/teamclaw"
+
 const pageTitleKeys: Record<string, TranslationKey> = {
   "/": "page.dashboard",
   "/chat": "page.chat",
   "/instances": "page.instances",
   "/agents": "page.agents",
   "/skills": "page.skills",
+  "/cron": "page.cron",
   "/users": "page.users",
   "/departments": "page.departments",
   "/resources": "page.resources",
@@ -41,9 +45,19 @@ export function DashboardHeader() {
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="h-4" />
       <h1 className="text-sm font-medium">{title}</h1>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-1">
         <LanguageToggle />
         <ThemeToggle />
+        <Separator orientation="vertical" className="mx-1 h-4" />
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-muted-foreground hover:text-foreground inline-flex size-9 items-center justify-center rounded-md transition-colors"
+          aria-label="GitHub"
+        >
+          <Github className="size-4" />
+        </a>
       </div>
     </header>
   )
