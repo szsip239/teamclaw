@@ -12,6 +12,8 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/refresh',
   '/_next',
   '/favicon.ico',
+  '/icon.png',
+  '/apple-icon.png',
   '/manifest.webmanifest',
   '/icons/',
   '/sw.js',

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import * as fs from 'fs/promises'
+import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation, param } from '@/lib/middleware/auth'
 import type { AuthContext } from '@/lib/middleware/auth'
@@ -7,6 +9,16 @@ import { dockerManager } from '@/lib/docker'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { extractAgentsConfig, resolveWorkspacePath, containerWorkspacePath } from '@/lib/agents/helpers'
 import { auditLog } from '@/lib/audit'
+
+/**
+ * Resolve a gateway workspace path (which may use ~) to an absolute host path.
+ * Uses the instance's workspacePath (e.g. /Users/user/.openclaw) to derive the home dir.
+ */
+function resolveExternalPath(workspacePath: string, gatewayPath: string): string {
+  if (!gatewayPath.startsWith('~')) return gatewayPath
+  const homeDir = path.resolve(workspacePath, '..')
+  return gatewayPath.replace(/^~/, homeDir)
+}
 
 // POST /api/v1/skills/[id]/uninstall - Uninstall skill from agent
 export const POST = withAuth(
@@ -38,22 +50,28 @@ export const POST = withAuth(
         return NextResponse.json({ error: 'Installation record not found for this skill' }, { status: 404 })
       }
 
-      // Check instance has container
+      // Check instance
       const instance = await prisma.instance.findUnique({
         where: { id: instanceId },
-        select: { id: true, name: true, containerId: true },
+        select: { id: true, name: true, containerId: true, workspacePath: true },
       })
       if (!instance) {
         return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
-      if (!instance.containerId) {
-        return NextResponse.json({ error: 'Instance has no associated container' }, { status: 400 })
+      if (!instance.containerId && !instance.workspacePath) {
+        return NextResponse.json({ error: 'Instance has no container or workspace path configured' }, { status: 400 })
       }
 
-      // Determine container skill dir based on install path
-      let containerSkillDir: string
+      const isExternal = !instance.containerId && !!instance.workspacePath
+
+      // Determine skill directory
+      let skillDir: string
       if (installation.installPath === 'global') {
-        containerSkillDir = `/home/node/.openclaw/skills/${installation.skill.slug}`
+        if (isExternal) {
+          skillDir = `${instance.workspacePath}/skills/${installation.skill.slug}`
+        } else {
+          skillDir = `/home/node/.openclaw/skills/${installation.skill.slug}`
+        }
       } else {
         // workspace: need agent workspace path from gateway config
         await ensureRegistryInitialized()
@@ -71,16 +89,24 @@ export const POST = withAuth(
         }
 
         const workspace = resolveWorkspacePath(agentConfig, defaults)
-        const wsContainer = containerWorkspacePath(workspace)
-        containerSkillDir = `${wsContainer}/skills/${installation.skill.slug}`
+        if (isExternal) {
+          skillDir = `${resolveExternalPath(instance.workspacePath!, workspace)}/skills/${installation.skill.slug}`
+        } else {
+          const wsContainer = containerWorkspacePath(workspace)
+          skillDir = `${wsContainer}/skills/${installation.skill.slug}`
+        }
       }
 
-      // Delete container files (rm -rf on the skill dir)
+      // Delete skill files
       try {
-        await dockerManager.removeContainerDir(instance.containerId, containerSkillDir)
+        if (isExternal) {
+          await fs.rm(skillDir, { recursive: true, force: true })
+        } else {
+          await dockerManager.removeContainerDir(instance.containerId!, skillDir)
+        }
       } catch (err) {
         return NextResponse.json(
-          { error: `Failed to delete skill files from container:${(err as Error).message}` },
+          { error: `Failed to delete skill files: ${(err as Error).message}` },
           { status: 500 },
         )
       }
@@ -99,7 +125,8 @@ export const POST = withAuth(
           slug: installation.skill.slug,
           instanceId,
           agentId,
-          containerPath: containerSkillDir,
+          skillDir,
+          external: isExternal,
         },
         ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
         userAgent: req.headers.get('user-agent') || undefined,

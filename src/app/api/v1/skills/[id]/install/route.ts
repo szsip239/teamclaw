@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import * as fs from 'fs/promises'
+import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation, param } from '@/lib/middleware/auth'
 import type { AuthContext } from '@/lib/middleware/auth'
@@ -9,6 +11,17 @@ import { dockerManager } from '@/lib/docker'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { extractAgentsConfig, resolveWorkspacePath, containerWorkspacePath } from '@/lib/agents/helpers'
 import { auditLog } from '@/lib/audit'
+
+/**
+ * Resolve a gateway workspace path (which may use ~) to an absolute host path.
+ * Uses the instance's workspacePath (e.g. /Users/user/.openclaw) to derive the home dir.
+ */
+function resolveExternalPath(workspacePath: string, gatewayPath: string): string {
+  if (!gatewayPath.startsWith('~')) return gatewayPath
+  // workspacePath = /Users/user/.openclaw → homeDir = /Users/user
+  const homeDir = path.resolve(workspacePath, '..')
+  return gatewayPath.replace(/^~/, homeDir)
+}
 
 // POST /api/v1/skills/[id]/install - Install skill to agent
 export const POST = withAuth(
@@ -33,16 +46,16 @@ export const POST = withAuth(
         return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
       }
 
-      // Check instance exists and has container
+      // Check instance exists
       const instance = await prisma.instance.findUnique({
         where: { id: instanceId },
-        select: { id: true, name: true, containerId: true },
+        select: { id: true, name: true, containerId: true, workspacePath: true },
       })
       if (!instance) {
         return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
-      if (!instance.containerId) {
-        return NextResponse.json({ error: 'Instance has no associated container' }, { status: 400 })
+      if (!instance.containerId && !instance.workspacePath) {
+        return NextResponse.json({ error: 'Instance has no container or workspace path configured' }, { status: 400 })
       }
 
       // Check agent permission via AgentMeta
@@ -53,12 +66,18 @@ export const POST = withAuth(
         return NextResponse.json({ error: 'No permission to install to this agent' }, { status: 403 })
       }
 
-      // Determine container target path
-      let containerTargetDir: string
+      // Resolve the target skill directory
+      let targetDir: string
+      const isExternal = !instance.containerId && !!instance.workspacePath
+
       if (installPath === 'global') {
-        containerTargetDir = `/home/node/.openclaw/skills/${skill.slug}`
+        if (isExternal) {
+          targetDir = `${instance.workspacePath}/skills/${skill.slug}`
+        } else {
+          targetDir = `/home/node/.openclaw/skills/${skill.slug}`
+        }
       } else {
-        // workspace: need agent workspace path
+        // workspace: need agent workspace path from gateway config
         await ensureRegistryInitialized()
         const adapter = registry.getAdapter(instanceId)
         const client = registry.getClient(instanceId)
@@ -74,8 +93,12 @@ export const POST = withAuth(
         }
 
         const workspace = resolveWorkspacePath(agentConfig, defaults)
-        const wsContainer = containerWorkspacePath(workspace)
-        containerTargetDir = `${wsContainer}/skills/${skill.slug}`
+        if (isExternal) {
+          targetDir = `${resolveExternalPath(instance.workspacePath!, workspace)}/skills/${skill.slug}`
+        } else {
+          const wsContainer = containerWorkspacePath(workspace)
+          targetDir = `${wsContainer}/skills/${skill.slug}`
+        }
       }
 
       // Read all files from skill dir on host (recursive)
@@ -84,35 +107,29 @@ export const POST = withAuth(
         return NextResponse.json({ error: 'Skill directory is empty, no files to install' }, { status: 400 })
       }
 
-      // Ensure target directory exists in container
+      // Write files to target (container or host filesystem)
       try {
-        await dockerManager.ensureContainerDir(instance.containerId, containerTargetDir)
-      } catch (err) {
-        return NextResponse.json(
-          { error: `Failed to create target directory:${(err as Error).message}` },
-          { status: 500 },
-        )
-      }
-
-      // Write each file to container
-      try {
-        for (const file of files) {
-          const containerFilePath = `${containerTargetDir}/${file.path}`
-          // Ensure subdirectory exists
-          const lastSlash = containerFilePath.lastIndexOf('/')
-          if (lastSlash > 0) {
-            const dir = containerFilePath.slice(0, lastSlash)
-            await dockerManager.ensureContainerDir(instance.containerId, dir)
+        if (isExternal) {
+          await fs.mkdir(targetDir, { recursive: true, mode: 0o755 })
+          for (const file of files) {
+            const filePath = path.join(targetDir, file.path)
+            await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o755 })
+            await fs.writeFile(filePath, file.content, { mode: 0o644 })
           }
-          await dockerManager.writeContainerFile(
-            instance.containerId,
-            containerFilePath,
-            file.content,
-          )
+        } else {
+          await dockerManager.ensureContainerDir(instance.containerId!, targetDir)
+          for (const file of files) {
+            const containerFilePath = `${targetDir}/${file.path}`
+            const lastSlash = containerFilePath.lastIndexOf('/')
+            if (lastSlash > 0) {
+              await dockerManager.ensureContainerDir(instance.containerId!, containerFilePath.slice(0, lastSlash))
+            }
+            await dockerManager.writeContainerFile(instance.containerId!, containerFilePath, file.content)
+          }
         }
       } catch (err) {
         return NextResponse.json(
-          { error: `Failed to write files to container:${(err as Error).message}` },
+          { error: `Failed to write skill files: ${(err as Error).message}` },
           { status: 500 },
         )
       }
@@ -149,6 +166,7 @@ export const POST = withAuth(
           agentId,
           installPath,
           version: skill.version,
+          external: isExternal,
         },
         ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
         userAgent: req.headers.get('user-agent') || undefined,
@@ -163,7 +181,7 @@ export const POST = withAuth(
           agentId,
           installedVersion: installation.installedVersion,
           installPath: installation.installPath,
-          containerPath: containerTargetDir,
+          targetPath: targetDir,
           filesCount: files.length,
         },
       })

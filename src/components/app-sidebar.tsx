@@ -9,6 +9,7 @@ import {
   Server,
   Bot,
   Puzzle,
+  Clock,
   Users,
   Building2,
   KeyRound,
@@ -64,6 +65,7 @@ export function AppSidebar() {
         { title: t('nav.instances'), icon: Server, href: "/instances" },
         { title: t('nav.agents'), icon: Bot, href: "/agents" },
         { title: t('nav.skills'), icon: Puzzle, href: "/skills" },
+        { title: t('nav.cron'), icon: Clock, href: "/cron" },
       ],
     },
     {
