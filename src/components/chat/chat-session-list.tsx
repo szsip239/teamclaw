@@ -71,9 +71,17 @@ export function ChatSessionList() {
     )
   }
 
+  // Active sessions first, then by most recent
+  const sorted = [...sessions].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
+    const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
+    return tb - ta
+  })
+
   return (
     <div className="flex flex-col gap-0.5">
-      {sessions.map((session) => {
+      {sorted.map((session) => {
         const isCurrentSession = activeSessionId === session.id
         return (
           <div

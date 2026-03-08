@@ -864,6 +864,7 @@ const zhCN = {
   'page.settingsDesc': '配置平台全局参数，包括安全策略、集成和通知设置。',
 
   // ── File Panel ────────────────────────────────────
+  'chat.filePanel': '文件',
   'filePanel.title': '会话文件',
   'filePanel.input': '输入',
   'filePanel.output': '产出物',

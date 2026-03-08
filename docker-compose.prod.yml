@@ -56,7 +56,7 @@ services:
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
-      - ${HOME}/.openclaw:${HOME}/.openclaw:ro
+      - ${HOME}/.openclaw:${HOME}/.openclaw
       - /tmp:/tmp:ro
       # Mount for external instance MEDIA images (e.g. OpenClaw skills output).
       # Set EXTERNAL_MEDIA_DIR to the OpenClaw installation's parent directory.

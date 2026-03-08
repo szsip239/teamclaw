@@ -866,6 +866,7 @@ const en: Record<TranslationKey, string> = {
   'page.settingsDesc': 'Configure platform global parameters including security policies, integrations, and notification settings.',
 
   // ── File Panel ────────────────────────────────────
+  'chat.filePanel': 'Files',
   'filePanel.title': 'Session Files',
   'filePanel.input': 'Input',
   'filePanel.output': 'Artifacts',

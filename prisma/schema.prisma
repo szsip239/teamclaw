@@ -146,6 +146,9 @@ model Instance {
   imageName       String         @default("alpine/openclaw:latest")
   dockerConfig    Json?
 
+  // External instance — host filesystem path (e.g. /Users/user/.openclaw)
+  workspacePath   String?
+
   // Runtime status
   status          InstanceStatus @default(OFFLINE)
   lastHealthCheck DateTime?

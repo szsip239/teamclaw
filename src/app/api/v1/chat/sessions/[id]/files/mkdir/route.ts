@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, resolveExternalSessionFilePath } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import { mkdirSchema } from '@/lib/validations/session-files'
 
 // POST /api/v1/chat/sessions/[id]/files/mkdir — create folder in input/
@@ -43,15 +44,20 @@ export const POST = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
+
+    if (instance?.containerId) {
+      const fullPath = resolveSessionFilePath(
+        session.agentId, session.id, 'input', result.data.dir,
+      )
+      await dockerManager.ensureContainerDir(instance.containerId, fullPath)
+    } else if (instance?.workspacePath) {
+      const hostPath = resolveExternalSessionFilePath(
+        instance.workspacePath, session.agentId, session.id, 'input', result.data.dir,
+      )
+      await hostFileOps.ensureDir(hostPath, instance.workspacePath)
+    } else {
       return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
     }
-
-    const fullPath = resolveSessionFilePath(
-      session.agentId, session.id, 'input', result.data.dir,
-    )
-
-    await dockerManager.ensureContainerDir(instance.containerId, fullPath)
 
     return NextResponse.json({ success: true })
   }),

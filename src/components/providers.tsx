@@ -33,6 +33,17 @@ function AuthRefresh() {
   return null
 }
 
+function ServiceWorkerRegister() {
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Non-fatal — PWA install just won't be available
+      })
+    }
+  }, [])
+  return null
+}
+
 function LanguageSync() {
   const language = useLanguageStore((s) => s.language)
   useEffect(() => {
@@ -41,23 +52,27 @@ function LanguageSync() {
   return null
 }
 
+let _queryClient: QueryClient | null = null
+
+export function getQueryClient(): QueryClient {
+  if (!_queryClient) {
+    _queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { staleTime: 60 * 1000, retry: 1 },
+      },
+    })
+  }
+  return _queryClient
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 60 * 1000,
-            retry: 1,
-          },
-        },
-      })
-  )
+  const [queryClient] = useState(() => getQueryClient())
 
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <QueryClientProvider client={queryClient}>
         <AuthRefresh />
+        <ServiceWorkerRegister />
         <LanguageSync />
         {children}
         <Toaster

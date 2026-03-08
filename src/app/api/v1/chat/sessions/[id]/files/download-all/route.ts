@@ -3,7 +3,8 @@ import { Readable } from 'stream'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, resolveExternalSessionFilePath } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 
 // GET /api/v1/chat/sessions/[id]/files/download-all — download output/ as tar.gz
 export const GET = withAuth(
@@ -22,24 +23,36 @@ export const GET = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
-      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
-    }
-
-    const outputPath = resolveSessionFilePath(
-      session.agentId, session.id, 'output',
-    )
 
     try {
-      const archiveStream = await dockerManager.downloadDirAsArchive(instance.containerId, outputPath)
-      const webStream = Readable.toWeb(Readable.from(archiveStream)) as ReadableStream
+      if (instance?.containerId) {
+        const outputPath = resolveSessionFilePath(
+          session.agentId, session.id, 'output',
+        )
+        const archiveStream = await dockerManager.downloadDirAsArchive(instance.containerId, outputPath)
+        const webStream = Readable.toWeb(Readable.from(archiveStream)) as ReadableStream
 
-      return new NextResponse(webStream, {
-        headers: {
-          'Content-Type': 'application/gzip',
-          'Content-Disposition': 'attachment; filename="session-output.tar.gz"',
-        },
-      })
+        return new NextResponse(webStream, {
+          headers: {
+            'Content-Type': 'application/gzip',
+            'Content-Disposition': 'attachment; filename="session-output.tar.gz"',
+          },
+        })
+      } else if (instance?.workspacePath) {
+        const hostPath = resolveExternalSessionFilePath(
+          instance.workspacePath, session.agentId, session.id, 'output',
+        )
+        const archiveStream = hostFileOps.downloadDirAsArchive(hostPath, instance.workspacePath)
+
+        return new NextResponse(archiveStream, {
+          headers: {
+            'Content-Type': 'application/gzip',
+            'Content-Disposition': 'attachment; filename="session-output.tar.gz"',
+          },
+        })
+      } else {
+        return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
+      }
     } catch {
       // Output directory doesn't exist yet
       return new NextResponse(null, { status: 204 })

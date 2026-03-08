@@ -57,6 +57,12 @@ interface ChatState {
   // Sidebar
   sidebarOpen: boolean
   setSidebarOpen: (v: boolean) => void
+
+  // Mobile drawers (separate from desktop state — never read by desktop code)
+  mobileSidebarOpen: boolean
+  setMobileSidebarOpen: (v: boolean) => void
+  mobileFilePanelOpen: boolean
+  setMobileFilePanelOpen: (v: boolean) => void
 }
 
 /**
@@ -334,6 +340,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (capturedSessionId && get().activeSessionId) {
         syncFromHistory(capturedSessionId, set)
       }
+
+      // 6. Invalidate TanStack caches so isActive flags and history data are fresh.
+      // Dynamic import avoids circular deps between Zustand store and React providers.
+      try {
+        const { getQueryClient } = await import('@/components/providers')
+        const qc = getQueryClient()
+        qc.invalidateQueries({ queryKey: ['chat', 'sessions'] })
+        if (capturedSessionId) {
+          qc.invalidateQueries({ queryKey: ['chat', 'history', capturedSessionId] })
+        }
+      } catch { /* non-fatal */ }
     }
   },
 
@@ -348,4 +365,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sidebarOpen: true,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
+
+  mobileSidebarOpen: false,
+  setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
+  mobileFilePanelOpen: false,
+  setMobileFilePanelOpen: (v) => set({ mobileFilePanelOpen: v }),
 }))

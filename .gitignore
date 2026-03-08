@@ -59,6 +59,7 @@ PRD.md
 DEVELOPMENT.md
 docs/PRD.md
 docs/DEVELOPMENT.md
+docs/knowledge/
 
 # debug/test scripts (may contain tokens or local env data)
 scripts/debug-*.ts

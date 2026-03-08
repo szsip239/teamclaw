@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, resolveExternalSessionFilePath } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import type { SessionFileZone } from '@/lib/session-files/helpers'
-import type { SessionFileListResponse } from '@/types/session-files'
+import type { SessionFileListResponse, SessionFileEntry } from '@/types/session-files'
 
 // GET /api/v1/chat/sessions/[id]/files — list files in a session zone
 export const GET = withAuth(
@@ -23,9 +24,6 @@ export const GET = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
-      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
-    }
 
     const url = new URL(req.url)
     const zone = (url.searchParams.get('zone') || 'input') as SessionFileZone
@@ -39,22 +37,26 @@ export const GET = withAuth(
       return NextResponse.json({ error: 'Invalid directory path' }, { status: 400 })
     }
 
-    const resolvedPath = resolveSessionFilePath(
-      session.agentId, session.id, zone, dir || undefined,
-    )
-
+    let entries: SessionFileEntry[]
     try {
-      const entries = await dockerManager.listContainerDir(instance.containerId, resolvedPath)
-      const response: SessionFileListResponse = {
-        files: entries,
-        zone,
-        dir: dir || '',
+      if (instance?.containerId) {
+        const resolvedPath = resolveSessionFilePath(
+          session.agentId, session.id, zone, dir || undefined,
+        )
+        entries = await dockerManager.listContainerDir(instance.containerId, resolvedPath)
+      } else if (instance?.workspacePath) {
+        const hostPath = resolveExternalSessionFilePath(
+          instance.workspacePath, session.agentId, session.id, zone, dir || undefined,
+        )
+        entries = await hostFileOps.listDir(hostPath, instance.workspacePath)
+      } else {
+        return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
       }
-      return NextResponse.json(response)
     } catch {
-      // Directory doesn't exist yet — return empty
-      const response: SessionFileListResponse = { files: [], zone, dir: dir || '' }
-      return NextResponse.json(response)
+      entries = []
     }
+
+    const response: SessionFileListResponse = { files: entries, zone, dir: dir || '' }
+    return NextResponse.json(response)
   }),
 )

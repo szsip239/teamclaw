@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath, isSessionPathSafe } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, resolveExternalSessionFilePath, isSessionPathSafe } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import type { SessionFileEntry } from '@/types/session-files'
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
@@ -24,7 +25,7 @@ export const POST = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
+    if (!instance?.containerId && !instance?.workspacePath) {
       return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
     }
 
@@ -49,14 +50,20 @@ export const POST = withAuth(
       return NextResponse.json({ error: 'Invalid filename' }, { status: 400 })
     }
 
-    const containerDir = resolveSessionFilePath(
-      session.agentId, session.id, 'input', dir || undefined,
-    )
-
     const buffer = Buffer.from(await file.arrayBuffer())
 
     try {
-      await dockerManager.uploadFileToContainer(instance.containerId, containerDir, fileName, buffer)
+      if (instance.containerId) {
+        const containerDir = resolveSessionFilePath(
+          session.agentId, session.id, 'input', dir || undefined,
+        )
+        await dockerManager.uploadFileToContainer(instance.containerId, containerDir, fileName, buffer)
+      } else {
+        const hostDir = resolveExternalSessionFilePath(
+          instance.workspacePath!, session.agentId, session.id, 'input', dir || undefined,
+        )
+        await hostFileOps.writeFile(hostDir, fileName, buffer, instance.workspacePath!)
+      }
     } catch (err) {
       console.error('[session-files] upload failed:', err)
       return NextResponse.json(

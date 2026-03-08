@@ -37,24 +37,18 @@ export function ChatAgentList() {
   const [confirmAgent, setConfirmAgent] = useState<ChatAgentInfo | null>(null)
 
   function handleSelect(agent: ChatAgentInfo) {
-    if (
-      selectedAgent?.instanceId !== agent.instanceId ||
-      selectedAgent?.agentId !== agent.agentId
-    ) {
+    const isSameAgent =
+      selectedAgent?.instanceId === agent.instanceId &&
+      selectedAgent?.agentId === agent.agentId
+
+    if (!isSameAgent) {
       clearMessages()
-      // Find active session for this agent
-      const activeSession = sessions?.find(
-        (s) =>
-          s.instanceId === agent.instanceId &&
-          s.agentId === agent.agentId &&
-          s.isActive,
-      )
-      if (activeSession) {
-        qc.invalidateQueries({
-          queryKey: chatKeys.history(activeSession.id),
-        })
-      }
+    } else {
+      // Same agent clicked — reset activeSessionId so chat-main resolves
+      // the freshest active session (user may be viewing a history session).
+      useChatStore.getState().setActiveSessionId(null)
     }
+    qc.invalidateQueries({ queryKey: chatKeys.sessions() })
     setSelectedAgent(agent)
   }
 

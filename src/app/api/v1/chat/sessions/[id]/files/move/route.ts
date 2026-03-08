@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, resolveExternalSessionFilePath } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import { moveSchema } from '@/lib/validations/session-files'
 
 // POST /api/v1/chat/sessions/[id]/files/move — move file within input/
@@ -43,19 +44,27 @@ export const POST = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
-      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
-    }
-
-    const sourceFull = resolveSessionFilePath(
-      session.agentId, session.id, 'input', result.data.source,
-    )
-    const targetFull = resolveSessionFilePath(
-      session.agentId, session.id, 'input', result.data.target,
-    )
 
     try {
-      await dockerManager.moveContainerPath(instance.containerId, sourceFull, targetFull)
+      if (instance?.containerId) {
+        const sourceFull = resolveSessionFilePath(
+          session.agentId, session.id, 'input', result.data.source,
+        )
+        const targetFull = resolveSessionFilePath(
+          session.agentId, session.id, 'input', result.data.target,
+        )
+        await dockerManager.moveContainerPath(instance.containerId, sourceFull, targetFull)
+      } else if (instance?.workspacePath) {
+        const sourceFull = resolveExternalSessionFilePath(
+          instance.workspacePath, session.agentId, session.id, 'input', result.data.source,
+        )
+        const targetFull = resolveExternalSessionFilePath(
+          instance.workspacePath, session.agentId, session.id, 'input', result.data.target,
+        )
+        await hostFileOps.moveFile(sourceFull, targetFull, instance.workspacePath)
+      } else {
+        return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
+      }
       return NextResponse.json({ success: true })
     } catch {
       return NextResponse.json({ error: 'Move failed, source file may not exist' }, { status: 400 })

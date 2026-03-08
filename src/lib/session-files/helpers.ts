@@ -42,6 +42,28 @@ export function buildCurrentSessionTarget(chatSessionId: string): string {
   return `sessions/${chatSessionId}`
 }
 
+// --- External instance paths (host filesystem) ---
+
+export function buildExternalSessionBasePath(
+  workspacePath: string, agentId: string, chatSessionId: string,
+): string {
+  return `${workspacePath}/agents/${agentId}/sessions/${chatSessionId}/`
+}
+
+export function resolveExternalSessionFilePath(
+  workspacePath: string, agentId: string, chatSessionId: string,
+  zone: SessionFileZone, relativePath?: string,
+): string {
+  const base = `${buildExternalSessionBasePath(workspacePath, agentId, chatSessionId)}${zone}/`
+  return relativePath ? `${base}${relativePath}` : base
+}
+
+export function buildExternalCurrentSessionLinkPath(
+  workspacePath: string, agentId: string,
+): string {
+  return `${workspacePath}/agents/${agentId}/current-session`
+}
+
 export function isSessionPathSafe(relativePath: string): boolean {
   if (!relativePath) return false
   if (relativePath.includes('..')) return false

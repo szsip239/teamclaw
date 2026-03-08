@@ -36,7 +36,7 @@ export const POST = withAuth(
 
     try {
       // Archive: snapshot messages + delete OpenClaw session (keeps DB session active)
-      await archiveSession(id, session.instanceId, session.agentId, session.userId, client, { keepActive: true, triggerMemoryDump: true })
+      await archiveSession(id, session.instanceId, session.agentId, session.userId, client, { keepActive: true, triggerMemoryDump: true, waitForNewCompletion: true })
 
       // Clear liveMessages and reset messageCount since context was reset.
       // messageCount must be reset to 0 so the session-lost detection

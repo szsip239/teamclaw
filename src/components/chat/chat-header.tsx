@@ -15,16 +15,28 @@ import {
 import { useChatStore } from "@/stores/chat-store"
 import { useClearContext } from "@/hooks/use-chat"
 import { useT } from "@/stores/language-store"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
 
 export function ChatHeader() {
   const t = useT()
+  const isMobile = useIsMobile()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sidebarOpen = useChatStore((s) => s.sidebarOpen)
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen)
+  const mobileSidebarOpen = useChatStore((s) => s.mobileSidebarOpen)
+  const setMobileSidebarOpen = useChatStore((s) => s.setMobileSidebarOpen)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const clearContext = useClearContext()
+
+  function handleToggleSidebar() {
+    if (isMobile) {
+      setMobileSidebarOpen(!mobileSidebarOpen)
+    } else {
+      setSidebarOpen(!sidebarOpen)
+    }
+  }
 
   function handleClearContext() {
     if (!activeSessionId) return
@@ -46,9 +58,9 @@ export function ChatHeader() {
           variant="ghost"
           size="icon"
           className="size-8"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
+          onClick={handleToggleSidebar}
         >
-          {sidebarOpen ? (
+          {(isMobile ? mobileSidebarOpen : sidebarOpen) ? (
             <PanelLeftClose className="size-4" />
           ) : (
             <PanelLeft className="size-4" />
@@ -58,26 +70,44 @@ export function ChatHeader() {
         {selectedAgent ? (
           <>
             <Bot className="text-muted-foreground size-4" />
-            <span className="text-sm font-medium">
+            <span className={`text-sm font-medium ${isMobile ? "max-w-[120px] truncate" : ""}`}>
               {selectedAgent.agentName}
             </span>
-            <Badge variant="outline" className="text-xs">
-              {selectedAgent.instanceName}
-            </Badge>
+            {!isMobile && (
+              <Badge variant="outline" className="text-xs">
+                {selectedAgent.instanceName}
+              </Badge>
+            )}
             <div className="ml-auto">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!activeSessionId || clearContext.isPending}
-                onClick={() => setConfirmOpen(true)}
-              >
-                {clearContext.isPending ? (
-                  <Loader2 className="mr-1 size-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="mr-1 size-3.5" />
-                )}
-                {t('chat.clearContext')}
-              </Button>
+              {isMobile ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  disabled={!activeSessionId || clearContext.isPending}
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  {clearContext.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-3.5" />
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!activeSessionId || clearContext.isPending}
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  {clearContext.isPending ? (
+                    <Loader2 className="mr-1 size-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="mr-1 size-3.5" />
+                  )}
+                  {t('chat.clearContext')}
+                </Button>
+              )}
             </div>
           </>
         ) : (

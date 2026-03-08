@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import { Providers } from "@/components/providers"
 import "./globals.css"
@@ -8,10 +8,22 @@ const inter = Inter({
   subsets: ["latin"],
 })
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
+}
+
 export const metadata: Metadata = {
   title: "TeamClaw - 企业级 OpenClaw 管理平台",
   description:
     "TeamClaw 是一个企业级 OpenClaw 管理平台，提供实例管理、Agent 管理、权限控制、审计日志等功能。",
+  appleWebApp: {
+    capable: true,
+    title: "TeamClaw",
+    statusBarStyle: "default",
+  },
 }
 
 export default function RootLayout({

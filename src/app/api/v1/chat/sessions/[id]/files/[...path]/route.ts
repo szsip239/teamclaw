@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param, paramArray } from '@/lib/middleware/auth'
 import { dockerManager } from '@/lib/docker/manager'
-import { resolveSessionFilePath, isSessionPathSafe } from '@/lib/session-files/helpers'
+import { resolveSessionFilePath, resolveExternalSessionFilePath, isSessionPathSafe } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import type { SessionFileZone } from '@/lib/session-files/helpers'
 
 // GET /api/v1/chat/sessions/[id]/files/[...path] — download a file
@@ -37,16 +38,23 @@ export const GET = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
-      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
-    }
-
-    const filePath = resolveSessionFilePath(
-      session.agentId, session.id, zone, relativePath,
-    )
 
     try {
-      const data = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
+      let data: Buffer
+      if (instance?.containerId) {
+        const filePath = resolveSessionFilePath(
+          session.agentId, session.id, zone, relativePath,
+        )
+        data = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
+      } else if (instance?.workspacePath) {
+        const hostPath = resolveExternalSessionFilePath(
+          instance.workspacePath, session.agentId, session.id, zone, relativePath,
+        )
+        data = await hostFileOps.readFile(hostPath, instance.workspacePath)
+      } else {
+        return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
+      }
+
       const fileName = pathSegments[pathSegments.length - 1]
       return new NextResponse(new Uint8Array(data), {
         headers: {
@@ -93,16 +101,21 @@ export const DELETE = withAuth(
     }
 
     const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
-    if (!instance?.containerId) {
-      return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
-    }
-
-    const filePath = resolveSessionFilePath(
-      session.agentId, session.id, 'input', relativePath,
-    )
 
     try {
-      await dockerManager.removeContainerFile(instance.containerId, filePath)
+      if (instance?.containerId) {
+        const filePath = resolveSessionFilePath(
+          session.agentId, session.id, 'input', relativePath,
+        )
+        await dockerManager.removeContainerFile(instance.containerId, filePath)
+      } else if (instance?.workspacePath) {
+        const hostPath = resolveExternalSessionFilePath(
+          instance.workspacePath, session.agentId, session.id, 'input', relativePath,
+        )
+        await hostFileOps.removeFile(hostPath, instance.workspacePath)
+      } else {
+        return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
+      }
       return new NextResponse(null, { status: 204 })
     } catch {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
