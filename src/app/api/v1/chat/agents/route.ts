@@ -40,10 +40,10 @@ export const GET = withAuth(
     // Fetch instance name map
     const instances = await prisma.instance.findMany({
       where: { id: { in: instanceIds } },
-      select: { id: true, name: true, containerId: true },
+      select: { id: true, name: true, containerId: true, workspacePath: true },
     })
     const nameMap = new Map(instances.map((i) => [i.id, i.name]))
-    const containerMap = new Map(instances.map((i) => [i.id, !!i.containerId]))
+    const fileAccessMap = new Map(instances.map((i) => [i.id, !!(i.containerId || i.workspacePath)]))
 
     await Promise.allSettled(
       instanceIds.map(async (instanceId) => {
@@ -81,7 +81,7 @@ export const GET = withAuth(
               status: agent.status || 'active',
               model: agent.model,
               category: (meta?.category as AgentCategory) ?? 'DEFAULT',
-              hasContainer: containerMap.get(instanceId) ?? false,
+              hasContainer: fileAccessMap.get(instanceId) ?? false,
             })
           }
         } catch {

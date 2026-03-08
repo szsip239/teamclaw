@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
-import { Send, Square, Paperclip, X, FileText } from "lucide-react"
+import { useState, useRef, useCallback, useEffect } from "react"
+import { Send, Square, Paperclip, X, FileText, FolderOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useChatStore } from "@/stores/chat-store"
 import { useT } from "@/stores/language-store"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 const IMAGE_MAX_SIZE = 10 * 1024 * 1024  // 10MB
 const FILE_MAX_SIZE = 5 * 1024 * 1024    // 5MB
@@ -22,6 +23,7 @@ interface PendingFile {
 
 export function ChatInput() {
   const t = useT()
+  const isMobile = useIsMobile()
   const [input, setInput] = useState("")
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -32,6 +34,8 @@ export function ChatInput() {
   const abortController = useChatStore((s) => s.abortController)
   const sendMessage = useChatStore((s) => s.sendMessage)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const mobileFilePanelOpen = useChatStore((s) => s.mobileFilePanelOpen)
+  const setMobileFilePanelOpen = useChatStore((s) => s.setMobileFilePanelOpen)
 
   const handleSend = useCallback(() => {
     const text = input.trim()
@@ -127,6 +131,20 @@ export function ChatInput() {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
   }
 
+  // Mobile: scroll input into view when virtual keyboard opens
+  useEffect(() => {
+    if (!isMobile) return
+    const vv = window.visualViewport
+    if (!vv) return
+    function onResize() {
+      textareaRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+    }
+    vv.addEventListener("resize", onResize)
+    return () => vv.removeEventListener("resize", onResize)
+  }, [isMobile])
+
+  const showFilePanelButton = isMobile && activeSessionId && selectedAgent?.hasContainer !== false
+
   return (
     <div className="border-t px-4 py-3">
       <div className="mx-auto max-w-3xl">
@@ -184,6 +202,20 @@ export function ChatInput() {
             <Paperclip className="size-4" />
           </Button>
 
+          {/* Mobile: file panel toggle button */}
+          {showFilePanelButton && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={() => setMobileFilePanelOpen(!mobileFilePanelOpen)}
+              title={t('chat.filePanel')}
+            >
+              <FolderOpen className="size-4" />
+            </Button>
+          )}
+
           <Textarea
             ref={textareaRef}
             value={input}
@@ -193,6 +225,7 @@ export function ChatInput() {
             className="min-h-[44px] max-h-[200px] resize-none"
             rows={1}
             disabled={isStreaming}
+            enterKeyHint="send"
           />
           {isStreaming ? (
             <Button

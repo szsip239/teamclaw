@@ -60,6 +60,8 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 
 **平台能力**
 - 完整国际化 — 中英文界面一键切换
+- 移动端适配 — 手机浏览器完整对话体验，侧边栏和文件面板以抽屉形式展开
+- PWA 支持 — 支持添加到主屏幕，独立窗口运行
 - 多模型支持 — Anthropic、OpenAI、MiniMax、Groq 等
 - Docker 部署 — 一条命令启动全栈服务
 
@@ -333,6 +335,8 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 
 **Platform**
 - Full i18n — English and Chinese interface with one-click switching
+- Mobile-responsive — full chat experience on mobile browsers with sidebar and file panel as slide-in drawers
+- PWA support — add to home screen, runs in standalone mode
 - Multi-model support — Anthropic, OpenAI, MiniMax, Groq, and more
 - Docker deployment — one-command full-stack setup
 

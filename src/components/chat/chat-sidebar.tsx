@@ -6,11 +6,12 @@ import { ChatSessionList } from "./chat-session-list"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useT } from "@/stores/language-store"
+import { cn } from "@/lib/utils"
 
-export function ChatSidebar() {
+export function ChatSidebar({ className }: { className?: string }) {
   const t = useT()
   return (
-    <div className="border-r flex w-72 shrink-0 flex-col bg-muted/30">
+    <div className={cn("flex flex-col bg-muted/30", className)}>
       <ChatSidebarHeader />
       <Separator />
       <ScrollArea className="flex-1">

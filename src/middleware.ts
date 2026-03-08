@@ -12,6 +12,9 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/refresh',
   '/_next',
   '/favicon.ico',
+  '/manifest.webmanifest',
+  '/icons/',
+  '/sw.js',
 ]
 
 let cachedPublicKey: CryptoKey | null = null

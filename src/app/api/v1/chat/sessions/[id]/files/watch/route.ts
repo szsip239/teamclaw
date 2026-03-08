@@ -5,7 +5,9 @@ import { dockerManager } from '@/lib/docker/manager'
 import {
   buildSessionInputPath,
   buildSessionOutputPath,
+  resolveExternalSessionFilePath,
 } from '@/lib/session-files/helpers'
+import * as hostFileOps from '@/lib/session-files/host-file-ops'
 
 const POLL_INTERVAL_MS = 5_000
 const EXEC_TIMEOUT_MS = 8_000
@@ -36,13 +38,24 @@ export async function GET(
   const instance = await prisma.instance.findUnique({
     where: { id: session.instanceId },
   })
-  if (!instance?.containerId) {
+  if (!instance?.containerId && !instance?.workspacePath) {
     return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
   }
 
   const containerId = instance.containerId
-  const inputDir = buildSessionInputPath(session.agentId, session.id)
-  const outputDir = buildSessionOutputPath(session.agentId, session.id)
+  const workspacePath = instance.workspacePath
+
+  // Docker container paths
+  const dockerInputDir = buildSessionInputPath(session.agentId, session.id)
+  const dockerOutputDir = buildSessionOutputPath(session.agentId, session.id)
+
+  // Host filesystem paths (for external instances)
+  const hostInputDir = workspacePath
+    ? resolveExternalSessionFilePath(workspacePath, session.agentId, session.id, 'input')
+    : ''
+  const hostOutputDir = workspacePath
+    ? resolveExternalSessionFilePath(workspacePath, session.agentId, session.id, 'output')
+    : ''
 
   // --- SSE stream ---
   const encoder = new TextEncoder()
@@ -90,16 +103,26 @@ export async function GET(
       async function poll() {
         if (stopped) return
         try {
-          const mtime = await Promise.race([
-            dockerManager.execWithOutput(containerId, [
-              'sh', '-c',
-              'stat -c "%Y" "$1" "$2" 2>/dev/null || true',
-              '_', inputDir, outputDir,
-            ]),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('exec timeout')), EXEC_TIMEOUT_MS),
-            ),
-          ])
+          let mtime: string
+          if (containerId) {
+            mtime = await Promise.race([
+              dockerManager.execWithOutput(containerId, [
+                'sh', '-c',
+                'stat -c "%Y" "$1" "$2" 2>/dev/null || true',
+                '_', dockerInputDir, dockerOutputDir,
+              ]),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('exec timeout')), EXEC_TIMEOUT_MS),
+              ),
+            ])
+          } else {
+            // External instance: use fs.stat on host paths
+            const parts: string[] = []
+            try { parts.push(await hostFileOps.statMtime(hostInputDir, workspacePath!)) } catch { /* dir may not exist */ }
+            try { parts.push(await hostFileOps.statMtime(hostOutputDir, workspacePath!)) } catch { /* dir may not exist */ }
+            mtime = parts.join('\n')
+          }
+
           failCount = 0
           const trimmed = mtime.trim()
           if (trimmed && trimmed !== lastMtime) {

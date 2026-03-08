@@ -8,12 +8,13 @@ import { useT } from "@/stores/language-store"
 import { sessionFileKeys, useFileWatch } from "@/hooks/use-session-files"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { FolderOpen, Download } from "lucide-react"
 import { FileTree } from "./file-tree"
 import { FileUploadZone } from "./file-upload-zone"
 import { FileDetail } from "./file-detail"
 
-export function ChatFilePanel() {
+export function ChatFilePanel({ className }: { className?: string }) {
   const t = useT()
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const isStreaming = useChatStore((s) => s.isStreaming)
@@ -51,7 +52,7 @@ export function ChatFilePanel() {
   if (!activeSessionId) return null
 
   return (
-    <div className="border-l flex w-96 shrink-0 flex-col bg-background">
+    <div className={cn("flex flex-col bg-background", className)}>
       {/* Header — matches chat header height */}
       <div className="flex h-14 items-center gap-2 px-4">
         <FolderOpen className="size-4 text-muted-foreground" />
