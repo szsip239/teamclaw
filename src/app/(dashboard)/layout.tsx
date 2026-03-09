@@ -20,8 +20,8 @@ export default function DashboardLayout({
   const t = useT()
 
   useEffect(() => {
-    if (!user) fetchUser()
-  }, [fetchUser, user])
+    fetchUser()
+  }, [fetchUser])
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -45,11 +45,11 @@ export default function DashboardLayout({
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar />
       <SidebarInset>
         <DashboardHeader />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main className="flex flex-1 flex-col overflow-auto">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   )

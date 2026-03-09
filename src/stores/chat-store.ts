@@ -1,38 +1,37 @@
 import { create } from 'zustand'
 import { streamChat } from '@/lib/chat-stream'
 import { getAccessToken } from '@/lib/api-client'
+import { assembleFromResponse } from '@/lib/chat/message-assembly'
 import type { ChatAgentInfo, ChatMessage, ChatToolCall, ChatHistoryResponse, ChatAttachment, ChatContentBlock } from '@/types/chat'
 
 interface ChatState {
-  // Selected agent
   selectedAgent: ChatAgentInfo | null
   setSelectedAgent: (agent: ChatAgentInfo | null) => void
 
-  // Active session tracking
   activeSessionId: string | null
   setActiveSessionId: (id: string | null) => void
 
-  // Messages for current conversation
+  // Completed messages (stable during streaming)
   messages: ChatMessage[]
+  setMessages: (messages: ChatMessage[]) => void
+
+  // Streaming message isolated from messages[] to avoid full-list re-renders
+  streamingMessage: ChatMessage | null
+
   addUserMessage: (content: string, attachments?: ChatAttachment[]) => void
   appendAssistantContent: (content: string) => void
   appendAssistantImage: (imageUrl: string, mimeType?: string, alt?: string) => void
   appendThinking: (content: string) => void
   appendToolCall: (toolCall: ChatToolCall) => void
   setAssistantError: (error: string) => void
-  completeAssistantMessage: () => void
 
-  // History loading
   isLoadingHistory: boolean
   setLoadingHistory: (v: boolean) => void
-  setMessages: (messages: ChatMessage[]) => void
 
-  // Streaming state
   isStreaming: boolean
   setStreaming: (v: boolean) => void
   abortController: AbortController | null
 
-  // Send message action
   sendMessage: (
     instanceId: string,
     agentId: string,
@@ -41,7 +40,6 @@ interface ChatState {
     attachments?: { name: string; content: string; mimeType: string; size: number; dataUrl: string }[],
   ) => Promise<void>
 
-  // Session management
   clearMessages: () => void
 
   // Pending session-uploaded file paths (injected into next outgoing message)
@@ -49,23 +47,17 @@ interface ChatState {
   addPendingFilePath: (name: string, path: string) => void
   clearPendingFilePaths: () => void
 
-  // Sidebar
+  connectionStatus: 'ok' | 'unreachable' | 'session-lost'
+  setConnectionStatus: (v: 'ok' | 'unreachable' | 'session-lost') => void
+
   sidebarOpen: boolean
   setSidebarOpen: (v: boolean) => void
 }
 
-/**
- * After streaming completes, replace messages with full history from the API.
- *
- * During streaming, the store only has 1 assistant message (text-only).
- * OpenClaw's gateway doesn't send tool events or thinking in chat events,
- * so the streaming view is incomplete. By syncing from history after streaming,
- * we get the full picture: all thinking blocks, tool calls, images, etc.
- * This ensures consistency between the post-streaming view and page refresh.
- */
 async function syncFromHistory(
   activeSessionId: string,
-  set: (fn: (s: ChatState) => Partial<ChatState>) => void,
+  set: (partial: Partial<ChatState>) => void,
+  opts?: { polling?: boolean },
 ) {
   try {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ""
@@ -73,41 +65,41 @@ async function syncFromHistory(
     const headers: Record<string, string> = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
 
-    const res = await fetch(`${apiUrl}/api/v1/chat/sessions/${activeSessionId}/history`, {
+    const qs = opts?.polling ? '?polling=true' : ''
+    const res = await fetch(`${apiUrl}/api/v1/chat/sessions/${activeSessionId}/history${qs}`, {
       credentials: 'include',
       headers,
     })
     if (!res.ok) return
     const json = await res.json()
-    // Unwrap Go response envelope { code, message, data }
     const data: ChatHistoryResponse = json?.data ?? json
+    const assembled = assembleFromResponse(data)
 
-    const snapshots = data.snapshots ?? []
-    const currentMessages = data.currentMessages ?? []
-    const assembled: ChatMessage[] = []
-
-    // Rebuild: snapshots + separators + currentMessages
-    for (let i = 0; i < snapshots.length; i++) {
-      assembled.push(...snapshots[i].messages)
-      const isLastBatch = i === snapshots.length - 1
-      const hasMoreContent = !isLastBatch || (data.isActive && currentMessages.length > 0)
-      if (hasMoreContent) {
-        assembled.push({
-          id: `sep-${snapshots[i].batchId}`,
-          role: 'assistant' as const,
-          content: `__separator__:context-reset`,
-          createdAt: new Date().toISOString(),
-        })
+    if (assembled.length > 0) {
+      // Preserve user-uploaded attachments not returned by gateway history
+      const existing = useChatStore.getState().messages
+      const attachmentsByContent = new Map<string, ChatAttachment[]>()
+      for (const msg of existing) {
+        if (msg.role === 'user' && msg.attachments?.length) {
+          attachmentsByContent.set(msg.content, msg.attachments)
+        }
       }
+      if (attachmentsByContent.size > 0) {
+        for (const msg of assembled) {
+          if (msg.role === 'user' && !msg.attachments?.length) {
+            const att = attachmentsByContent.get(msg.content)
+            if (att) msg.attachments = att
+          }
+        }
+      }
+      set({ messages: assembled })
     }
 
-    if (data.isActive && currentMessages.length > 0) {
-      assembled.push(...currentMessages)
+    if (data.connectionStatus) {
+      set({ connectionStatus: data.connectionStatus })
     }
-
-    set(() => ({ messages: assembled }))
   } catch {
-    // Silently fail — sync is a non-critical UI enhancement
+    // Silently fail
   }
 }
 
@@ -119,10 +111,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveSessionId: (id) => set({ activeSessionId: id }),
 
   messages: [],
+  streamingMessage: null,
+  setMessages: (messages) => set({ messages }),
 
   isLoadingHistory: false,
   setLoadingHistory: (v) => set({ isLoadingHistory: v }),
-  setMessages: (messages) => set({ messages }),
 
   addUserMessage: (content, attachments) => {
     const msg: ChatMessage = {
@@ -137,78 +130,55 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   appendAssistantImage: (imageUrl, mimeType, alt) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        const blocks: ChatContentBlock[] = [...(last.contentBlocks ?? [])]
-        blocks.push({ type: 'image', imageUrl, mimeType, alt })
-        msgs[msgs.length - 1] = { ...last, contentBlocks: blocks }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      const blocks: ChatContentBlock[] = [...(msg.contentBlocks ?? [])]
+      blocks.push({ type: 'image', imageUrl, mimeType, alt })
+      return { streamingMessage: { ...msg, contentBlocks: blocks } }
     })
   },
 
   appendAssistantContent: (content) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, content: last.content + content }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      return { streamingMessage: { ...msg, content: msg.content + content } }
     })
   },
 
   appendThinking: (content) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = {
-          ...last,
-          thinking: (last.thinking ?? '') + content,
-        }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      return { streamingMessage: { ...msg, thinking: (msg.thinking ?? '') + content } }
     })
   },
 
   appendToolCall: (toolCall) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        // When a tool call arrives, any accumulated content is intermediate
-        // narration (e.g. "Let me calculate..."), not the final answer.
-        // Move it into thinking so it renders in the collapsible block.
-        const reclassifiedThinking =
-          last.content
-            ? last.content + (last.thinking ? '\n\n' + last.thinking : '')
-            : last.thinking
-        msgs[msgs.length - 1] = {
-          ...last,
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      const reclassifiedThinking =
+        msg.content
+          ? msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
+          : msg.thinking
+      return {
+        streamingMessage: {
+          ...msg,
           content: '',
           ...(reclassifiedThinking ? { thinking: reclassifiedThinking } : {}),
-          toolCalls: [...(last.toolCalls ?? []), toolCall],
-        }
+          toolCalls: [...(msg.toolCalls ?? []), toolCall],
+        },
       }
-      return { messages: msgs }
     })
   },
 
   setAssistantError: (error) => {
     set((s) => {
-      const msgs = [...s.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, error }
-      }
-      return { messages: msgs }
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      return { streamingMessage: { ...msg, error } }
     })
-  },
-
-  completeAssistantMessage: () => {
-    // No-op marker — streaming is done
   },
 
   isStreaming: false,
@@ -217,12 +187,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (instanceId, agentId, message, sessionId, attachments) => {
     const { addUserMessage } = get()
-    // Capture session ID at start — may be updated by the 'session' SSE event
-    // when the API creates a new session (activeSessionId was null)
     let capturedSessionId = get().activeSessionId
 
-    // Consume pending file paths — inject them into the gateway message so the
-    // agent can read the uploaded files. The UI still shows the original message.
+    // Inject pending uploaded file paths into the gateway message
     const pendingPaths = get().pendingFilePaths
     let gatewayMessage = message
     if (pendingPaths.length > 0) {
@@ -231,7 +198,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().clearPendingFilePaths()
     }
 
-    // 1. Add user message (with attachment previews for UI)
     const uiAttachments: ChatAttachment[] | undefined = attachments?.map(a => ({
       name: a.name,
       mimeType: a.mimeType,
@@ -240,22 +206,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
     addUserMessage(message, uiAttachments)
 
-    // 2. Create assistant placeholder
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
       createdAt: new Date().toISOString(),
     }
-    set((s) => ({ messages: [...s.messages, assistantMsg] }))
+    set({ streamingMessage: assistantMsg })
 
-    // 3. Set streaming state
     const controller = new AbortController()
     set({ isStreaming: true, abortController: controller })
 
+    // Progress polling to show intermediate tool calls during streaming
+    let syncing = false
+    const PROGRESS_POLL_INTERVAL = 5_000
+    const progressTimer = setInterval(() => {
+      const sid = capturedSessionId || get().activeSessionId
+      if (sid && get().isStreaming && !syncing) {
+        syncing = true
+        syncFromHistory(sid, set, { polling: true }).finally(() => { syncing = false })
+      }
+    }, PROGRESS_POLL_INTERVAL)
+
     try {
-      // 4. Stream events
-      // Build attachments payload (base64 only, no data URL prefix)
       const streamAttachments = attachments?.map(a => ({
         name: a.name,
         content: a.content,
@@ -268,8 +241,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       )) {
         switch (event.type) {
           case 'session':
-            // API sends the session ID as the first event — track it
-            // so syncFromHistory works even when no sessionId was passed
             capturedSessionId = event.sessionId
             if (!get().activeSessionId) {
               set({ activeSessionId: event.sessionId })
@@ -282,17 +253,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().appendThinking(event.content)
             break
           case 'tool_call':
-            get().appendToolCall({
-              toolName: event.toolName,
-              toolInput: event.toolInput,
-            })
+            get().appendToolCall({ toolName: event.toolName, toolInput: event.toolInput })
             break
           case 'tool_result':
-            get().appendToolCall({
-              toolName: event.toolName,
-              toolInput: null,
-              toolOutput: event.toolOutput,
-            })
+            get().appendToolCall({ toolName: event.toolName, toolInput: null, toolOutput: event.toolOutput })
             break
           case 'image':
             get().appendAssistantImage(event.imageUrl, event.mimeType, event.alt)
@@ -301,7 +265,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().setAssistantError(event.error)
             break
           case 'done':
-            get().completeAssistantMessage()
             break
         }
       }
@@ -310,11 +273,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         get().setAssistantError((err as Error).message || 'Failed to send message')
       }
     } finally {
-      set({ isStreaming: false, abortController: null })
+      clearInterval(progressTimer)
 
-      // 5. Sync with full history (gateway omits thinking + tool events during streaming)
-      // Use captured ID to avoid reading a stale/changed activeSessionId
-      if (capturedSessionId) {
+      const finalStreaming = get().streamingMessage
+      if (finalStreaming) {
+        set((s) => ({
+          messages: [...s.messages, finalStreaming],
+          streamingMessage: null,
+          isStreaming: false,
+          abortController: null,
+        }))
+      } else {
+        set({ streamingMessage: null, isStreaming: false, abortController: null })
+      }
+
+      if (capturedSessionId && get().activeSessionId) {
         syncFromHistory(capturedSessionId, set)
       }
     }
@@ -323,13 +296,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     const { abortController } = get()
     if (abortController) abortController.abort()
-    set({ messages: [], isStreaming: false, abortController: null, activeSessionId: null, pendingFilePaths: [] })
+    set({
+      messages: [],
+      streamingMessage: null,
+      isStreaming: false,
+      abortController: null,
+      activeSessionId: null,
+      pendingFilePaths: [],
+      connectionStatus: 'ok',
+    })
   },
 
   pendingFilePaths: [],
   addPendingFilePath: (name, path) =>
     set((s) => ({ pendingFilePaths: [...s.pendingFilePaths, { name, path }] })),
   clearPendingFilePaths: () => set({ pendingFilePaths: [] }),
+
+  connectionStatus: 'ok',
+  setConnectionStatus: (v) => set({ connectionStatus: v }),
 
   sidebarOpen: true,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),

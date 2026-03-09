@@ -8,19 +8,20 @@ import { ChatHeader } from "./chat-header"
 import { ChatMessageList } from "./chat-message-list"
 import { ChatInput } from "./chat-input"
 import { ChatWelcome } from "./chat-welcome"
-import type { ChatMessage, ChatSnapshotBatch } from "@/types/chat"
+import { assembleHistoryMessages } from "@/lib/chat/message-assembly"
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const setMessages = useChatStore((s) => s.setMessages)
-  const setLoadingHistory = useChatStore((s) => s.setLoadingHistory)
+  const setConnectionStatus = useChatStore((s) => s.setConnectionStatus)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
   const messagesLength = useChatStore((s) => s.messages.length)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const qc = useQueryClient()
 
-  // Find existing active session for the selected agent
+  // Find existing session for the selected agent.
+  // Prefer active session, fall back to the most recent inactive one (e.g. after gateway restart).
   const { data: sessions } = useChatSessions()
   const matchingSession = selectedAgent
     ? (activeSessionId
@@ -30,6 +31,11 @@ export function ChatMain() {
               s.instanceId === selectedAgent.instanceId &&
               s.agentId === selectedAgent.agentId &&
               s.isActive,
+          ) ??
+          sessions?.find(
+            (s) =>
+              s.instanceId === selectedAgent.instanceId &&
+              s.agentId === selectedAgent.agentId,
           )
       ) ?? null
     : null
@@ -41,10 +47,6 @@ export function ChatMain() {
   // Track which session + data version we've already loaded to avoid
   // redundant re-applies while still picking up background refetch results.
   const loadedRef = useRef<{ sessionId: string; updatedAt: number } | null>(null)
-
-  useEffect(() => {
-    setLoadingHistory(isLoadingHistoryQuery)
-  }, [isLoadingHistoryQuery, setLoadingHistory])
 
   // Set activeSessionId when we find a matching session
   useEffect(() => {
@@ -78,14 +80,19 @@ export function ChatMain() {
 
     if (!alreadyLoaded) {
       loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
-      const assembled = assembleMessages(
+      const assembled = assembleHistoryMessages(
         historyData.snapshots,
         historyData.currentMessages,
         historyData.isActive,
       )
-      setMessages(assembled)
+      // Don't overwrite existing messages with empty history — can happen when the
+      // history fetch races ahead of gateway processing the first chat.send request.
+      if (assembled.length > 0 || messagesLength === 0) {
+        setMessages(assembled)
+      }
+      setConnectionStatus(historyData.connectionStatus ?? 'ok')
     }
-  }, [historyData, matchingSession, setMessages, messagesLength, dataUpdatedAt, isStreaming])
+  }, [historyData, matchingSession, setMessages, setConnectionStatus, messagesLength, dataUpdatedAt, isStreaming])
 
   if (!selectedAgent) {
     return (
@@ -99,73 +106,8 @@ export function ChatMain() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <ChatHeader />
-      <ChatMessageList />
+      <ChatMessageList isLoadingHistory={isLoadingHistoryQuery} />
       <ChatInput />
     </div>
   )
-}
-
-/**
- * Normalize a message from the history API.
- * toolCalls may arrive as a JSON string (legacy Go serialization) — parse it back to an array.
- * contentBlocks may also arrive as a string — same treatment.
- */
-function normalizeMessage(msg: ChatMessage): ChatMessage {
-  let { toolCalls, contentBlocks } = msg
-  if (toolCalls !== undefined && !Array.isArray(toolCalls)) {
-    try { toolCalls = JSON.parse(toolCalls as unknown as string) } catch { toolCalls = [] }
-  }
-  if (contentBlocks !== undefined && !Array.isArray(contentBlocks)) {
-    try { contentBlocks = JSON.parse(contentBlocks as unknown as string) } catch { contentBlocks = [] }
-  }
-  return (toolCalls !== msg.toolCalls || contentBlocks !== msg.contentBlocks)
-    ? { ...msg, toolCalls, contentBlocks }
-    : msg
-}
-
-/**
- * Assemble snapshots and current messages into a single list,
- * inserting separator markers between context resets.
- */
-function assembleMessages(
-  snapshots: ChatSnapshotBatch[],
-  currentMessages: ChatMessage[],
-  isActive: boolean,
-): ChatMessage[] {
-  const result: ChatMessage[] = []
-
-  for (let i = 0; i < snapshots.length; i++) {
-    result.push(...snapshots[i].messages.map(normalizeMessage))
-
-    // Insert separator after each batch
-    const isLastBatch = i === snapshots.length - 1
-    const hasMoreContent = !isLastBatch || (isActive && currentMessages.length > 0)
-    if (hasMoreContent) {
-      result.push(createSeparator("context-reset", `sep-${snapshots[i].batchId}`))
-    }
-  }
-
-  if (isActive && currentMessages.length > 0) {
-    result.push(...currentMessages.map(normalizeMessage))
-  } else if (!isActive && snapshots.length > 0) {
-    // Non-active session — show "context restart" separator if new messages arrive later
-    // (handled by the store when streaming starts on a reactivated session)
-  }
-
-  return result
-}
-
-/**
- * Create a special "separator" message used by ChatMessageList to render dividers.
- */
-function createSeparator(
-  type: "context-reset" | "context-restart",
-  id: string,
-): ChatMessage {
-  return {
-    id,
-    role: "assistant" as const,
-    content: `__separator__:${type}`,
-    createdAt: new Date().toISOString(),
-  }
 }

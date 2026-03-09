@@ -16,7 +16,7 @@ export function ChatSidebar() {
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-1 p-3">
           <p className="text-muted-foreground mb-1 px-2 text-xs font-medium uppercase tracking-wider">
-            Agents
+            {t('chat.agents')}
           </p>
           <ChatAgentList />
         </div>

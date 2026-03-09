@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ChevronDown, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useT } from "@/stores/language-store"
 import type { ChatToolCall } from "@/types/chat"
 
 interface ChatToolCallBlockProps {
@@ -10,6 +11,7 @@ interface ChatToolCallBlockProps {
 }
 
 export function ChatToolCallBlock({ toolCall }: ChatToolCallBlockProps) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -33,7 +35,7 @@ export function ChatToolCallBlock({ toolCall }: ChatToolCallBlockProps) {
           {toolCall.toolInput != null && (
             <div className="mb-2">
               <p className="text-muted-foreground mb-1 text-[10px] font-medium uppercase">
-                Input
+                {t('chat.toolInput')}
               </p>
               <pre className="bg-muted overflow-x-auto rounded p-2 text-xs">
                 <code>
@@ -47,7 +49,7 @@ export function ChatToolCallBlock({ toolCall }: ChatToolCallBlockProps) {
           {toolCall.toolOutput != null && (
             <div>
               <p className="text-muted-foreground mb-1 text-[10px] font-medium uppercase">
-                Output
+                {t('chat.toolOutput')}
               </p>
               <pre className="bg-muted overflow-x-auto rounded p-2 text-xs">
                 <code>

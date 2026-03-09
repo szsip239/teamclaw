@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query"
 import { api } from "@/lib/api-client"
 import { useAuthStore } from "@/stores/auth-store"
+import { useChatStore } from "@/stores/chat-store"
 import type { ChatAgentInfo, ChatSessionResponse, ChatHistoryResponse } from "@/types/chat"
 
 // ─── Query Key Factory ───────────────────────────────────────────────
@@ -28,6 +29,7 @@ export function useChatAgents() {
     queryFn: () =>
       api.get<{ agents: ChatAgentInfo[] }>("/api/v1/chat/agents"),
     enabled: !!user,
+    staleTime: 60_000,
     select: (data) => data.agents,
   })
 }
@@ -41,6 +43,7 @@ export function useChatSessions() {
     queryFn: () =>
       api.get<{ sessions: ChatSessionResponse[] }>("/api/v1/chat/sessions"),
     enabled: !!user,
+    staleTime: 30_000,
     select: (data) => data.sessions,
   })
 }
@@ -55,6 +58,13 @@ export function useChatHistory(sessionId: string | null) {
         `/api/v1/chat/sessions/${sessionId}/history`,
       ),
     enabled: !!sessionId,
+    refetchInterval: (query) => {
+      const data = query.state.data as ChatHistoryResponse | undefined
+      if (data?.isActive && !useChatStore.getState().isStreaming) {
+        return 5_000
+      }
+      return false
+    },
   })
 }
 
