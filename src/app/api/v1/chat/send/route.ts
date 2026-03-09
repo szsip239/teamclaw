@@ -6,7 +6,7 @@ import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
-import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget, resolveExternalSessionFilePath, buildExternalCurrentSessionLinkPath } from '@/lib/session-files/helpers'
+import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget, resolveExternalSessionFilePath, buildExternalCurrentSessionLinkPath, buildExternalWorkspaceSessionLinkPath, buildExternalWorkspaceSessionTarget } from '@/lib/session-files/helpers'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
 import { MIME_BY_EXT, extractMediaPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
@@ -598,14 +598,20 @@ export async function POST(req: NextRequest) {
           const wp = instance.workspacePath
           const inputPath = resolveExternalSessionFilePath(wp, agentId, activeSession.id, 'input')
           const outputPath = resolveExternalSessionFilePath(wp, agentId, activeSession.id, 'output')
-          const linkPath = buildExternalCurrentSessionLinkPath(wp, agentId)
-          const target = `sessions/${activeSession.id}`
+          const agentDirLink = buildExternalCurrentSessionLinkPath(wp, agentId)
+          const agentDirTarget = `sessions/${activeSession.id}`
+
+          // Also create symlink in the workspace dir (agent's CWD) so relative
+          // `current-session/input/` works.  Target is relative back to agents dir.
+          const wsLink = buildExternalWorkspaceSessionLinkPath(wp, agentId)
+          const wsTarget = buildExternalWorkspaceSessionTarget(agentId, activeSession.id)
 
           try {
             await Promise.all([
               hostFileOps.ensureDir(inputPath, wp),
               hostFileOps.ensureDir(outputPath, wp),
-              hostFileOps.createSymlink(target, linkPath, wp),
+              hostFileOps.createSymlink(agentDirTarget, agentDirLink, wp),
+              hostFileOps.createSymlink(wsTarget, wsLink, wp),
             ])
           } catch {
             // Non-fatal: symlink/mkdir failure doesn't block chat

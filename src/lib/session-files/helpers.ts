@@ -64,6 +64,34 @@ export function buildExternalCurrentSessionLinkPath(
   return `${workspacePath}/agents/${agentId}/current-session`
 }
 
+/**
+ * Build the path for the `current-session` symlink in the agent's **workspace** directory.
+ * The workspace is the agent's CWD — this is where the agent actually looks for
+ * `current-session/input/`.
+ *
+ * Convention: main/default agent → `{wp}/workspace/`, others → `{wp}/workspace-{agentId}/`.
+ */
+export function buildExternalWorkspaceSessionLinkPath(
+  workspacePath: string, agentId: string,
+): string {
+  const wsDir = (agentId === 'main' || agentId === 'default')
+    ? `${workspacePath}/workspace`
+    : `${workspacePath}/workspace-${agentId}`
+  return `${wsDir}/current-session`
+}
+
+/**
+ * Build the relative symlink target from the workspace directory to the session folder
+ * in the agents directory.
+ *
+ * e.g. from `workspace-internet/current-session` → `../agents/internet/sessions/{cuid}`
+ */
+export function buildExternalWorkspaceSessionTarget(
+  agentId: string, chatSessionId: string,
+): string {
+  return `../agents/${agentId}/sessions/${chatSessionId}`
+}
+
 export function isSessionPathSafe(relativePath: string): boolean {
   if (!relativePath) return false
   if (relativePath.includes('..')) return false

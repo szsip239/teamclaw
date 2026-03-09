@@ -200,23 +200,41 @@ export class GatewayV1Adapter implements GatewayAdapter {
       'cron.runs',
       Object.keys(rpcParams).length > 0 ? rpcParams : undefined,
     )
+    const obj = result as Record<string, unknown> | null
     const rawRuns: Record<string, unknown>[] = Array.isArray(result)
       ? result
-      : ((result as Record<string, unknown>)?.runs as Record<string, unknown>[]) ?? []
+      : (obj?.runs as Record<string, unknown>[])
+        ?? (obj?.entries as Record<string, unknown>[])
+        ?? []
 
-    // Normalize: gateway may use `id`/`jobId` for the cron job reference,
-    // and epoch-ms timestamps
-    const runs = rawRuns.map((raw) => ({
-      ...raw,
-      jobId: (raw.jobId as string) ?? (raw.cronId as string) ?? (raw.id as string),
-      runId: (raw.runId as string) ?? (raw.id as string),
-      startedAt: raw.startedAtMs
-        ? new Date(raw.startedAtMs as number).toISOString()
-        : (raw.startedAt as string),
-      endedAt: raw.endedAtMs
-        ? new Date(raw.endedAtMs as number).toISOString()
-        : (raw.endedAt as string | undefined),
-    } as CronRunsResult['runs'][number]))
+    // Normalize: gateway returns entries with field names that differ from our CronRun type.
+    // Key mappings: runAtMs→startedAt, ts→endedAt, sessionId→runId, status "ok"→"success",
+    // usage.input_tokens→tokens.input
+    const runs = rawRuns.map((raw) => {
+      const usage = raw.usage as Record<string, number> | undefined
+      const statusRaw = (raw.status as string) ?? ''
+      const status = statusRaw === 'ok' ? 'success' : statusRaw === 'error' ? 'error' : statusRaw
+
+      return {
+        ...raw,
+        jobId: (raw.jobId as string) ?? (raw.cronId as string) ?? (raw.id as string),
+        runId: (raw.runId as string) ?? (raw.sessionId as string) ?? (raw.id as string),
+        status,
+        startedAt: raw.startedAtMs
+          ? new Date(raw.startedAtMs as number).toISOString()
+          : raw.runAtMs
+            ? new Date(raw.runAtMs as number).toISOString()
+            : (raw.startedAt as string),
+        endedAt: raw.endedAtMs
+          ? new Date(raw.endedAtMs as number).toISOString()
+          : raw.ts
+            ? new Date(raw.ts as number).toISOString()
+            : (raw.endedAt as string | undefined),
+        tokens: usage
+          ? { input: usage.input_tokens, output: usage.output_tokens }
+          : (raw.tokens as Record<string, number> | undefined),
+      } as CronRunsResult['runs'][number]
+    })
 
     return { runs }
   }
