@@ -37,7 +37,7 @@ services:
       DEFAULT_MODEL_API_KEY: "${DEFAULT_MODEL_API_KEY:-}"
       DEFAULT_MODEL_BASE_URL: "${DEFAULT_MODEL_BASE_URL:-https://api.anthropic.com}"
       DEFAULT_MODEL_API_TYPE: "${DEFAULT_MODEL_API_TYPE:-anthropic-messages}"
-      TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/data/teamclaw}"
+      TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}"
       DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
       DOCKER_NETWORK: "teamclaw-net"
     extra_hosts:
@@ -57,6 +57,7 @@ services:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
       - ${HOME}/.openclaw:${HOME}/.openclaw
+      - ${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}:${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}
       - /tmp:/tmp:ro
       # Mount for external instance MEDIA images (e.g. OpenClaw skills output).
       # Set EXTERNAL_MEDIA_DIR to the OpenClaw installation's parent directory.

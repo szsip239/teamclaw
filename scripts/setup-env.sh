@@ -89,7 +89,20 @@ else
   warn "Skipping DOCKER_GID (no socket found)"
 fi
 
-# ─── 3. Validate critical keys ──────────────────────────
+# ─── 3. Instance data directory ───────────────────
+info "Configuring instance data directory..."
+
+DEFAULT_DATA_DIR="${HOME}/.teamclaw/instances"
+set_env "TEAMCLAW_DATA_DIR" "$DEFAULT_DATA_DIR" "Instance data storage (host path for Docker volume mounts)"
+
+# Ensure the directory exists
+DATA_DIR_VAL=$(grep "^TEAMCLAW_DATA_DIR=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"')
+if [[ -n "$DATA_DIR_VAL" ]] && [[ ! -d "$DATA_DIR_VAL" ]]; then
+  mkdir -p "$DATA_DIR_VAL"
+  ok "Created data directory: $DATA_DIR_VAL"
+fi
+
+# ─── 4. Validate critical keys ──────────────────────────
 echo ""
 info "Checking critical configuration..."
 
