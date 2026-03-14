@@ -945,6 +945,24 @@ const zhCN = {
   'cron.weekSat': '六',
   'cron.weekSun': '日',
 
+  // ── Profile ─────────────────────────────────────
+  'profile.title': '个人信息',
+  'profile.info': '账户信息',
+  'profile.name': '姓名',
+  'profile.email': '邮箱',
+  'profile.role': '角色',
+  'profile.department': '部门',
+  'profile.changePassword': '修改密码',
+  'profile.currentPassword': '当前密码',
+  'profile.newPassword': '新密码',
+  'profile.confirmPassword': '确认新密码',
+  'profile.passwordMismatch': '两次密码不一致',
+  'profile.passwordChanged': '密码修改成功，请重新登录。',
+  'profile.passwordFailed': '密码修改失败',
+  'profile.currentPasswordWrong': '当前密码不正确',
+  'profile.save': '保存',
+  'profile.noDepartment': '无',
+
   // ── File Panel ────────────────────────────────────
   'chat.filePanel': '文件',
   'filePanel.title': '会话文件',

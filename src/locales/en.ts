@@ -947,6 +947,24 @@ const en: Record<TranslationKey, string> = {
   'cron.weekSat': 'Sat',
   'cron.weekSun': 'Sun',
 
+  // ── Profile ─────────────────────────────────────
+  'profile.title': 'Profile',
+  'profile.info': 'Account Info',
+  'profile.name': 'Name',
+  'profile.email': 'Email',
+  'profile.role': 'Role',
+  'profile.department': 'Department',
+  'profile.changePassword': 'Change Password',
+  'profile.currentPassword': 'Current Password',
+  'profile.newPassword': 'New Password',
+  'profile.confirmPassword': 'Confirm New Password',
+  'profile.passwordMismatch': 'Passwords do not match',
+  'profile.passwordChanged': 'Password changed successfully. Please log in again.',
+  'profile.passwordFailed': 'Failed to change password',
+  'profile.currentPasswordWrong': 'Current password is incorrect',
+  'profile.save': 'Save',
+  'profile.noDepartment': 'None',
+
   // ── File Panel ────────────────────────────────────
   'chat.filePanel': 'Files',
   'filePanel.title': 'Session Files',
