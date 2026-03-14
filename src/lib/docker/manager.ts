@@ -224,6 +224,40 @@ export class DockerManager {
     }
   }
 
+  /**
+   * Check if a remote image has a newer version than the local one.
+   * Uses `docker pull --dry-run` style: pulls manifest only via
+   * `docker manifest inspect` and compares the manifest-list digest
+   * against the local RepoDigests.
+   * Returns true if remote is newer or local doesn't exist.
+   */
+  async isImageOutdated(imageName: string): Promise<boolean> {
+    try {
+      const info = await this.docker.getImage(imageName).inspect()
+      const localDigests: string[] = info.RepoDigests || []
+      if (localDigests.length === 0) return true
+
+      // Get the registry's manifest-list digest via Docker CLI.
+      // `docker buildx imagetools inspect --raw` returns the raw manifest
+      // whose Content-Digest header is the manifest-list digest — the same
+      // digest stored in RepoDigests.
+      const { execSync } = await import('child_process')
+      const raw = execSync(
+        `docker buildx imagetools inspect --raw ${imageName} 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 15000, maxBuffer: 1024 * 1024 },
+      )
+      // Compute sha256 of the raw manifest — this IS the manifest-list digest
+      const { createHash } = await import('crypto')
+      const remoteDigest = 'sha256:' + createHash('sha256').update(raw).digest('hex')
+
+      // localDigests looks like ["alpine/openclaw@sha256:abc123..."]
+      return !localDigests.some((d: string) => d.includes(remoteDigest))
+    } catch {
+      // If check fails (offline, registry error), don't block — assume up to date
+      return false
+    }
+  }
+
   // Sandbox support initialization (Docker-in-Docker)
   /**
    * Install Docker CLI and configure permissions inside a container.

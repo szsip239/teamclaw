@@ -53,6 +53,7 @@ export function InstanceCreateDialog({
   const [apiKey, setApiKey] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [pullLatest, setPullLatest] = useState(false)
   const [memoryLimit, setMemoryLimit] = useState("")
   const [restartPolicy, setRestartPolicy] = useState("unless-stopped")
 
@@ -72,6 +73,7 @@ export function InstanceCreateDialog({
     setApiKey("")
     setBaseUrl("")
     setShowAdvanced(false)
+    setPullLatest(false)
     setMemoryLimit("")
     setRestartPolicy("unless-stopped")
     setGatewayUrl("")
@@ -91,6 +93,7 @@ export function InstanceCreateDialog({
       // Docker-specific payload
       const docker: Record<string, unknown> = {}
       if (imageName) docker.imageName = imageName
+      if (pullLatest) docker.pullLatest = true
       if (memoryLimit) docker.memoryLimit = parseInt(memoryLimit, 10) * 1024 * 1024 // MB → bytes
       if (restartPolicy !== "unless-stopped") docker.restartPolicy = restartPolicy
       if (Object.keys(docker).length > 0) payload.docker = docker
@@ -288,6 +291,22 @@ export function InstanceCreateDialog({
               </button>
               {showAdvanced && (
                 <div className="space-y-3 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label htmlFor="pullLatest" className="text-[12px]">
+                        {t('instance.pullLatest')}
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t('instance.pullLatestHint')}
+                      </p>
+                    </div>
+                    <Switch
+                      id="pullLatest"
+                      checked={pullLatest}
+                      onCheckedChange={setPullLatest}
+                    />
+                  </div>
+                  <Separator />
                   <div className="space-y-2">
                     <Label htmlFor="memoryLimit" className="text-[12px]">
                       {t('instance.memoryLimit')}
