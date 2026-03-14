@@ -58,10 +58,10 @@ COPY --from=builder /app/src/generated/prisma ./src/generated/prisma
 COPY --from=builder /app/scripts/generate-keys.mjs ./scripts/generate-keys.mjs
 
 # Create writable data directories for the nextjs user
-# /app/data/skills — skill file storage (TEAMCLAW_SKILLS_DIR default)
-# /data/teamclaw  — instance data storage (TEAMCLAW_DATA_DIR default)
-RUN mkdir -p /app/data/skills /data/teamclaw && \
-    chown -R nextjs:nodejs /app/data /data/teamclaw
+# /app/data/skills — skill file storage
+# TEAMCLAW_DATA_DIR is bind-mounted from host at runtime (no need to pre-create)
+RUN mkdir -p /app/data/skills && \
+    chown -R nextjs:nodejs /app/data
 
 USER nextjs
 

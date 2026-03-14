@@ -71,6 +71,17 @@ $SED_INPLACE "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=\"$ENCRYPTION_KEY\"|" "$ENV_FIL
 echo -e "${GREEN}  -> JWT RS256 key pair generated${NC}"
 echo -e "${GREEN}  -> AES-256-CBC encryption key generated${NC}"
 
+# ── Step 2b: Configure TEAMCLAW_DATA_DIR ───────────────────
+TEAMCLAW_DATA_DIR_VAL=$(grep '^TEAMCLAW_DATA_DIR=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"')
+if [[ -z "$TEAMCLAW_DATA_DIR_VAL" ]]; then
+  DEFAULT_DATA_DIR="${HOME}/.teamclaw/instances"
+  $SED_INPLACE "s|TEAMCLAW_DATA_DIR=.*|TEAMCLAW_DATA_DIR=\"${DEFAULT_DATA_DIR}\"|" "$ENV_FILE"
+  mkdir -p "$DEFAULT_DATA_DIR"
+  echo -e "${GREEN}  -> Instance data dir: ${DEFAULT_DATA_DIR}${NC}"
+else
+  echo -e "${GREEN}  -> Instance data dir already set: ${TEAMCLAW_DATA_DIR_VAL}${NC}"
+fi
+
 # ── Step 3: Nginx HTTPS Configuration (optional) ─────────
 echo ""
 echo -e "${CYAN}[3/5] Nginx HTTPS Configuration${NC}"
