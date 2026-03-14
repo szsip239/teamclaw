@@ -29,6 +29,17 @@ export const resetPasswordSchema = z.object({
     .regex(/[0-9]/, '密码需包含至少一个数字'),
 })
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z
+    .string()
+    .min(8, '密码至少8个字符')
+    .regex(/[A-Z]/, '密码需包含至少一个大写字母')
+    .regex(/[a-z]/, '密码需包含至少一个小写字母')
+    .regex(/[0-9]/, '密码需包含至少一个数字'),
+})
+
 export type CreateUserInput = z.infer<typeof createUserSchema>
 export type UpdateUserInput = z.infer<typeof updateUserSchema>
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>

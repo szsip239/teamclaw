@@ -202,7 +202,7 @@ export function AppSidebar() {
                   </p>
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => router.push("/profile")}>
                   <UserCircle className="mr-2 size-4" />
                   {t('nav.profile')}
                 </DropdownMenuItem>
