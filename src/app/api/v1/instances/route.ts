@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import path from 'path'
+import fs from 'fs/promises'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { createInstanceSchema } from '@/lib/validations/instance'
@@ -182,6 +183,7 @@ async function createDockerInstance(
     description?: string
     docker?: {
       imageName?: string
+      pullLatest?: boolean
       env?: Record<string, string>
       restartPolicy?: 'no' | 'always' | 'unless-stopped' | 'on-failure'
       memoryLimit?: number
@@ -224,22 +226,42 @@ async function createDockerInstance(
     process.env.DEFAULT_OPENCLAW_IMAGE ||
     'alpine/openclaw:latest'
 
-  // 5. Pull image if not present
+  // 5. Pull image if not present, or if user requested latest
   const exists = await dockerManager.imageExists(imageName)
+  const pullLatest = body.docker?.pullLatest ?? false
   if (!exists) {
     try {
       await dockerManager.pullImage(imageName)
     } catch (err) {
       await cleanupInstanceFiles(name).catch(() => {})
       return NextResponse.json(
-        { error: `Failed to pull image:${(err as Error).message}` },
+        { error: `Failed to pull image: ${(err as Error).message}` },
         { status: 500 },
       )
+    }
+  } else if (pullLatest) {
+    try {
+      await dockerManager.pullImage(imageName)
+    } catch {
+      // pull failed but local image exists — continue with cached version
     }
   }
 
   // 6. Find next available host port
   const hostPort = await findNextAvailablePort()
+
+  // 6b. Patch allowedOrigins with hostPort so the browser Control UI can connect
+  try {
+    const configPath = path.join(dataDir, 'openclaw.json')
+    const configRaw = await fs.readFile(configPath, 'utf-8')
+    const configObj = JSON.parse(configRaw)
+    const origins: string[] = configObj.gateway?.controlUi?.allowedOrigins || []
+    origins.push(`http://127.0.0.1:${hostPort}`, `http://localhost:${hostPort}`)
+    configObj.gateway.controlUi.allowedOrigins = origins
+    await fs.writeFile(configPath, JSON.stringify(configObj, null, 2), 'utf-8')
+  } catch {
+    // non-fatal — Control UI may prompt origin error but gateway still works
+  }
 
   // 7. Create container
   const containerName = `teamclaw-${name}`

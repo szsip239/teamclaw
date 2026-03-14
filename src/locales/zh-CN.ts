@@ -154,6 +154,8 @@ const zhCN = {
   'instance.customApiKey': '自定义 API Key',
   'instance.useGlobalKey': '将使用系统全局 API Key（如已配置）',
   'instance.advancedOptions': '高级选项',
+  'instance.pullLatest': '拉取最新镜像',
+  'instance.pullLatestHint': '从 Docker Hub 拉取最新版本，否则使用本地缓存',
   'instance.memoryLimit': '内存限制 (MB)',
   'instance.restartPolicy': '重启策略',
   'instance.gatewayToken': 'Gateway Token',

@@ -156,6 +156,8 @@ const en: Record<TranslationKey, string> = {
   'instance.customApiKey': 'Custom API Key',
   'instance.useGlobalKey': 'Will use the system global API key (if configured)',
   'instance.advancedOptions': 'Advanced Options',
+  'instance.pullLatest': 'Pull Latest Image',
+  'instance.pullLatestHint': 'Pull the latest version from Docker Hub, otherwise use local cache',
   'instance.memoryLimit': 'Memory Limit (MB)',
   'instance.restartPolicy': 'Restart Policy',
   'instance.gatewayToken': 'Gateway Token',

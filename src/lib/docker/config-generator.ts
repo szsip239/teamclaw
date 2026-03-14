@@ -61,6 +61,9 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
       controlUi: {
         allowInsecureAuth: true, // Docker: backend connects without browser origin header
         dangerouslyDisableDeviceAuth: true, // Backend client: no device key-pair, use token auth only
+        allowedOrigins: [
+          `http://teamclaw-${config.instanceName}:${port}`,
+        ],
       },
     },
     agents: {
