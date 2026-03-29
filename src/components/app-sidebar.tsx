@@ -15,6 +15,7 @@ import {
   Building2,
   KeyRound,
   ScrollText,
+  Settings,
   LogOut,
   UserCircle,
   ChevronsUpDown,
@@ -82,6 +83,7 @@ export function AppSidebar() {
       items: [
         { title: t('nav.resources'), icon: KeyRound, href: '/resources' },
         { title: t('nav.logs'), icon: ScrollText, href: '/logs' },
+        { title: t('page.settings'), icon: Settings, href: '/settings' },
       ],
     },
   ]
