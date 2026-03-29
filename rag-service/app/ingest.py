@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -136,7 +137,9 @@ async def start_ingestion(
         raw_ocr_dir = os.path.join(output_dir, req.doc_id, "raw_pdf_ocr")
 
         _log(job_id, f"Starting OCR ({page_count} pages, model={creds.ocr_model})...")
-        _run_ocr_with_progress(job_id, req.file_path, raw_ocr_dir, creds, page_count)
+        await asyncio.to_thread(
+            _run_ocr_with_progress, job_id, req.file_path, raw_ocr_dir, creds, page_count
+        )
         _log(job_id, "OCR complete")
 
         # --- Step 2: Extract + Index (uses existing OCR output) ---
@@ -145,7 +148,8 @@ async def start_ingestion(
 
         from app.step0_document_ingestion import ingest_document
 
-        summary = ingest_document(
+        summary = await asyncio.to_thread(
+            ingest_document,
             input_path=req.file_path,
             creds=creds,
             kb_id=req.kb_id,
