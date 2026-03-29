@@ -60,7 +60,7 @@ COPY --from=builder /app/scripts/generate-keys.mjs ./scripts/generate-keys.mjs
 # Create writable data directories for the nextjs user
 # /app/data/skills — skill file storage
 # TEAMCLAW_DATA_DIR is bind-mounted from host at runtime (no need to pre-create)
-RUN mkdir -p /app/data/skills && \
+RUN mkdir -p /app/data/skills /app/data/knowledge-bases && \
     chown -R nextjs:nodejs /app/data
 
 USER nextjs
