@@ -132,17 +132,41 @@ async def start_ingestion(
         _log(job_id, f"Document has {page_count} pages")
         ingestion_jobs[job_id].progress = 15.0
 
-        # --- Step 1: OCR with progress tracking ---
+        # --- Run full pipeline (OCR + Extract + Index) ---
         output_dir = os.path.join(INGESTION_OUTPUT_ROOT, req.kb_id)
-        raw_ocr_dir = os.path.join(output_dir, req.doc_id, "raw_pdf_ocr")
+        work_dir = os.path.join(output_dir, req.doc_id)
+        manifest_path = os.path.join(work_dir, "manifest.json")
+        raw_ocr_dir = os.path.join(work_dir, "raw_pdf_ocr")
 
-        _log(job_id, f"Starting OCR ({page_count} pages, model={creds.ocr_model})...")
-        await asyncio.to_thread(
-            _run_ocr_with_progress, job_id, req.file_path, raw_ocr_dir, creds, page_count
-        )
-        _log(job_id, "OCR complete")
+        # Auto-reuse: if another doc_id in the same KB has a completed manifest
+        # for the same PDF filename, symlink to reuse its OCR output.
+        if not os.path.exists(manifest_path) and os.path.isdir(output_dir):
+            pdf_stem = Path(req.file_path).stem
+            for sibling in os.listdir(output_dir):
+                if sibling == req.doc_id:
+                    continue
+                sibling_manifest = os.path.join(output_dir, sibling, "manifest.json")
+                sibling_ocr = os.path.join(output_dir, sibling, "raw_pdf_ocr", pdf_stem)
+                if os.path.exists(sibling_manifest) and os.path.isdir(sibling_ocr):
+                    _log(job_id, f"Reusing OCR from previous doc {sibling}")
+                    if os.path.exists(work_dir):
+                        import shutil
+                        shutil.rmtree(work_dir, ignore_errors=True)
+                    os.symlink(os.path.join(output_dir, sibling), work_dir)
+                    break
 
-        # --- Step 2: Extract + Index (uses existing OCR output) ---
+        skip_ocr = os.path.exists(manifest_path)
+
+        if skip_ocr:
+            _log(job_id, "Found existing OCR output, skipping OCR (indexing only)")
+            ingestion_jobs[job_id].progress = 75.0
+        else:
+            _log(job_id, f"Starting OCR ({page_count} pages, model={creds.ocr_model})...")
+            await asyncio.to_thread(
+                _run_ocr_with_progress, job_id, req.file_path, raw_ocr_dir, creds, page_count
+            )
+            _log(job_id, "OCR complete")
+
         ingestion_jobs[job_id].progress = 78.0
         _log(job_id, "Extracting text/images/tables and indexing...")
 
@@ -155,7 +179,7 @@ async def start_ingestion(
             kb_id=req.kb_id,
             doc_id=req.doc_id,
             output_dir=output_dir,
-            skip_ocr=True,  # OCR already done above
+            skip_ocr=True,  # OCR already done above (or skipped)
         )
 
         text_count = summary.get("text_block_count", 0)
