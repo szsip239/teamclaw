@@ -41,7 +41,7 @@ from app.table_summary import summarize_table_blocks
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = project_root_from_file(__file__)
-BATCH_OCR_SCRIPT = os.path.abspath(os.path.join(PROJECT_ROOT, "..", "scripts", "batch_ocr.py"))
+BATCH_OCR_SCRIPT = os.path.abspath(os.path.join(os.path.dirname(__file__), "batch_ocr.py"))
 
 
 def relpath_from_project(path: str) -> str:
