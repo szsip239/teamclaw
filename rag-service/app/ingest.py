@@ -3,7 +3,7 @@ import os
 import traceback
 from datetime import datetime
 
-from app.config import RequestCredentials
+from app.config import INGESTION_OUTPUT_ROOT, RequestCredentials
 from app.models import IngestRequest, JobStatus
 from app.vector_store_management import delete_kb_vectors
 
@@ -25,7 +25,7 @@ def _log(job_id: str, message: str):
 async def start_ingestion(
     job_id: str, req: IngestRequest, creds: RequestCredentials
 ):
-    """Run ingestion in background. Updates ingestion_jobs dict."""
+    """Run full ingestion pipeline in background. Updates ingestion_jobs dict."""
     ingestion_jobs[job_id] = JobStatus(
         job_id=job_id,
         status="processing",
@@ -52,85 +52,36 @@ async def start_ingestion(
 
         ingestion_jobs[job_id].progress = 10.0
 
-        # --- Step 1: PDF parsing with PyMuPDF ---
-        _log(job_id, "Parsing PDF...")
-        import fitz  # PyMuPDF
-
+        # --- Count pages for progress reporting ---
+        import fitz
         doc = fitz.open(req.file_path)
         page_count = len(doc)
+        doc.close()
         ingestion_jobs[job_id].page_count = page_count
         _log(job_id, f"Document has {page_count} pages")
-        ingestion_jobs[job_id].progress = 20.0
+        ingestion_jobs[job_id].progress = 15.0
 
-        # Extract text from each page
-        pages_text: list[str] = []
-        for i, page in enumerate(doc):
-            text = page.get_text()
-            pages_text.append(text)
-            if (i + 1) % 10 == 0:
-                _log(job_id, f"Extracted text from page {i + 1}/{page_count}")
-                ingestion_jobs[job_id].progress = 20.0 + (
-                    30.0 * (i + 1) / page_count
-                )
+        # --- Run full ingestion pipeline (OCR → extract → index) ---
+        _log(job_id, "Running full ingestion pipeline (OCR + text/image/table indexing)...")
 
-        doc.close()
-        _log(job_id, "Text extraction complete")
-        ingestion_jobs[job_id].progress = 50.0
+        output_dir = os.path.join(INGESTION_OUTPUT_ROOT, req.kb_id)
+        os.makedirs(output_dir, exist_ok=True)
 
-        # --- Step 2: Create text chunks ---
-        _log(job_id, "Chunking text...")
-        from llama_index.core.node_parser import SentenceSplitter
-        from llama_index.core.schema import Document
+        from app.step0_document_ingestion import ingest_document
 
-        full_text = "\n\n".join(pages_text)
-        if not full_text.strip():
-            _log(job_id, "Warning: No text extracted from PDF")
-
-        splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
-        documents = [
-            Document(
-                text=full_text,
-                metadata={
-                    "kb_id": req.kb_id,
-                    "doc_id": req.doc_id,
-                    "file_name": os.path.basename(req.file_path),
-                },
-            )
-        ]
-        nodes = splitter.get_nodes_from_documents(documents)
-
-        # Inject kb_id and doc_id into every node's metadata
-        for node in nodes:
-            node.metadata["kb_id"] = req.kb_id
-            node.metadata["doc_id"] = req.doc_id
-
-        _log(job_id, f"Created {len(nodes)} text chunks")
-        ingestion_jobs[job_id].progress = 60.0
-
-        # --- Step 3: Create embeddings and store in PGVectorStore ---
-        _log(job_id, "Creating embeddings and storing vectors...")
-        from llama_index.core.ingestion import IngestionPipeline
-
-        from app.model_provider_utils import create_embedding_model
-        from app.vector_store_management import create_pgvector_store
-        from app.config import PGVECTOR_TEXT_TABLE
-
-        embed_model = create_embedding_model(
-            model_name=creds.embedding_model,
-            api_key=creds.embedding_api_key,
-            api_base=creds.embedding_base_url or None,
+        summary = ingest_document(
+            input_path=req.file_path,
+            creds=creds,
+            kb_id=req.kb_id,
+            doc_id=req.doc_id,
+            output_dir=output_dir,
         )
 
-        vector_store = create_pgvector_store(PGVECTOR_TEXT_TABLE)
+        text_count = summary.get("text_block_count", 0)
+        image_count = summary.get("image_block_count", 0)
+        table_count = summary.get("table_block_count", 0)
 
-        pipeline = IngestionPipeline(
-            transformations=[embed_model],
-            vector_store=vector_store,
-        )
-
-        await pipeline.arun(nodes=nodes, show_progress=False)
-
-        _log(job_id, f"Stored {len(nodes)} vectors in pgvector")
+        _log(job_id, f"Indexed: {text_count} text blocks, {image_count} images, {table_count} tables")
         ingestion_jobs[job_id].progress = 100.0
         ingestion_jobs[job_id].status = "completed"
         _log(job_id, "Ingestion complete!")
