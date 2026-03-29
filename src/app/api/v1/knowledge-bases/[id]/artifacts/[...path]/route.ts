@@ -24,9 +24,9 @@ export const GET = withAuth(
     }
 
     try {
-      // Proxy to RAG service: /artifacts/{kbId}/{docId}/images/...
+      // Proxy to RAG service: /artifacts/{path already contains kbId/docId/...}
       const artifactPath = pathSegments.map(encodeURIComponent).join('/')
-      const ragUrl = `${RAG_SERVICE_URL}/artifacts/${encodeURIComponent(kbId)}/${artifactPath}`
+      const ragUrl = `${RAG_SERVICE_URL}/artifacts/${artifactPath}`
 
       const res = await fetch(ragUrl)
       if (!res.ok) {
