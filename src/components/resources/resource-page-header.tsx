@@ -1,10 +1,10 @@
-"use client"
+'use client'
 
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Search } from "lucide-react"
-import { useT } from "@/stores/language-store"
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Plus, Search } from 'lucide-react'
+import { useT } from '@/stores/language-store'
 
 interface ResourcePageHeaderProps {
   canCreate: boolean
@@ -14,6 +14,7 @@ interface ResourcePageHeaderProps {
   search: string
   onSearchChange: (value: string) => void
   total?: number
+  hideSearch?: boolean
 }
 
 export function ResourcePageHeader({
@@ -24,6 +25,7 @@ export function ResourcePageHeader({
   search,
   onSearchChange,
   total,
+  hideSearch,
 }: ResourcePageHeaderProps) {
   const t = useT()
   return (
@@ -54,18 +56,21 @@ export function ResourcePageHeader({
             <TabsTrigger value="all">{t('resource.tabAll')}</TabsTrigger>
             <TabsTrigger value="MODEL">{t('resource.tabModel')}</TabsTrigger>
             <TabsTrigger value="TOOL">{t('resource.tabTool')}</TabsTrigger>
+            <TabsTrigger value="RAG">{t('settings.ragTab')}</TabsTrigger>
           </TabsList>
         </Tabs>
 
-        <div className="relative ml-auto w-64">
-          <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={t('resource.searchResources')}
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-8"
-          />
-        </div>
+        {!hideSearch && (
+          <div className="relative ml-auto w-64">
+            <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={t('resource.searchResources')}
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+        )}
       </div>
     </div>
   )
