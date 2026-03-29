@@ -1,17 +1,17 @@
-"use client"
+'use client'
 
-import { useState, useRef, useCallback } from "react"
-import { Send, StopCircle, MessageCircle, Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ChatTextBlock } from "@/components/chat/chat-text-block"
-import { KbQaSources } from "./kb-qa-sources"
-import { KbAnswerAssets } from "./kb-answer-assets"
-import { KbImageLightbox } from "./kb-image-lightbox"
-import { streamKbQuery } from "@/lib/knowledge-base/query-stream"
-import { useT } from "@/stores/language-store"
-import type { ScoredNode } from "@/types/knowledge-base"
+import { useState, useRef, useCallback } from 'react'
+import { Send, StopCircle, MessageCircle, Sparkles } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ChatTextBlock } from '@/components/chat/chat-text-block'
+import { KbQaSources } from './kb-qa-sources'
+import { KbAnswerAssets } from './kb-answer-assets'
+import { KbImageLightbox } from './kb-image-lightbox'
+import { streamKbQuery } from '@/lib/knowledge-base/query-stream'
+import { useT } from '@/stores/language-store'
+import type { ScoredNode } from '@/types/knowledge-base'
 
 interface KbQaTabProps {
   kbId: string
@@ -20,49 +20,65 @@ interface KbQaTabProps {
 
 export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
   const t = useT()
-  const [question, setQuestion] = useState("")
-  const [askedQuestion, setAskedQuestion] = useState("")
+  const [question, setQuestion] = useState('')
+  const [askedQuestion, setAskedQuestion] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
-  const [answer, setAnswer] = useState("")
-  const [reasoning, setReasoning] = useState("")
+  const [answer, setAnswer] = useState('')
+  const [reasoning, setReasoning] = useState('')
   const [answerAssets, setAnswerAssets] = useState<ScoredNode[]>([])
   const [answerSources, setAnswerSources] = useState<ScoredNode[]>([])
+  const [retrievalGroups, setRetrievalGroups] = useState<
+    | {
+        text_results: ScoredNode[]
+        image_results: ScoredNode[]
+        table_results: ScoredNode[]
+      }
+    | undefined
+  >(undefined)
   const [generateAnswer, setGenerateAnswer] = useState(true)
   const [lightboxImage, setLightboxImage] = useState<string | null>(null)
-  const [lightboxTitle, setLightboxTitle] = useState("")
+  const [lightboxTitle, setLightboxTitle] = useState('')
   const abortRef = useRef<AbortController | null>(null)
 
-  const hasResult = askedQuestion !== ""
+  const hasResult = askedQuestion !== ''
 
   const handleSubmit = useCallback(async () => {
     const q = question.trim()
     if (!q || isStreaming) return
 
     setAskedQuestion(q)
-    setAnswer("")
-    setReasoning("")
+    setAnswer('')
+    setReasoning('')
     setAnswerAssets([])
     setAnswerSources([])
+    setRetrievalGroups(undefined)
     setIsStreaming(true)
-    setQuestion("")
+    setQuestion('')
 
     const controller = new AbortController()
     abortRef.current = controller
 
     try {
       for await (const event of streamKbQuery(kbId, q, generateAnswer, 5, controller.signal)) {
-        if (event.type === "retrieval") {
+        if (event.type === 'retrieval') {
           const assets = (event.data.answer_assets as ScoredNode[]) ?? []
           const sources = (event.data.answer_sources as ScoredNode[]) ?? []
           setAnswerAssets(assets)
           setAnswerSources(sources)
-        } else if (event.type === "chunk") {
-          setAnswer((prev) => prev + (event.data.text as string ?? ""))
-        } else if (event.type === "reasoning") {
-          setReasoning((prev) => prev + (event.data.delta as string ?? ""))
-        } else if (event.type === "error") {
+          // Preserve grouped retrieval results for evidence panel
+          const allSources = (event.data.sources as ScoredNode[]) ?? []
+          setRetrievalGroups({
+            text_results: allSources.filter((s) => s.kind === 'text'),
+            image_results: allSources.filter((s) => s.kind === 'image'),
+            table_results: allSources.filter((s) => s.kind === 'table'),
+          })
+        } else if (event.type === 'chunk') {
+          setAnswer((prev) => prev + ((event.data.text as string) ?? ''))
+        } else if (event.type === 'reasoning') {
+          setReasoning((prev) => prev + ((event.data.delta as string) ?? ''))
+        } else if (event.type === 'error') {
           setAnswer(`Error: ${event.data.message as string}`)
-        } else if (event.type === "done") {
+        } else if (event.type === 'done') {
           // Update with final assets/sources from done event
           const doneAssets = (event.data.answer_assets as ScoredNode[]) ?? []
           const doneSources = (event.data.answer_sources as ScoredNode[]) ?? []
@@ -72,7 +88,7 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
         }
       }
     } catch (err) {
-      if ((err as Error).name !== "AbortError") {
+      if ((err as Error).name !== 'AbortError') {
         setAnswer(`Error: ${(err as Error).message}`)
       }
     } finally {
@@ -86,7 +102,7 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
@@ -108,9 +124,7 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
               <MessageCircle className="size-6 text-primary/60" />
             </div>
             <h3 className="mt-4 text-sm font-semibold">{t('kb.qaWelcome')}</h3>
-            <p className="mt-1 text-[12px] text-muted-foreground max-w-[280px]">
-              {kbName}
-            </p>
+            <p className="mt-1 text-[12px] text-muted-foreground max-w-[280px]">{kbName}</p>
           </div>
         ) : (
           /* Q&A display */
@@ -149,18 +163,15 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
 
               {/* Answer Assets (images/tables from retrieval) */}
               {!isStreaming && answerAssets.length > 0 && (
-                <KbAnswerAssets
-                  kbId={kbId}
-                  assets={answerAssets}
-                  onImageClick={openLightbox}
-                />
+                <KbAnswerAssets kbId={kbId} assets={answerAssets} onImageClick={openLightbox} />
               )}
 
               {/* Sources (collapsible, with rich rendering) */}
-              {!isStreaming && answerSources.length > 0 && (
+              {!isStreaming && (answerSources.length > 0 || retrievalGroups) && (
                 <KbQaSources
                   kbId={kbId}
-                  sources={answerSources}
+                  answerSources={answerSources}
+                  retrievalGroups={retrievalGroups}
                   onImageClick={openLightbox}
                 />
               )}
@@ -189,12 +200,7 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
             disabled={isStreaming}
           />
           {isStreaming ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleAbort}
-              className="shrink-0"
-            >
+            <Button size="sm" variant="outline" onClick={handleAbort} className="shrink-0">
               <StopCircle className="size-4" />
             </Button>
           ) : (
@@ -214,7 +220,10 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
             checked={generateAnswer}
             onCheckedChange={(checked) => setGenerateAnswer(!!checked)}
           />
-          <label htmlFor="generateAnswer" className="text-[12px] text-muted-foreground cursor-pointer">
+          <label
+            htmlFor="generateAnswer"
+            className="text-[12px] text-muted-foreground cursor-pointer"
+          >
             {t('kb.qaGenerateAnswer')}
           </label>
         </div>
