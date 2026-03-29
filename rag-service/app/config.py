@@ -78,7 +78,7 @@ INGESTION_OUTPUT_ROOT: str = os.environ.get(
 )
 
 # PGVector table names (under "rag" schema or public)
-PGVECTOR_SCHEMA: str = os.environ.get("PGVECTOR_SCHEMA", "public")
+PGVECTOR_SCHEMA: str = os.environ.get("PGVECTOR_SCHEMA", "rag")
 PGVECTOR_TEXT_TABLE: str = "text_chunks"
 PGVECTOR_IMAGE_TABLE: str = "image_descriptions"
 PGVECTOR_TABLE_TABLE: str = "table_blocks"
