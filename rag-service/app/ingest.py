@@ -2,14 +2,14 @@ import logging
 import os
 import traceback
 from datetime import datetime
-from urllib.parse import urlparse
 
-from app.config import DATABASE_URL, RagCredentials
+from app.config import RequestCredentials
 from app.models import IngestRequest, JobStatus
+from app.vector_store_management import delete_kb_vectors
 
 logger = logging.getLogger(__name__)
 
-# In-memory job tracking (volatile — TeamClaw handles timeout detection)
+# In-memory job tracking (volatile -- TeamClaw handles timeout detection)
 ingestion_jobs: dict[str, JobStatus] = {}
 
 
@@ -22,20 +22,8 @@ def _log(job_id: str, message: str):
     logger.info("job=%s %s", job_id[:8], message)
 
 
-def _parse_database_url() -> dict:
-    """Parse DATABASE_URL into PGVectorStore-compatible params."""
-    parsed = urlparse(DATABASE_URL)
-    return {
-        "database": parsed.path.lstrip("/").split("?")[0],
-        "host": parsed.hostname or "localhost",
-        "port": str(parsed.port or 5432),
-        "user": parsed.username or "teamclaw",
-        "password": parsed.password or "",
-    }
-
-
 async def start_ingestion(
-    job_id: str, req: IngestRequest, creds: RagCredentials
+    job_id: str, req: IngestRequest, creds: RequestCredentials
 ):
     """Run ingestion in background. Updates ingestion_jobs dict."""
     ingestion_jobs[job_id] = JobStatus(
@@ -52,7 +40,16 @@ async def start_ingestion(
         if not os.path.exists(req.file_path):
             raise FileNotFoundError(f"File not found: {req.file_path}")
 
-        _log(job_id, f"Using OCR model: {req.ocr_model}")
+        _log(job_id, f"Using OCR model: {creds.ocr_model}")
+        ingestion_jobs[job_id].progress = 5.0
+
+        # --- Step 0: Clean old vectors for this doc ---
+        try:
+            deleted = await delete_kb_vectors(kb_id=req.kb_id, doc_id=req.doc_id)
+            _log(job_id, f"Cleaned {deleted} old vectors for doc_id={req.doc_id}")
+        except Exception as exc:
+            _log(job_id, f"Old vector cleanup skipped: {exc}")
+
         ingestion_jobs[job_id].progress = 10.0
 
         # --- Step 1: PDF parsing with PyMuPDF ---
@@ -113,22 +110,18 @@ async def start_ingestion(
         # --- Step 3: Create embeddings and store in PGVectorStore ---
         _log(job_id, "Creating embeddings and storing vectors...")
         from llama_index.core.ingestion import IngestionPipeline
-        from llama_index.embeddings.openai import OpenAIEmbedding
-        from llama_index.vector_stores.postgres import PGVectorStore
 
-        embed_model = OpenAIEmbedding(
-            api_key=creds.embedding_api_key,
-            api_base=creds.embedding_base_url,
+        from app.model_provider_utils import create_embedding_model
+        from app.vector_store_management import create_pgvector_store
+        from app.config import PGVECTOR_TEXT_TABLE
+
+        embed_model = create_embedding_model(
             model_name=creds.embedding_model,
+            api_key=creds.embedding_api_key,
+            api_base=creds.embedding_base_url or None,
         )
 
-        db_params = _parse_database_url()
-        vector_store = PGVectorStore.from_params(
-            **db_params,
-            table_name="data_text_chunks",
-            schema_name="rag",
-            embed_dim=1024,  # Typical for text-embedding-v3
-        )
+        vector_store = create_pgvector_store(PGVECTOR_TEXT_TABLE)
 
         pipeline = IngestionPipeline(
             transformations=[embed_model],
