@@ -25,7 +25,8 @@ function splitRow(line: string): string[] {
 function normalizeAssetSrc(src: string, kbId: string, docId: string): string {
   const value = (src || '').trim()
   if (!value) return ''
-  if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/')) return value
+  if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/'))
+    return value
   if (value.startsWith('images/') && docId && kbId) {
     return `/api/v1/knowledge-bases/${kbId}/artifacts/${docId}/${value}`
   }
@@ -41,24 +42,32 @@ function renderCell(cell: string, kbId: string, docId: string): string {
     return `<img class="inline max-h-16" src="${escapeHtml(normalizedSrc)}" alt="${escapeHtml(alt || 'image')}" />`
   })
 
-  // Escape remaining HTML but preserve our img tags
-  const imgPlaceholders: string[] = []
+  // Preserve safe HTML tags (img, strong, em, b, i, br, code) before escaping
+  const placeholders: string[] = []
+  const SAFE_TAG_RE = /<\/?(strong|em|b|i|br|code|sub|sup)\b[^>]*>/gi
+  text = text.replace(SAFE_TAG_RE, (match) => {
+    placeholders.push(match)
+    return `__TAG_${placeholders.length - 1}__`
+  })
   text = text.replace(/<img [^>]+>/g, (match) => {
-    imgPlaceholders.push(match)
-    return `__IMG_${imgPlaceholders.length - 1}__`
+    placeholders.push(match)
+    return `__TAG_${placeholders.length - 1}__`
   })
 
   text = escapeHtml(text).replace(/\n/g, '<br>')
 
-  imgPlaceholders.forEach((img, i) => {
-    text = text.replace(`__IMG_${i}__`, img)
+  placeholders.forEach((tag, i) => {
+    text = text.replace(`__TAG_${i}__`, tag)
   })
 
   return text
 }
 
 export function markdownTableToHtml(markdown: string, kbId = '', docId = ''): string {
-  const lines = markdown.trim().split('\n').filter((l) => l.trim())
+  const lines = markdown
+    .trim()
+    .split('\n')
+    .filter((l) => l.trim())
   if (lines.length < 2) return `<pre>${escapeHtml(markdown)}</pre>`
 
   // Check if line 2 is the alignment row (---|---|---)
@@ -68,15 +77,15 @@ export function markdownTableToHtml(markdown: string, kbId = '', docId = ''): st
   const headerCells = splitRow(lines[0])
   const bodyRows = lines.slice(2) // skip header + align row
 
-  const headHtml = headerCells
-    .map((cell) => `<th>${renderCell(cell, kbId, docId)}</th>`)
-    .join('')
+  const headHtml = headerCells.map((cell) => `<th>${renderCell(cell, kbId, docId)}</th>`).join('')
 
   const bodyHtml = bodyRows
     .filter((line) => line.includes('|'))
     .map((line) => {
       const cells = splitRow(line)
-      return '<tr>' + cells.map((cell) => `<td>${renderCell(cell, kbId, docId)}</td>`).join('') + '</tr>'
+      return (
+        '<tr>' + cells.map((cell) => `<td>${renderCell(cell, kbId, docId)}</td>`).join('') + '</tr>'
+      )
     })
     .join('')
 
