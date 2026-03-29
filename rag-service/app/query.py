@@ -29,6 +29,12 @@ def _serialize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
 
 
 def _make_backend(creds: RequestCredentials, kb_id: str) -> QueryBackend:
+    # DashScope SDK may need DASHSCOPE_API_KEY env var for authentication
+    import os
+    if creds.embedding_api_key and not os.environ.get("DASHSCOPE_API_KEY"):
+        os.environ["DASHSCOPE_API_KEY"] = creds.embedding_api_key
+    if creds.llm_api_key and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = creds.llm_api_key
     return QueryBackend(creds=creds, kb_id=kb_id)
 
 
