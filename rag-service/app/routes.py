@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.auth import verify_service_secret
-from app.config import get_credentials_from_headers
+from app.config import (
+    get_credentials_from_headers,
+    INGEST_DEFAULT_OCR_MODEL,
+    INGEST_DEFAULT_WORKERS,
+    INGEST_MAX_WORKERS,
+)
 from app.delete import delete_vectors
 from app.ingest import get_job_status, start_ingestion
 from app.models import (
@@ -73,3 +78,14 @@ async def default_queries(kb_id: str, request: Request):
     creds = get_credentials_from_headers(dict(request.headers))
     queries = await get_default_queries(kb_id, creds)
     return DefaultQueriesResponse(queries=queries)
+
+
+@router.get("/ingest/options")
+async def ingest_options():
+    """Return available OCR model choices and worker config."""
+    return {
+        "ocr_models": [INGEST_DEFAULT_OCR_MODEL],
+        "default_ocr_model": INGEST_DEFAULT_OCR_MODEL,
+        "default_workers": INGEST_DEFAULT_WORKERS,
+        "max_workers": INGEST_MAX_WORKERS,
+    }

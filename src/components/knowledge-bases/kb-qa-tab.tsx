@@ -7,9 +7,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ChatTextBlock } from "@/components/chat/chat-text-block"
 import { KbQaSources } from "./kb-qa-sources"
+import { KbAnswerAssets } from "./kb-answer-assets"
+import { KbImageLightbox } from "./kb-image-lightbox"
 import { streamKbQuery } from "@/lib/knowledge-base/query-stream"
 import { useT } from "@/stores/language-store"
-import type { RetrievalSource } from "@/types/knowledge-base"
+import type { ScoredNode } from "@/types/knowledge-base"
 
 interface KbQaTabProps {
   kbId: string
@@ -23,8 +25,11 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [answer, setAnswer] = useState("")
   const [reasoning, setReasoning] = useState("")
-  const [sources, setSources] = useState<RetrievalSource[]>([])
+  const [answerAssets, setAnswerAssets] = useState<ScoredNode[]>([])
+  const [answerSources, setAnswerSources] = useState<ScoredNode[]>([])
   const [generateAnswer, setGenerateAnswer] = useState(true)
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null)
+  const [lightboxTitle, setLightboxTitle] = useState("")
   const abortRef = useRef<AbortController | null>(null)
 
   const hasResult = askedQuestion !== ""
@@ -36,7 +41,8 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
     setAskedQuestion(q)
     setAnswer("")
     setReasoning("")
-    setSources([])
+    setAnswerAssets([])
+    setAnswerSources([])
     setIsStreaming(true)
     setQuestion("")
 
@@ -46,15 +52,22 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
     try {
       for await (const event of streamKbQuery(kbId, q, generateAnswer, 5, controller.signal)) {
         if (event.type === "retrieval") {
-          const retrievedSources = (event.data.sources as RetrievalSource[]) ?? []
-          setSources(retrievedSources)
+          const assets = (event.data.answer_assets as ScoredNode[]) ?? []
+          const sources = (event.data.answer_sources as ScoredNode[]) ?? []
+          setAnswerAssets(assets)
+          setAnswerSources(sources)
         } else if (event.type === "chunk") {
           setAnswer((prev) => prev + (event.data.text as string ?? ""))
         } else if (event.type === "reasoning") {
-          setReasoning((prev) => prev + (event.data.text as string ?? ""))
+          setReasoning((prev) => prev + (event.data.delta as string ?? ""))
         } else if (event.type === "error") {
           setAnswer(`Error: ${event.data.message as string}`)
         } else if (event.type === "done") {
+          // Update with final assets/sources from done event
+          const doneAssets = (event.data.answer_assets as ScoredNode[]) ?? []
+          const doneSources = (event.data.answer_sources as ScoredNode[]) ?? []
+          if (doneAssets.length > 0) setAnswerAssets(doneAssets)
+          if (doneSources.length > 0) setAnswerSources(doneSources)
           break
         }
       }
@@ -77,6 +90,11 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
       e.preventDefault()
       handleSubmit()
     }
+  }
+
+  function openLightbox(imageUrl: string, title: string) {
+    setLightboxImage(imageUrl)
+    setLightboxTitle(title)
   }
 
   return (
@@ -129,13 +147,26 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
                 </div>
               )}
 
-              {/* Sources */}
-              {!isStreaming && sources.length > 0 && (
-                <KbQaSources sources={sources} />
+              {/* Answer Assets (images/tables from retrieval) */}
+              {!isStreaming && answerAssets.length > 0 && (
+                <KbAnswerAssets
+                  kbId={kbId}
+                  assets={answerAssets}
+                  onImageClick={openLightbox}
+                />
+              )}
+
+              {/* Sources (collapsible, with rich rendering) */}
+              {!isStreaming && answerSources.length > 0 && (
+                <KbQaSources
+                  kbId={kbId}
+                  sources={answerSources}
+                  onImageClick={openLightbox}
+                />
               )}
 
               {/* No sources */}
-              {!isStreaming && sources.length === 0 && !answer && (
+              {!isStreaming && answerSources.length === 0 && !answer && (
                 <p className="text-[12px] text-muted-foreground text-center py-4">
                   {t('kb.qaNoSources')}
                 </p>
@@ -188,6 +219,13 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
           </label>
         </div>
       </div>
+
+      {/* Image Lightbox */}
+      <KbImageLightbox
+        imageUrl={lightboxImage}
+        title={lightboxTitle}
+        onClose={() => setLightboxImage(null)}
+      />
     </div>
   )
 }

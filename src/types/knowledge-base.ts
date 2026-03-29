@@ -57,3 +57,30 @@ export interface RetrievalSource {
   source_type: string
   metadata: Record<string, unknown>
 }
+
+/** Serialized scored node from web_helpers — used for sources and assets */
+export interface ScoredNode {
+  kind: string // "text" | "image" | "table"
+  score: number
+  doc_id: string
+  page_no: number | null
+  page_label: string
+  source_path: string
+  summary: string
+  // text-specific
+  text?: string
+  snippet?: string
+  block_id?: string
+  // image-specific
+  image_id?: string
+  image_path?: string
+  image_url?: string
+  // table-specific
+  table_id?: string
+  caption?: string
+  semantic_summary?: string
+  headers?: string[]
+  raw_table?: string
+  raw_format?: string
+  normalized_table_text?: string
+}

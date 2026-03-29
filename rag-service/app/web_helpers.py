@@ -6,12 +6,11 @@ from html import escape
 from typing import Any
 from urllib.parse import quote
 
+from app.config import INGESTION_OUTPUT_ROOT
 from app.document_ingestion import materialize_missing_pdf_region_images
-from app.pipeline_utils import project_root_from_file
 
 
-PROJECT_ROOT = project_root_from_file(__file__)
-ARTIFACTS_ROOT = os.path.join(PROJECT_ROOT, "complex_document_rag", "ingestion_output")
+ARTIFACTS_ROOT = INGESTION_OUTPUT_ROOT
 
 
 def build_artifact_url(path: str, artifacts_root: str = ARTIFACTS_ROOT) -> str:
