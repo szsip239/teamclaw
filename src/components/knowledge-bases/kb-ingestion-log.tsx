@@ -1,9 +1,10 @@
-"use client"
+'use client'
 
-import { useEffect, useRef, useState } from "react"
-import { ChevronDown, ChevronRight } from "lucide-react"
-import { useJobStatus } from "@/hooks/use-knowledge-bases"
-import { useT } from "@/stores/language-store"
+import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useJobStatus, kbKeys } from '@/hooks/use-knowledge-bases'
+import { useT } from '@/stores/language-store'
 
 interface KbIngestionLogProps {
   kbId: string
@@ -13,10 +14,20 @@ interface KbIngestionLogProps {
 
 export function KbIngestionLog({ kbId, docId, jobId }: KbIngestionLogProps) {
   const t = useT()
+  const qc = useQueryClient()
   const [expanded, setExpanded] = useState(true)
   const logRef = useRef<HTMLDivElement>(null)
 
   const { data: jobStatus } = useJobStatus(kbId, docId, jobId)
+
+  // When job completes or fails, refresh the KB detail to update document status
+  useEffect(() => {
+    if (jobStatus?.status === 'completed' || jobStatus?.status === 'failed') {
+      qc.invalidateQueries({ queryKey: kbKeys.detail(kbId) })
+      qc.invalidateQueries({ queryKey: kbKeys.documents(kbId) })
+      qc.invalidateQueries({ queryKey: kbKeys.lists() })
+    }
+  }, [jobStatus?.status, kbId, qc])
 
   // Auto-scroll to bottom
   useEffect(() => {
