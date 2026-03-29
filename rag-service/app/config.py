@@ -83,7 +83,7 @@ PGVECTOR_TEXT_TABLE: str = "text_chunks"
 PGVECTOR_IMAGE_TABLE: str = "image_descriptions"
 PGVECTOR_TABLE_TABLE: str = "table_blocks"
 
-PGVECTOR_EMBED_DIM: int = int(os.environ.get("PGVECTOR_EMBED_DIM", "1536"))
+PGVECTOR_EMBED_DIM: int = int(os.environ.get("PGVECTOR_EMBED_DIM", "1024"))
 
 
 # ============================================================
