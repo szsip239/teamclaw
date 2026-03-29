@@ -52,16 +52,20 @@ export async function* streamKbQuery(
         if (!eventStr.trim()) continue
 
         let eventType = ''
-        let eventData = ''
+        const dataLines: string[] = []
 
         for (const line of eventStr.split('\n')) {
           if (line.startsWith('event: ')) {
             eventType = line.slice(7).trim()
           } else if (line.startsWith('data: ')) {
-            eventData = line.slice(6)
+            dataLines.push(line.slice(6))
+          } else if (line.startsWith('data:')) {
+            // data: with no space (edge case)
+            dataLines.push(line.slice(5))
           }
         }
 
+        const eventData = dataLines.join('\n')
         if (eventType && eventData) {
           try {
             const parsed = JSON.parse(eventData) as Record<string, unknown>
