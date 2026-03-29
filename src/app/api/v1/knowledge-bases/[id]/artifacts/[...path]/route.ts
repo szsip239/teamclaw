@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile } from 'fs/promises'
-import { extname } from 'path'
 import { prisma } from '@/lib/db'
 import {
   withAuth,
@@ -10,22 +8,11 @@ import {
   type AuthContext,
 } from '@/lib/middleware/auth'
 import { isKbVisible } from '@/lib/knowledge-base/permissions'
-import { resolveArtifactPath } from '@/lib/knowledge-base/file-storage'
 
-const MIME_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.md': 'text/markdown',
-  '.txt': 'text/plain',
-  '.json': 'application/json',
-  '.html': 'text/html',
-}
+const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:8000'
 
 // GET /api/v1/knowledge-bases/[id]/artifacts/[...path]
+// Proxies to RAG service's /artifacts/ static file server
 export const GET = withAuth(
   withPermission('knowledge:view', async (_req: NextRequest, ctx: AuthContext) => {
     const kbId = param(ctx, 'id')
@@ -37,14 +24,21 @@ export const GET = withAuth(
     }
 
     try {
-      const filePath = resolveArtifactPath(kbId, ...pathSegments)
-      const content = await readFile(filePath)
-      const ext = extname(filePath).toLowerCase()
-      const mimeType = MIME_TYPES[ext] || 'application/octet-stream'
+      // Proxy to RAG service: /artifacts/{kbId}/{docId}/images/...
+      const artifactPath = pathSegments.map(encodeURIComponent).join('/')
+      const ragUrl = `${RAG_SERVICE_URL}/artifacts/${encodeURIComponent(kbId)}/${artifactPath}`
 
-      return new NextResponse(content, {
+      const res = await fetch(ragUrl)
+      if (!res.ok) {
+        return NextResponse.json({ error: 'Artifact not found' }, { status: 404 })
+      }
+
+      const contentType = res.headers.get('content-type') || 'application/octet-stream'
+      const body = await res.arrayBuffer()
+
+      return new NextResponse(Buffer.from(body), {
         headers: {
-          'Content-Type': mimeType,
+          'Content-Type': contentType,
           'Cache-Control': 'public, max-age=3600',
         },
       })

@@ -14,19 +14,14 @@ from typing import Any, AsyncIterator
 from app.config import RequestCredentials
 from app.models import QueryRequest, QueryResponse, RetrievalResult
 from app.step4_basic_query import QueryBackend, _safe_score, _sort_answer_assets
+from app.web_helpers import serialize_scored_node, ARTIFACTS_ROOT
 
 logger = logging.getLogger(__name__)
 
 
 def _serialize_node(node: Any) -> dict[str, Any]:
-    """Serialize a LlamaIndex node to a plain dict."""
-    metadata = getattr(node, "metadata", {}) or {}
-    return {
-        "text": str(getattr(node, "text", "") or ""),
-        "score": _safe_score(node),
-        "source_type": metadata.get("type", metadata.get("block_type", "text")),
-        "metadata": metadata,
-    }
+    """Serialize a LlamaIndex node using web_helpers for proper artifact URLs."""
+    return serialize_scored_node(node, artifacts_root=ARTIFACTS_ROOT)
 
 
 def _serialize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
