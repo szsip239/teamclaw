@@ -2,6 +2,7 @@
 
 import { Image, Table2 } from 'lucide-react'
 import { useT } from '@/stores/language-store'
+import { markdownTableToHtml } from '@/lib/knowledge-base/markdown-table'
 import type { ScoredNode } from '@/types/knowledge-base'
 
 interface KbAnswerAssetsProps {
@@ -75,7 +76,7 @@ export function KbAnswerAssets({ kbId, assets, onImageClick }: KbAnswerAssetsPro
                       __html:
                         asset.raw_format === 'html'
                           ? asset.raw_table
-                          : `<pre class="whitespace-pre-wrap text-[10px]">${asset.raw_table.replace(/</g, '&lt;')}</pre>`,
+                          : markdownTableToHtml(asset.raw_table),
                     }}
                   />
                 ) : (
