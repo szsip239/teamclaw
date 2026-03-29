@@ -1,0 +1,16 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+pydantic==2.11.*
+asyncpg==0.30.*
+psycopg2-binary==2.9.*
+sqlalchemy==2.0.*
+pgvector==0.3.*
+llama-index-core==0.12.*
+llama-index-vector-stores-postgres==0.4.*
+llama-index-embeddings-openai==0.3.*
+llama-index-llms-openai-like==0.3.*
+llama-index-readers-file==0.4.*
+httpx==0.28.*
+python-multipart==0.0.*
+pillow==11.*
+pymupdf==1.25.*
