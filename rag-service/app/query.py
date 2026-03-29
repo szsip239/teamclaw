@@ -29,12 +29,15 @@ def _serialize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
 
 
 def _make_backend(creds: RequestCredentials, kb_id: str) -> QueryBackend:
-    # DashScope SDK may need DASHSCOPE_API_KEY env var for authentication
+    # DashScope SDK requires DASHSCOPE_API_KEY env var; OpenAI SDK uses OPENAI_API_KEY.
+    # Set them every request since credentials come from per-request headers.
     import os
-    if creds.embedding_api_key and not os.environ.get("DASHSCOPE_API_KEY"):
+    if creds.embedding_api_key:
         os.environ["DASHSCOPE_API_KEY"] = creds.embedding_api_key
-    if creds.llm_api_key and not os.environ.get("OPENAI_API_KEY"):
+    if creds.llm_api_key:
         os.environ["OPENAI_API_KEY"] = creds.llm_api_key
+        if not os.environ.get("DASHSCOPE_API_KEY"):
+            os.environ["DASHSCOPE_API_KEY"] = creds.llm_api_key
     return QueryBackend(creds=creds, kb_id=kb_id)
 
 
@@ -106,6 +109,7 @@ async def stream_query(
         try:
             retrieval = backend.retrieve(req.question)
         except Exception as exc:
+            logger.exception("Retrieval failed for kb=%s", req.kb_id)
             retrieval_error = str(exc)
 
         if retrieval_error or retrieval is None:
