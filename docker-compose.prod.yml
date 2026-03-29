@@ -40,6 +40,8 @@ services:
       TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}"
       DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
       DOCKER_NETWORK: "teamclaw-net"
+      RAG_SERVICE_URL: "http://rag:8000"
+      RAG_SERVICE_SECRET: "${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -62,9 +64,32 @@ services:
       # Mount for external instance MEDIA images (e.g. OpenClaw skills output).
       # Set EXTERNAL_MEDIA_DIR to the OpenClaw installation's parent directory.
       - ${EXTERNAL_MEDIA_DIR:-/tmp/no-extra-mount}:${EXTERNAL_MEDIA_DIR:-/tmp/no-extra-mount}:ro
+      - kb-data:/app/data/knowledge-bases
+
+  rag:
+    build:
+      context: ./rag-service
+      dockerfile: Dockerfile
+    container_name: teamclaw-rag
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}"
+      RAG_SERVICE_SECRET: "${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}"
+    volumes:
+      - kb-data:/app/data/knowledge-bases
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     container_name: teamclaw-postgres
     restart: unless-stopped
     environment:
@@ -75,6 +100,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
       - data-net
     healthcheck:
@@ -122,6 +148,7 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  kb-data:
 
 networks:
   data-net:

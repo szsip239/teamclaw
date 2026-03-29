@@ -36,6 +36,19 @@ enum SkillSource {
   CLAWHUB      // 从 ClawHub 拉取
 }
 
+enum KbScope {
+  GLOBAL       // 所有用户可见
+  DEPARTMENT   // 部门成员可见
+  PERSONAL     // 仅创建者可见
+}
+
+enum DocumentStatus {
+  PENDING      // 已上传，等待处理
+  PROCESSING   // OCR / 向量化进行中
+  SUCCEEDED    // 处理完成
+  FAILED       // 处理失败
+}
+
 enum ResourceType {
   MODEL
   TOOL
@@ -69,6 +82,7 @@ model User {
   publishedVersions SkillVersion[] @relation("VersionPublisher")
   installedSkills  SkillInstallation[] @relation("SkillInstaller")
   createdResources Resource[]          @relation("ResourceCreator")
+  knowledgeBases   KnowledgeBase[]     @relation("KbCreator")
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 }
@@ -81,6 +95,7 @@ model Department {
   instanceAccess  InstanceAccess[]
   agentMetas      AgentMeta[]
   skills          Skill[]
+  knowledgeBases  KnowledgeBase[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -326,5 +341,42 @@ model Resource {
 
   @@index([type])
   @@index([provider])
+  @@index([status])
+}
+
+model KnowledgeBase {
+  id              String              @id @default(cuid())
+  name            String
+  description     String?             @db.Text
+  scope           KbScope             @default(PERSONAL)
+  departmentId    String?
+  department      Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  createdById     String
+  createdBy       User                @relation("KbCreator", fields: [createdById], references: [id])
+  documentCount   Int                 @default(0)
+  documents       KnowledgeDocument[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([scope])
+  @@index([departmentId])
+  @@index([createdById])
+}
+
+model KnowledgeDocument {
+  id              String         @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  docId           String         @default(cuid()) // Unique ID for vector metadata
+  fileName        String
+  fileSize        Int            // bytes
+  pageCount       Int?
+  status          DocumentStatus @default(PENDING)
+  jobId           String?        // Python RAG service job ID
+  errorMessage    String?        @db.Text
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([knowledgeBaseId])
   @@index([status])
 }
