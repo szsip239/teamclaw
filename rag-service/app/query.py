@@ -1,205 +1,198 @@
+"""
+Query module — retrieval, reranking, and LLM answer generation.
+
+Uses the QueryBackend from step4_basic_query for the full pipeline
+(multi-collection retrieval, query expansion, reranking, filtering,
+LLM streaming/non-streaming answer).
+"""
+
 import json
 import logging
-from typing import AsyncIterator
-from urllib.parse import urlparse
+import time
+from typing import Any, AsyncIterator
 
-from app.config import DATABASE_URL, RagCredentials
+from app.config import RequestCredentials
 from app.models import QueryRequest, QueryResponse, RetrievalResult
+from app.step4_basic_query import QueryBackend, _safe_score, _sort_answer_assets
 
 logger = logging.getLogger(__name__)
 
 
-def _build_vector_store():
-    """Build PGVectorStore connection."""
-    from llama_index.vector_stores.postgres import PGVectorStore
-
-    parsed = urlparse(DATABASE_URL)
-
-    return PGVectorStore.from_params(
-        database=parsed.path.lstrip("/").split("?")[0],
-        host=parsed.hostname or "localhost",
-        port=str(parsed.port or 5432),
-        user=parsed.username or "teamclaw",
-        password=parsed.password or "",
-        table_name="data_text_chunks",
-        schema_name="rag",
-        embed_dim=1024,
-    )
+def _serialize_node(node: Any) -> dict[str, Any]:
+    """Serialize a LlamaIndex node to a plain dict."""
+    metadata = getattr(node, "metadata", {}) or {}
+    return {
+        "text": str(getattr(node, "text", "") or ""),
+        "score": _safe_score(node),
+        "source_type": metadata.get("type", metadata.get("block_type", "text")),
+        "metadata": metadata,
+    }
 
 
-def _build_embed_model(creds: RagCredentials):
-    from llama_index.embeddings.openai import OpenAIEmbedding
-
-    return OpenAIEmbedding(
-        api_key=creds.embedding_api_key,
-        api_base=creds.embedding_base_url,
-        model_name=creds.embedding_model,
-    )
+def _serialize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
+    return [_serialize_node(n) for n in nodes]
 
 
-_SYSTEM_PROMPT = (
-    "You are a helpful assistant. Answer questions based on the provided context. "
-    "If the context doesn't contain enough information, say so. "
-    "Always cite which parts of the context support your answer."
-)
+def _make_backend(creds: RequestCredentials, kb_id: str) -> QueryBackend:
+    return QueryBackend(creds=creds, kb_id=kb_id)
 
 
 async def query_knowledge_base(
-    req: QueryRequest, creds: RagCredentials
+    req: QueryRequest, creds: RequestCredentials
 ) -> QueryResponse:
-    """Synchronous query -- returns full result."""
-    from llama_index.core import VectorStoreIndex
-    from llama_index.core.vector_stores.types import (
-        MetadataFilter,
-        MetadataFilters,
-    )
+    """Synchronous query -- returns full result with retrieval + LLM answer."""
+    backend = _make_backend(creds, req.kb_id)
 
-    vector_store = _build_vector_store()
-    embed_model = _build_embed_model(creds)
+    retrieval = backend.retrieve(req.question)
 
-    index = VectorStoreIndex.from_vector_store(
-        vector_store=vector_store,
-        embed_model=embed_model,
-    )
-
-    filters = MetadataFilters(
-        filters=[
-            MetadataFilter(key="kb_id", value=req.kb_id),
-        ]
-    )
-
-    retriever = index.as_retriever(
-        similarity_top_k=req.top_k,
-        filters=filters,
-    )
-
-    nodes = await retriever.aretrieve(req.question)
-
-    sources = [
-        RetrievalResult(
-            text=node.get_text(),
-            score=node.get_score() or 0.0,
-            source_type=node.metadata.get("source_type", "text"),
-            metadata=node.metadata,
-        )
-        for node in nodes
-    ]
+    sources = []
+    for branch_key in ("text_results", "image_results", "table_results"):
+        for node in retrieval.get(branch_key, []):
+            sources.append(
+                RetrievalResult(
+                    text=str(getattr(node, "text", "") or ""),
+                    score=_safe_score(node),
+                    source_type=(getattr(node, "metadata", {}) or {}).get(
+                        "type", "text"
+                    ),
+                    metadata=getattr(node, "metadata", {}) or {},
+                )
+            )
 
     answer = ""
     reasoning = ""
+    assets: list[dict] = []
 
     if req.generate_answer and sources:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(
-            api_key=creds.llm_api_key,
-            base_url=creds.llm_base_url,
-        )
-
-        context = "\n\n---\n\n".join([s.text for s in sources[:5]])
-        messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {req.question}",
-            },
-        ]
-
-        response = await client.chat.completions.create(
-            model=creds.llm_model,
-            messages=messages,
-        )
-        answer = response.choices[0].message.content or ""
+        try:
+            answer_result = backend.answer(req.question, retrieval=retrieval)
+            answer = answer_result.get("answer", "")
+            assets = _serialize_nodes(answer_result.get("answer_assets", []))
+        except Exception as exc:
+            logger.exception("Answer generation failed")
+            answer = f"[Error generating answer: {exc}]"
 
     return QueryResponse(
         answer=answer,
         reasoning=reasoning,
         sources=sources,
+        assets=assets,
     )
 
 
 async def stream_query(
-    req: QueryRequest, creds: RagCredentials
+    req: QueryRequest, creds: RequestCredentials
 ) -> AsyncIterator[str]:
-    """SSE streaming query -- yields event strings."""
-    from llama_index.core import VectorStoreIndex
-    from llama_index.core.vector_stores.types import (
-        MetadataFilter,
-        MetadataFilters,
-    )
+    """
+    SSE streaming query.
 
+    Event flow:
+        1. ``retrieval`` — sources + answer_assets + answer_sources
+        2. ``reasoning`` — reasoning deltas (if model supports it)
+        3. ``chunk``     — answer text deltas
+        4. ``done``      — final answer + assets
+        5. ``error``     — on failure
+    """
     def sse_event(event_type: str, data: dict) -> str:
-        return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+        return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     try:
-        vector_store = _build_vector_store()
-        embed_model = _build_embed_model(creds)
-
-        index = VectorStoreIndex.from_vector_store(
-            vector_store=vector_store,
-            embed_model=embed_model,
-        )
-
-        filters = MetadataFilters(
-            filters=[
-                MetadataFilter(key="kb_id", value=req.kb_id),
-            ]
-        )
-
-        retriever = index.as_retriever(
-            similarity_top_k=req.top_k,
-            filters=filters,
-        )
+        backend = _make_backend(creds, req.kb_id)
 
         # Step 1: Retrieval
-        nodes = await retriever.aretrieve(req.question)
+        retrieval_error = ""
+        retrieval = None
+        try:
+            retrieval = backend.retrieve(req.question)
+        except Exception as exc:
+            retrieval_error = str(exc)
 
-        sources = [
-            {
-                "text": node.get_text(),
-                "score": node.get_score() or 0.0,
-                "source_type": node.metadata.get("source_type", "text"),
-                "metadata": node.metadata,
-            }
-            for node in nodes
-        ]
-
-        yield sse_event("retrieval", {"sources": sources})
-
-        if not req.generate_answer or not sources:
-            yield sse_event("done", {"sources_count": len(sources)})
+        if retrieval_error or retrieval is None:
+            yield sse_event("retrieval", {
+                "sources": [],
+                "retrieval_error": retrieval_error,
+                "answer_assets": [],
+                "answer_sources": [],
+            })
+            yield sse_event("error", {"message": retrieval_error or "Retrieval failed"})
+            yield sse_event("done", {"answer": "", "answer_assets": [], "answer_sources": []})
             return
 
-        # Step 2: LLM streaming answer
-        from openai import AsyncOpenAI
+        # Serialize retrieval sources
+        sources = []
+        for branch_key in ("text_results", "image_results", "table_results"):
+            sources.extend(_serialize_nodes(retrieval.get(branch_key, [])))
 
-        client = AsyncOpenAI(
-            api_key=creds.llm_api_key,
-            base_url=creds.llm_base_url,
+        if not req.generate_answer or not sources:
+            yield sse_event("retrieval", {
+                "sources": sources,
+                "retrieval_error": "",
+                "answer_assets": [],
+                "answer_sources": [],
+            })
+            yield sse_event("done", {"answer": "", "sources_count": len(sources)})
+            return
+
+        # Step 2: Streaming answer
+        try:
+            stream_result = backend.stream_answer(req.question, retrieval=retrieval)
+        except Exception as exc:
+            yield sse_event("retrieval", {
+                "sources": sources,
+                "retrieval_error": "",
+                "answer_assets": [],
+                "answer_sources": [],
+            })
+            yield sse_event("error", {"message": str(exc)})
+            yield sse_event("done", {"answer": "", "answer_assets": [], "answer_sources": []})
+            return
+
+        stream_iter = stream_result.get("stream", [])
+        raw_answer_sources = stream_result.get("answer_sources", [])
+        raw_answer_assets = stream_result.get("answer_assets", [])
+
+        answer_sources = _serialize_nodes(raw_answer_sources)
+        answer_assets = _serialize_nodes(_sort_answer_assets(raw_answer_assets))
+
+        yield sse_event("retrieval", {
+            "sources": sources,
+            "retrieval_error": "",
+            "answer_assets": answer_assets,
+            "answer_sources": answer_sources,
+        })
+
+        # Stream LLM chunks
+        answer_text = ""
+        t_start = time.perf_counter()
+        try:
+            for chunk in stream_iter:
+                additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+                reasoning_delta = str(additional_kwargs.get("reasoning_delta", "") or "")
+                delta = getattr(chunk, "delta", "") or getattr(chunk, "text", "")
+                if not delta and isinstance(chunk, str):
+                    delta = chunk
+                if not reasoning_delta and not delta:
+                    continue
+                if reasoning_delta:
+                    yield sse_event("reasoning", {"delta": reasoning_delta})
+                if delta:
+                    answer_text += delta
+                    yield sse_event("chunk", {"text": delta})
+        except Exception as exc:
+            yield sse_event("error", {"message": str(exc)})
+
+        logger.info(
+            "[stream] %.0fms answer=%d chars",
+            (time.perf_counter() - t_start) * 1000,
+            len(answer_text),
         )
 
-        context = "\n\n---\n\n".join([s["text"] for s in sources[:5]])
-        messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {req.question}",
-            },
-        ]
-
-        stream = await client.chat.completions.create(
-            model=creds.llm_model,
-            messages=messages,
-            stream=True,
-        )
-
-        async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield sse_event(
-                    "chunk", {"text": chunk.choices[0].delta.content}
-                )
-
-        yield sse_event("done", {"sources_count": len(sources)})
+        yield sse_event("done", {
+            "answer": answer_text,
+            "answer_assets": answer_assets,
+            "answer_sources": answer_sources,
+            "sources_count": len(sources),
+        })
 
     except Exception as e:
         logger.exception("stream_query failed")
@@ -207,13 +200,9 @@ async def stream_query(
 
 
 async def get_default_queries(
-    kb_id: str, creds: RagCredentials
+    kb_id: str, creds: RequestCredentials
 ) -> list[str]:
-    """Generate suggested queries based on KB content.
-
-    Simple implementation returning generic suggestions.
-    Could be enhanced to sample from actual content.
-    """
+    """Return suggested queries for a knowledge base."""
     return [
         "What are the main topics covered?",
         "Summarize the key points",

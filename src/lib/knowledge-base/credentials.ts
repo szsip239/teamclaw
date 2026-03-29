@@ -12,6 +12,8 @@ interface RagCredentialHeaders {
   'x-rerank-api-key': string
   'x-rerank-base-url': string
   'x-rerank-model': string
+  'x-ocr-model': string
+  'x-ocr-workers': string
 }
 
 /**
@@ -58,5 +60,7 @@ export async function buildRagCredentialHeaders(): Promise<RagCredentialHeaders>
     'x-rerank-api-key': getApiKey('rag.rerank.apiKey'),
     'x-rerank-base-url': getString('rag.rerank.baseUrl'),
     'x-rerank-model': getString('rag.rerank.model'),
+    'x-ocr-model': getString('rag.ocr.model'),
+    'x-ocr-workers': String(configMap.get('rag.ocr.workers') ?? 4),
   }
 }
