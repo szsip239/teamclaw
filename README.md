@@ -67,21 +67,9 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 
 ## 快速开始
 
-### 方式一：Docker 镜像拉取（最快）
+> **⚠️ 重要提示**：TeamClaw 依赖 PostgreSQL 和 Redis，**不支持**单独 `docker run` 启动。请使用下面的 Docker Compose 方式部署。
 
-```bash
-docker pull ghcr.io/szsip239/teamclaw:latest
-```
-
-拉取指定版本：
-
-```bash
-docker pull ghcr.io/szsip239/teamclaw:0.1.1
-```
-
-> 镜像支持 `linux/amd64` 和 `linux/arm64` 架构。完整版本列表见 [GitHub Packages](https://github.com/szsip239/teamclaw/pkgs/container/teamclaw)。
-
-### 方式二：Docker Compose 部署（推荐）
+### 方式一：Docker Compose 部署（推荐）
 
 ```bash
 git clone https://github.com/szsip239/teamclaw.git
@@ -115,7 +103,7 @@ bash setup.sh
 
 访问 `https://your-domain.com`
 
-### 方式三：本地开发
+### 方式二：本地开发
 
 ```bash
 # 1. 克隆并安装依赖
@@ -342,21 +330,9 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 
 ## Quick Start
 
-### Option 1: Docker Image Pull (Fastest)
+> **⚠️ Important**: TeamClaw requires PostgreSQL and Redis. Standalone `docker run` will **NOT** work. Use Docker Compose as described below.
 
-```bash
-docker pull ghcr.io/szsip239/teamclaw:latest
-```
-
-Pull a specific version:
-
-```bash
-docker pull ghcr.io/szsip239/teamclaw:0.1.1
-```
-
-> Supports `linux/amd64` and `linux/arm64`. See all versions at [GitHub Packages](https://github.com/szsip239/teamclaw/pkgs/container/teamclaw).
-
-### Option 2: Docker Compose (Recommended)
+### Option 1: Docker Compose (Recommended)
 
 ```bash
 git clone https://github.com/szsip239/teamclaw.git
@@ -390,7 +366,7 @@ Visit `http://localhost:3100` — Login: `admin@teamclaw.local` / `Admin@123456`
 
 Visit `https://your-domain.com`
 
-### Option 3: Local Development
+### Option 2: Local Development
 
 ```bash
 # 1. Clone and install

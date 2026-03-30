@@ -6,10 +6,24 @@ import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
-import { buildSessionInputPath, buildSessionOutputPath, buildCurrentSessionLinkPath, buildCurrentSessionTarget, resolveExternalSessionFilePath, buildExternalCurrentSessionLinkPath, buildExternalWorkspaceSessionLinkPath, buildExternalWorkspaceSessionTarget } from '@/lib/session-files/helpers'
+import {
+  buildSessionInputPath,
+  buildSessionOutputPath,
+  buildCurrentSessionLinkPath,
+  buildCurrentSessionTarget,
+  resolveExternalSessionFilePath,
+  buildExternalCurrentSessionLinkPath,
+  buildExternalWorkspaceSessionLinkPath,
+  buildExternalWorkspaceSessionTarget,
+} from '@/lib/session-files/helpers'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
-import { MIME_BY_EXT, extractMediaPaths, readImageAsDataUrl, readContainerImageAsDataUrl } from '@/lib/chat/image-helpers'
+import {
+  MIME_BY_EXT,
+  extractMediaPaths,
+  readImageAsDataUrl,
+  readContainerImageAsDataUrl,
+} from '@/lib/chat/image-helpers'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult } from '@/types/gateway'
@@ -85,7 +99,6 @@ function extractThinkingFromMessage(message: unknown): string {
   return parts.join('\n').trim()
 }
 
-
 /**
  * Snapshot + archive the currently active session, then activate the target session.
  * Used when sending a message to a non-active (historical) session.
@@ -106,7 +119,10 @@ async function switchActiveSession(
     const client = registry.getClient(instanceId)
 
     if (client) {
-      await archiveSession(activeSession.id, instanceId, agentId, userId, client, { triggerMemoryDump: true, waitForNewCompletion: true })
+      await archiveSession(activeSession.id, instanceId, agentId, userId, client, {
+        triggerMemoryDump: true,
+        waitForNewCompletion: true,
+      })
     } else {
       await prisma.chatSession.update({
         where: { id: activeSession.id },
@@ -200,7 +216,15 @@ export async function POST(req: NextRequest) {
 
     if (agentMeta) {
       const { isAgentVisible } = await import('@/lib/agents/helpers')
-      const authUser = { id: user.id, role: userRole ?? user.role, departmentId: user.departmentId, name: '', email: '', departmentName: null, avatar: null }
+      const authUser = {
+        id: user.id,
+        role: userRole ?? user.role,
+        departmentId: user.departmentId,
+        name: '',
+        email: '',
+        departmentName: null,
+        avatar: null,
+      }
       if (!isAgentVisible(agentMeta, authUser)) {
         return NextResponse.json({ error: 'No access to this agent' }, { status: 403 })
       }
@@ -352,11 +376,15 @@ export async function POST(req: NextRequest) {
       const allPaths: string[] = []
       for (const msg of messages.slice(-20)) {
         if (msg.role !== 'toolResult') continue
-        const text = typeof msg.content === 'string'
-          ? msg.content
-          : Array.isArray(msg.content)
-            ? (msg.content as Record<string, unknown>[]).filter(b => b.type === 'text').map(b => b.text as string).join('\n')
-            : ''
+        const text =
+          typeof msg.content === 'string'
+            ? msg.content
+            : Array.isArray(msg.content)
+              ? (msg.content as Record<string, unknown>[])
+                  .filter((b) => b.type === 'text')
+                  .map((b) => b.text as string)
+                  .join('\n')
+              : ''
         allPaths.push(...extractMediaPaths(text))
       }
 
@@ -374,7 +402,9 @@ export async function POST(req: NextRequest) {
             write({ type: 'image', imageUrl: dataUrl, mimeType })
             capturedImages.push({ imageUrl: dataUrl, mimeType })
           } else {
-            console.warn(`[fetchAndEmitImages] Failed to read image: ${p} (containerId=${containerId ?? 'host'})`)
+            console.warn(
+              `[fetchAndEmitImages] Failed to read image: ${p} (containerId=${containerId ?? 'host'})`,
+            )
           }
         }),
       )
@@ -410,11 +440,21 @@ export async function POST(req: NextRequest) {
       // Capture inline image blocks if OpenClaw embeds them in chat events
       const images = extractImagesFromMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
-        write({ type: 'image', imageUrl: images[i].url, mimeType: images[i].mimeType, alt: images[i].alt })
+        write({
+          type: 'image',
+          imageUrl: images[i].url,
+          mimeType: images[i].mimeType,
+          alt: images[i].alt,
+        })
         capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
       }
       lastImageCount = images.length
     } else if (state === 'final') {
+      // Chat final arrived — cancel the lifecycle fallback timer
+      if (lifecycleEndTimer) {
+        clearTimeout(lifecycleEndTimer)
+        lifecycleEndTimer = null
+      }
       // Immediately clear active run status so history polls don't report
       // isRunning=true during the (potentially slow) post-run cleanup.
       activeRuns.delete(chatSessionId)
@@ -435,31 +475,58 @@ export async function POST(req: NextRequest) {
       // Capture any remaining inline image blocks from final message
       const images = extractImagesFromMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
-        write({ type: 'image', imageUrl: images[i].url, mimeType: images[i].mimeType, alt: images[i].alt })
+        write({
+          type: 'image',
+          imageUrl: images[i].url,
+          mimeType: images[i].mimeType,
+          alt: images[i].alt,
+        })
         capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
       }
 
       // Scan chat.history for MEDIA paths in tool results and emit as image events.
       // Must run before 'done' so frontend displays images in the same streaming session.
-      fetchAndEmitImages().then(async () => {
-        // Await saveLiveSnapshot BEFORE sending 'done' so that when the client
-        // calls syncFromHistory (triggered by 'done'), liveMessages in the DB
-        // already contain user-uploaded images and resolved MEDIA images.
-        try {
-          await saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments)
-        } catch (err) {
-          console.error('[live-snapshot] Save failed:', err)
-        }
-        write({ type: 'done' })
-        cleanup()
-      }).catch(async () => {
-        try {
-          await saveLiveSnapshot(chatSessionId, client!, sessionKey, containerId, capturedImages, userImageAttachments)
-        } catch { /* non-fatal */ }
-        write({ type: 'done' })
-        cleanup()
-      })
+      fetchAndEmitImages()
+        .then(async () => {
+          // Await saveLiveSnapshot BEFORE sending 'done' so that when the client
+          // calls syncFromHistory (triggered by 'done'), liveMessages in the DB
+          // already contain user-uploaded images and resolved MEDIA images.
+          try {
+            await saveLiveSnapshot(
+              chatSessionId,
+              client!,
+              sessionKey,
+              containerId,
+              capturedImages,
+              userImageAttachments,
+            )
+          } catch (err) {
+            console.error('[live-snapshot] Save failed:', err)
+          }
+          write({ type: 'done' })
+          cleanup()
+        })
+        .catch(async () => {
+          try {
+            await saveLiveSnapshot(
+              chatSessionId,
+              client!,
+              sessionKey,
+              containerId,
+              capturedImages,
+              userImageAttachments,
+            )
+          } catch {
+            /* non-fatal */
+          }
+          write({ type: 'done' })
+          cleanup()
+        })
     } else if (state === 'error') {
+      if (lifecycleEndTimer) {
+        clearTimeout(lifecycleEndTimer)
+        lifecycleEndTimer = null
+      }
       activeRuns.delete(chatSessionId)
       write({
         type: 'error',
@@ -467,11 +534,21 @@ export async function POST(req: NextRequest) {
       })
       cleanup()
     } else if (state === 'aborted') {
+      if (lifecycleEndTimer) {
+        clearTimeout(lifecycleEndTimer)
+        lifecycleEndTimer = null
+      }
       activeRuns.delete(chatSessionId)
       write({ type: 'error', error: 'Conversation aborted' })
       cleanup()
     }
   })
+
+  // Fallback timer: if agent lifecycle signals "end" but no chat "final"
+  // arrives within 5 seconds, force-close the SSE stream.  This prevents
+  // the loading-dots from spinning forever when the chat final event is
+  // lost (WS reconnect, gateway race, etc.).
+  let lifecycleEndTimer: ReturnType<typeof setTimeout> | null = null
 
   const unsubAgent = client.on('agent', (payload: unknown) => {
     if (closed) return
@@ -480,6 +557,35 @@ export async function POST(req: NextRequest) {
     if (evt.runId !== idempotencyKey) return
 
     const stream = evt.stream as string | undefined
+
+    // Use agent lifecycle "end"/"error" as a safety net for missing chat final
+    if (stream === 'lifecycle') {
+      const data = (evt.data ?? {}) as Record<string, unknown>
+      const phase = data.phase as string
+      if ((phase === 'end' || phase === 'error') && !lifecycleEndTimer) {
+        lifecycleEndTimer = setTimeout(async () => {
+          if (closed) return
+          console.warn(
+            `[chat/send] lifecycle ${phase} received but no chat final after 5s — forcing done (session=${chatSessionId})`,
+          )
+          activeRuns.delete(chatSessionId)
+          try {
+            await saveLiveSnapshot(
+              chatSessionId,
+              client!,
+              sessionKey,
+              containerId,
+              capturedImages,
+              userImageAttachments,
+            )
+          } catch {
+            /* non-fatal */
+          }
+          write({ type: 'done' })
+          cleanup()
+        }, 5_000)
+      }
+    }
 
     if (stream === 'tool') {
       const data = (evt.data ?? {}) as Record<string, unknown>
@@ -516,7 +622,9 @@ export async function POST(req: NextRequest) {
                 capturedImages.push({ imageUrl: dataUrl, mimeType })
               }
             }),
-          ).then(() => {}).catch(() => {})
+          )
+            .then(() => {})
+            .catch(() => {})
           pendingImageReads.push(imageReadPromise)
         }
       }
@@ -524,6 +632,10 @@ export async function POST(req: NextRequest) {
   })
 
   async function cleanup() {
+    if (lifecycleEndTimer) {
+      clearTimeout(lifecycleEndTimer)
+      lifecycleEndTimer = null
+    }
     activeRuns.delete(chatSessionId)
     unsubChat()
     unsubAgent()
@@ -537,14 +649,20 @@ export async function POST(req: NextRequest) {
   ;(async () => {
     const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
     const SESSION_IMAGE_EXTS: Record<string, string> = {
-      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.bmp': 'image/bmp',
     }
     const SESSION_IMAGE_MAX = 5 * 1024 * 1024 // 5MB per image for attachment
     try {
-      const activeSession = existingSession ?? await prisma.chatSession.findFirst({
-        where: { userId: user.id, instanceId, agentId, isActive: true },
-      })
+      const activeSession =
+        existingSession ??
+        (await prisma.chatSession.findFirst({
+          where: { userId: user.id, instanceId, agentId, isActive: true },
+        }))
       if (activeSession) {
         const instance = await prisma.instance.findUnique({
           where: { id: instanceId },
@@ -563,7 +681,11 @@ export async function POST(req: NextRequest) {
             const outputPath = buildSessionOutputPath(agentId, activeSession.id)
             await Promise.all([
               dockerManager.execInContainer(instance.containerId, [
-                'ln', '-sfn', '--', target, linkPath,
+                'ln',
+                '-sfn',
+                '--',
+                target,
+                linkPath,
               ]),
               dockerManager.ensureContainerDir(instance.containerId, inputPath),
               dockerManager.ensureContainerDir(instance.containerId, outputPath),
@@ -573,7 +695,9 @@ export async function POST(req: NextRequest) {
           }
 
           let inputFiles: { name: string; path: string; type: string; size: number }[] = []
-          try { inputFiles = await dockerManager.listContainerDir(instance.containerId, inputPath) } catch {}
+          try {
+            inputFiles = await dockerManager.listContainerDir(instance.containerId, inputPath)
+          } catch {}
 
           // Auto-attach images from input/ as base64 attachments so the model can see them.
           // No text injection — session file rules and discovery are handled by AGENTS.md.
@@ -584,7 +708,10 @@ export async function POST(req: NextRequest) {
             if (!mime) continue
             try {
               const filePath = `${inputPath}${f.name}`
-              const buf = await dockerManager.downloadFileFromContainer(instance.containerId, filePath)
+              const buf = await dockerManager.downloadFileFromContainer(
+                instance.containerId,
+                filePath,
+              )
               sessionFileAttachments.push({
                 fileName: f.name,
                 mimeType: mime,
@@ -618,7 +745,9 @@ export async function POST(req: NextRequest) {
           }
 
           let inputFiles: { name: string; path: string; type: string; size: number }[] = []
-          try { inputFiles = await hostFileOps.listDir(inputPath, wp) } catch {}
+          try {
+            inputFiles = await hostFileOps.listDir(inputPath, wp)
+          } catch {}
 
           for (const f of inputFiles) {
             if (f.type !== 'file' || f.size > SESSION_IMAGE_MAX) continue
@@ -644,14 +773,18 @@ export async function POST(req: NextRequest) {
     }
 
     const mappedAttachments = [
-      ...(attachments?.map(a => ({ fileName: a.name, mimeType: a.mimeType, content: a.content })) ?? []),
+      ...(attachments?.map((a) => ({
+        fileName: a.name,
+        mimeType: a.mimeType,
+        content: a.content,
+      })) ?? []),
       ...sessionFileAttachments,
     ]
 
     // Capture ONLY 📎 chat attachments for liveMessages persistence (not sidebar input/ files).
     // Session file attachments are sent to the agent via mappedAttachments but should NOT
     // appear as contentBlocks in chat message bubbles.
-    for (const a of (attachments ?? [])) {
+    for (const a of attachments ?? []) {
       if (a.mimeType.startsWith('image/')) {
         userImageAttachments.push({ name: a.name, mimeType: a.mimeType, content: a.content })
       }
@@ -663,7 +796,7 @@ export async function POST(req: NextRequest) {
     // with contentBlocks to liveMessages, mergeExistingContentBlocks (content-based
     // matching) can carry the image forward even if saveLiveSnapshot never runs.
     if (userImageAttachments.length > 0) {
-      const imageBlocks: ChatContentBlock[] = userImageAttachments.map(a => ({
+      const imageBlocks: ChatContentBlock[] = userImageAttachments.map((a) => ({
         type: 'image' as const,
         imageUrl: `data:${a.mimeType};base64,${a.content}`,
         mimeType: a.mimeType,
@@ -673,7 +806,9 @@ export async function POST(req: NextRequest) {
           where: { id: chatSessionId },
           select: { liveMessages: true },
         })
-        const live = (Array.isArray(cur?.liveMessages) ? cur!.liveMessages : []) as unknown as Record<string, unknown>[]
+        const live = (Array.isArray(cur?.liveMessages)
+          ? cur!.liveMessages
+          : []) as unknown as Record<string, unknown>[]
         live.push({
           id: randomUUID(),
           role: 'user',
@@ -690,10 +825,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await adapter
-      .sendMessage(client, sessionKey, message, idempotencyKey, {
-        attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
-      })
+    await adapter.sendMessage(client, sessionKey, message, idempotencyKey, {
+      attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
+    })
   })().catch((err) => {
     write({ type: 'error', error: (err as Error).message || 'Failed to send message' })
     cleanup()
