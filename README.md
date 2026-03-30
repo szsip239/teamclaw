@@ -47,6 +47,12 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 - 版本管理 — 安装追踪、版本检查与一键升级
 - 作用域控制 — 支持 PERSONAL / DEPARTMENT / GLOBAL 三级作用域
 
+**知识库 (RAG)**
+- 文档上传 — 支持 PDF、DOCX、TXT、Markdown，自动 OCR 与分块
+- 语义检索 — 基于 pgvector 向量相似度搜索，支持流式问答
+- 作用域管理 — PERSONAL / DEPARTMENT / GLOBAL 三级知识库隔离
+- 智能复用 — 同一知识库内自动复用已有文档的 OCR 结果
+
 **多实例管理**
 - Docker 一键创建 — 配置镜像、端口、绑定即可部署
 - 外部网关接入 — 通过 URL + Token 连接已有 OpenClaw 实例
@@ -197,9 +203,11 @@ graph TB
     end
 
     subgraph Storage["存储"]
-        PG["PostgreSQL 17<br/>14 个数据模型"]
+        PG["PostgreSQL 17 + pgvector<br/>14 个数据模型"]
         RD["Redis 7<br/>限流 + 健康计数"]
     end
+
+    RAG["RAG Service<br/>文档解析 + 向量检索"]
 
     subgraph Instances["OpenClaw 实例"]
         OC1["实例 1 (Docker)"]
@@ -214,6 +222,8 @@ graph TB
     API --> GW
     API --> PG
     API --> RD
+    API -- "文档/检索" --> RAG
+    RAG --> PG
     GW --> Health
     GW -- "WebSocket" --> OC1
     GW -- "WebSocket" --> OC2
@@ -226,6 +236,7 @@ graph TB
     style NextJS fill:#fff3e0
     style Backend fill:#e8f5e9
     style Storage fill:#fce4ec
+    style RAG fill:#fff9c4
     style Instances fill:#f3e5f5
 ```
 
@@ -236,7 +247,8 @@ graph TB
 | 框架 | Next.js 16 (App Router, Turbopack) |
 | 前端 | React 19, Tailwind CSS 4, shadcn/ui |
 | 状态管理 | Zustand 5, TanStack Query v5 |
-| 数据库 | PostgreSQL 17 + Prisma 7 (Driver Adapter) |
+| 数据库 | PostgreSQL 17 + Prisma 7 (Driver Adapter) + pgvector |
+| RAG | Python FastAPI + pgvector 向量检索 |
 | 缓存 | Redis 7 (ioredis) |
 | 认证 | RS256 JWT (jose) + bcryptjs |
 | 网关通信 | WebSocket (ws) + Docker API (dockerode) |
@@ -250,6 +262,7 @@ graph TB
 | Agent | 6 | CRUD、克隆、分类、文件管理 |
 | Skills | 12 | ClawHub 市场、安装/发布、版本管理、IDE 编辑 |
 | 实例 | 13 | Docker 创建、外部接入、健康监控、配置编辑 |
+| 知识库 | 8 | 文档上传、OCR、语义检索、流式问答、作用域管理 |
 | 认证 | 5 | JWT 登录、Token 轮转、限流 |
 | 组织 | 5 | 用户/部门 CRUD、RBAC 权限 |
 | 审计 | 2 | 操作日志、CSV 导出 |
@@ -309,6 +322,12 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 - Skill development — IDE-style file editor, develop locally and publish to ClawHub
 - Version management — installation tracking, version checks, and one-click upgrades
 - Scope control — PERSONAL / DEPARTMENT / GLOBAL skill scopes
+
+**Knowledge Base (RAG)**
+- Document upload — PDF, DOCX, TXT, Markdown with automatic OCR and chunking
+- Semantic search — pgvector-powered similarity search with streaming Q&A
+- Scope management — PERSONAL / DEPARTMENT / GLOBAL knowledge base isolation
+- Smart reuse — automatically reuse OCR output from previous documents in the same KB
 
 **Multi-Instance Management**
 - One-click Docker creation — configure image, ports, bind settings and deploy
@@ -411,9 +430,11 @@ graph TB
     end
 
     subgraph Storage["Storage"]
-        PG["PostgreSQL 17<br/>14 Data Models"]
+        PG["PostgreSQL 17 + pgvector<br/>14 Data Models"]
         RD["Redis 7<br/>Rate Limit + Health Counter"]
     end
+
+    RAG["RAG Service<br/>Doc Parsing + Vector Search"]
 
     subgraph Instances["OpenClaw Instances"]
         OC1["Instance 1 (Docker)"]
@@ -428,6 +449,8 @@ graph TB
     API --> GW
     API --> PG
     API --> RD
+    API -- "Docs/Search" --> RAG
+    RAG --> PG
     GW --> Health
     GW -- "WebSocket" --> OC1
     GW -- "WebSocket" --> OC2
@@ -440,6 +463,7 @@ graph TB
     style NextJS fill:#fff3e0
     style Backend fill:#e8f5e9
     style Storage fill:#fce4ec
+    style RAG fill:#fff9c4
     style Instances fill:#f3e5f5
 ```
 
@@ -450,7 +474,8 @@ graph TB
 | Framework | Next.js 16 (App Router, Turbopack) |
 | Frontend | React 19, Tailwind CSS 4, shadcn/ui |
 | State | Zustand 5, TanStack Query v5 |
-| Database | PostgreSQL 17 + Prisma 7 (Driver Adapter) |
+| Database | PostgreSQL 17 + Prisma 7 (Driver Adapter) + pgvector |
+| RAG | Python FastAPI + pgvector vector search |
 | Cache | Redis 7 (ioredis) |
 | Auth | RS256 JWT (jose) + bcryptjs |
 | Gateway | WebSocket (ws) + Docker API (dockerode) |
@@ -464,6 +489,7 @@ graph TB
 | Agents | 6 | CRUD, clone, classify, file management |
 | Skills | 12 | ClawHub marketplace, install/publish, version management, IDE editor |
 | Instances | 13 | Docker create, external gateway, health monitoring, config editor |
+| Knowledge Base | 8 | Document upload, OCR, semantic search, streaming Q&A, scope management |
 | Auth | 5 | JWT login, token rotation, rate limiting |
 | Org | 5 | User/department CRUD, RBAC |
 | Audit | 2 | Operation logs, CSV export |
