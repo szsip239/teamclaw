@@ -4,12 +4,18 @@ import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation, param } from '@/lib/middleware/auth'
 import type { AuthContext } from '@/lib/middleware/auth'
+import { readFile } from 'fs/promises'
+import { join } from 'path'
 import { installSkillSchema } from '@/lib/validations/skill'
-import { canInstallToAgent } from '@/lib/skills/permissions'
-import { listSkillFiles, readSkillFile } from '@/lib/skills/fs'
+import { listSkillFiles, getSkillDir } from '@/lib/skills/fs'
 import { dockerManager } from '@/lib/docker'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
-import { extractAgentsConfig, resolveWorkspacePath, containerWorkspacePath } from '@/lib/agents/helpers'
+import {
+  extractAgentsConfig,
+  resolveWorkspacePath,
+  containerWorkspacePath,
+  isAgentVisible,
+} from '@/lib/agents/helpers'
 import { auditLog } from '@/lib/audit'
 
 /**
@@ -55,15 +61,52 @@ export const POST = withAuth(
         return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
       }
       if (!instance.containerId && !instance.workspacePath) {
-        return NextResponse.json({ error: 'Instance has no container or workspace path configured' }, { status: 400 })
+        return NextResponse.json(
+          { error: 'Instance has no container or workspace path configured' },
+          { status: 400 },
+        )
       }
 
-      // Check agent permission via AgentMeta
-      const agentMeta = await prisma.agentMeta.findUnique({
-        where: { instanceId_agentId: { instanceId, agentId } },
-      })
-      if (!canInstallToAgent(agentMeta, user)) {
-        return NextResponse.json({ error: 'No permission to install to this agent' }, { status: 403 })
+      // Permission check: InstanceAccess (Layer 1) + AgentMeta visibility (Layer 2)
+      // Consistent with chat.send permission model
+      if (user.role !== 'SYSTEM_ADMIN') {
+        if (!user.departmentId) {
+          return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
+        }
+
+        const access = await prisma.instanceAccess.findUnique({
+          where: {
+            departmentId_instanceId: {
+              departmentId: user.departmentId,
+              instanceId,
+            },
+          },
+        })
+        if (!access) {
+          return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
+        }
+
+        // Layer 2: Agent visibility check
+        const agentMeta = await prisma.agentMeta.findUnique({
+          where: { instanceId_agentId: { instanceId, agentId } },
+        })
+        if (agentMeta) {
+          if (!isAgentVisible(agentMeta, user)) {
+            return NextResponse.json(
+              { error: 'No permission to install to this agent' },
+              { status: 403 },
+            )
+          }
+        } else {
+          // Fallback: legacy agentIds check from InstanceAccess
+          const allowedIds = access.agentIds as string[] | null
+          if (allowedIds && !allowedIds.includes(agentId)) {
+            return NextResponse.json(
+              { error: 'No permission to install to this agent' },
+              { status: 403 },
+            )
+          }
+        }
       }
 
       // Resolve the target skill directory
@@ -82,14 +125,20 @@ export const POST = withAuth(
         const adapter = registry.getAdapter(instanceId)
         const client = registry.getClient(instanceId)
         if (!adapter || !client) {
-          return NextResponse.json({ error: 'Instance not connected, cannot get agent workspace path' }, { status: 400 })
+          return NextResponse.json(
+            { error: 'Instance not connected, cannot get agent workspace path' },
+            { status: 400 },
+          )
         }
 
         const configResult = await adapter.getConfig(client)
         const { defaults, list } = extractAgentsConfig(configResult.config)
         const agentConfig = list.find((a) => a.id === agentId)
         if (!agentConfig) {
-          return NextResponse.json({ error: `Agent "${agentId}" not found in instance config` }, { status: 404 })
+          return NextResponse.json(
+            { error: `Agent "${agentId}" not found in instance config` },
+            { status: 404 },
+          )
         }
 
         const workspace = resolveWorkspacePath(agentConfig, defaults)
@@ -104,10 +153,13 @@ export const POST = withAuth(
       // Read all files from skill dir on host (recursive)
       const files = await collectAllFiles(skill.slug)
       if (files.length === 0) {
-        return NextResponse.json({ error: 'Skill directory is empty, no files to install' }, { status: 400 })
+        return NextResponse.json(
+          { error: 'Skill directory is empty, no files to install' },
+          { status: 400 },
+        )
       }
 
-      // Write files to target (container or host filesystem)
+      // Write files to target (container via tar archive, or host filesystem)
       try {
         if (isExternal) {
           await fs.mkdir(targetDir, { recursive: true, mode: 0o755 })
@@ -117,15 +169,9 @@ export const POST = withAuth(
             await fs.writeFile(filePath, file.content, { mode: 0o644 })
           }
         } else {
+          // Use putArchive (tar stream) — handles binary files safely
           await dockerManager.ensureContainerDir(instance.containerId!, targetDir)
-          for (const file of files) {
-            const containerFilePath = `${targetDir}/${file.path}`
-            const lastSlash = containerFilePath.lastIndexOf('/')
-            if (lastSlash > 0) {
-              await dockerManager.ensureContainerDir(instance.containerId!, containerFilePath.slice(0, lastSlash))
-            }
-            await dockerManager.writeContainerFile(instance.containerId!, containerFilePath, file.content)
-          }
+          await dockerManager.writeFilesToContainer(instance.containerId!, targetDir, files)
         }
       } catch (err) {
         return NextResponse.json(
@@ -189,13 +235,13 @@ export const POST = withAuth(
   ),
 )
 
-/** Recursively collect all files from a skill directory with their content */
+/** Recursively collect all files from a skill directory as Buffers (binary-safe) */
 async function collectAllFiles(
   slug: string,
   subdir?: string,
-): Promise<{ path: string; content: string }[]> {
+): Promise<{ path: string; content: Buffer }[]> {
   const entries = await listSkillFiles(slug, subdir)
-  const result: { path: string; content: string }[] = []
+  const result: { path: string; content: Buffer }[] = []
 
   for (const entry of entries) {
     if (entry.type === 'directory') {
@@ -203,7 +249,8 @@ async function collectAllFiles(
       result.push(...nested)
     } else {
       try {
-        const content = await readSkillFile(slug, entry.path)
+        const fullPath = join(getSkillDir(slug), entry.path)
+        const content = await readFile(fullPath)
         result.push({ path: entry.path, content })
       } catch {
         // Skip files that can't be read

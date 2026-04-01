@@ -1,18 +1,19 @@
-"use client"
+'use client'
 
-import { memo, useRef, useEffect, useState, useCallback } from "react"
-import { Bot, Loader2, RefreshCw, Plus } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Button } from "@/components/ui/button"
-import { useChatStore } from "@/stores/chat-store"
-import { chatKeys, useNewConversation } from "@/hooks/use-chat"
-import { useT } from "@/stores/language-store"
-import { ChatMessageBubble } from "./chat-message-bubble"
-import { ChatAssistantMessage } from "./chat-assistant-message"
-import type { ChatMessage } from "@/types/chat"
+import { memo, useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { Bot, Loader2, RefreshCw, Plus, Clock } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { useChatStore } from '@/stores/chat-store'
+import { chatKeys, useNewConversation } from '@/hooks/use-chat'
+import { useT } from '@/stores/language-store'
+import { ChatMessageBubble } from './chat-message-bubble'
+import { ChatAssistantMessage } from './chat-assistant-message'
+import { ChatProcessGroup } from './chat-process-group'
+import type { ChatMessage } from '@/types/chat'
 
-const SEPARATOR_PREFIX = "__separator__:"
+const SEPARATOR_PREFIX = '__separator__:'
 
 function isSeparator(content: string): string | null {
   if (content.startsWith(SEPARATOR_PREFIX)) {
@@ -21,11 +22,70 @@ function isSeparator(content: string): string | null {
   return null
 }
 
+/** An intermediate assistant message: has thinking/tools but no visible content */
+function isIntermediate(msg: ChatMessage): boolean {
+  return (
+    msg.role === 'assistant' &&
+    !msg.content &&
+    !msg.error &&
+    (!!msg.thinking || (msg.toolCalls?.length ?? 0) > 0)
+  )
+}
+
+// ─── Render item types ──────────────────────────────────────────────
+
+type RenderItem =
+  | { type: 'message'; id: string; message: ChatMessage }
+  | { type: 'assistant-grouped'; id: string; message: ChatMessage; steps: ChatMessage[] }
+  | { type: 'process-only'; id: string; steps: ChatMessage[] }
+
+/** Group consecutive intermediate assistant messages for compact rendering */
+function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
+  const items: RenderItem[] = []
+  let i = 0
+
+  while (i < messages.length) {
+    const msg = messages[i]
+
+    if (isIntermediate(msg)) {
+      // Collect consecutive intermediate messages
+      const steps: ChatMessage[] = []
+      while (i < messages.length && isIntermediate(messages[i])) {
+        steps.push(messages[i])
+        i++
+      }
+
+      // If next message is a final assistant with content, merge steps into it
+      if (i < messages.length && messages[i].role === 'assistant' && messages[i].content) {
+        items.push({
+          type: 'assistant-grouped',
+          id: messages[i].id,
+          message: messages[i],
+          steps,
+        })
+        i++
+      } else {
+        // Standalone process group (no final content message follows)
+        items.push({
+          type: 'process-only',
+          id: steps[0].id,
+          steps,
+        })
+      }
+    } else {
+      items.push({ type: 'message', id: msg.id, message: msg })
+      i++
+    }
+  }
+
+  return items
+}
+
+// ─── Sub-components ─────────────────────────────────────────────────
+
 function ContextSeparator({ type }: { type: string }) {
   const t = useT()
-  const label = type === "context-restart"
-    ? t('chat.contextRestart')
-    : t('chat.contextReset')
+  const label = type === 'context-restart' ? t('chat.contextRestart') : t('chat.contextReset')
 
   return (
     <div className="flex items-center gap-2 py-3 text-muted-foreground text-xs">
@@ -49,8 +109,9 @@ function SessionLostBanner() {
   function handleRetry() {
     if (!activeSessionId) return
     setRetrying(true)
-    qc.invalidateQueries({ queryKey: chatKeys.history(activeSessionId) })
-      .finally(() => setRetrying(false))
+    qc.invalidateQueries({ queryKey: chatKeys.history(activeSessionId) }).finally(() =>
+      setRetrying(false),
+    )
   }
 
   function handleNewConversation() {
@@ -80,7 +141,11 @@ function SessionLostBanner() {
           onClick={handleRetry}
           disabled={retrying}
         >
-          {retrying ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+          {retrying ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <RefreshCw className="size-3" />
+          )}
           {t('chat.sessionRetry')}
         </Button>
         <Button
@@ -90,7 +155,11 @@ function SessionLostBanner() {
           onClick={handleNewConversation}
           disabled={newConversation.isPending}
         >
-          {newConversation.isPending ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+          {newConversation.isPending ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Plus className="size-3" />
+          )}
           {t('chat.sessionNewConversation')}
         </Button>
       </div>
@@ -110,22 +179,20 @@ function HistoryLoadingSkeleton() {
   )
 }
 
-const MemoizedMessage = memo(function MemoizedMessage({
-  message,
-}: {
-  message: ChatMessage
-}) {
+const MemoizedMessage = memo(function MemoizedMessage({ message }: { message: ChatMessage }) {
   const separatorType = isSeparator(message.content)
   if (separatorType) {
     return <ContextSeparator type={separatorType} />
   }
 
-  return message.role === "user" ? (
+  return message.role === 'user' ? (
     <ChatMessageBubble message={message} />
   ) : (
     <ChatAssistantMessage message={message} isStreaming={false} />
   )
 })
+
+// ─── Main Component ─────────────────────────────────────────────────
 
 interface ChatMessageListProps {
   isLoadingHistory: boolean
@@ -135,6 +202,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
   const t = useT()
   const messages = useChatStore((s) => s.messages)
   const streamingMessage = useChatStore((s) => s.streamingMessage)
+  const queuedMessages = useChatStore((s) => s.queuedMessages)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const remoteStreaming = useChatStore((s) => s.remoteStreaming)
   const connectionStatus = useChatStore((s) => s.connectionStatus)
@@ -155,14 +223,18 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
     setIsNearBottom(el.scrollHeight - el.scrollTop - el.clientHeight < threshold)
   }, [])
 
+  // Group consecutive intermediate messages for compact rendering
+  const renderItems = useMemo(() => buildRenderItems(messages), [messages])
+
   // Auto-scroll when near bottom: on new messages or streaming content changes
   const messageCount = messages.length
+  const queuedCount = queuedMessages.length
   const streamingContent = streamingMessage?.content?.length ?? 0
   useEffect(() => {
     if (isNearBottom) {
-      bottomRef.current?.scrollIntoView({ behavior: "instant" })
+      bottomRef.current?.scrollIntoView({ behavior: 'instant' })
     }
-  }, [messageCount, streamingContent, isStreaming, remoteStreaming, isNearBottom])
+  }, [messageCount, queuedCount, streamingContent, isStreaming, remoteStreaming, isNearBottom])
 
   if (isLoadingHistory && messages.length === 0) {
     return (
@@ -182,9 +254,22 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
           </div>
         )}
         {connectionStatus === 'session-lost' && <SessionLostBanner />}
-        {messages.map((msg) => (
-          <MemoizedMessage key={msg.id} message={msg} />
-        ))}
+        {renderItems.map((item) => {
+          if (item.type === 'process-only') {
+            return <ChatProcessGroup key={item.id} steps={item.steps} />
+          }
+          if (item.type === 'assistant-grouped') {
+            return (
+              <ChatAssistantMessage
+                key={item.id}
+                message={item.message}
+                isStreaming={false}
+                processSteps={item.steps}
+              />
+            )
+          }
+          return <MemoizedMessage key={item.id} message={item.message} />
+        })}
         {streamingMessage && (
           <ChatAssistantMessage
             key={streamingMessage.id}
@@ -192,6 +277,20 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
             isStreaming={isStreaming}
           />
         )}
+        {/* Queued messages — removed from array once user msg appears in history */}
+        {queuedMessages.map((qm) => (
+          <div key={qm.id} className="flex justify-end">
+            <div className="flex max-w-[85%] items-end gap-2">
+              <div className="rounded-2xl rounded-br-sm bg-primary/80 px-4 py-2.5 text-primary-foreground">
+                <p className="text-sm whitespace-pre-wrap">{qm.content}</p>
+                <div className="mt-1 flex items-center justify-end gap-1 text-[10px] opacity-60">
+                  <Clock className="size-2.5" />
+                  {t('chat.queued')}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
         {remoteStreaming && !streamingMessage && (
           <div className="flex justify-start">
             <div className="flex max-w-[85%] items-start gap-2">

@@ -16,8 +16,8 @@ import type { ModelProviderConfig } from '@/lib/docker/config-generator'
 import { auditLog } from '@/lib/audit'
 import type { InstanceStatus, Prisma } from '@/generated/prisma'
 
-const GATEWAY_PORT = 18789          // Container-internal gateway port (fixed)
-const BASE_HOST_PORT = 18800        // Host port range starts here (avoids conflict with local OpenClaw on 18789)
+const GATEWAY_PORT = 18789 // Container-internal gateway port (fixed)
+const BASE_HOST_PORT = 18800 // Host port range starts here (avoids conflict with local OpenClaw on 18789)
 
 // Simple mutex to prevent port race conditions during concurrent instance creation
 let portLock: Promise<void> = Promise.resolve()
@@ -48,7 +48,9 @@ async function findNextAvailablePort(): Promise<number> {
   // until our DB record is created (caller must resolve the lock).
   let release!: () => void
   const prev = portLock
-  portLock = new Promise<void>((r) => { release = r })
+  portLock = new Promise<void>((r) => {
+    release = r
+  })
   await prev
 
   try {
@@ -91,9 +93,12 @@ function buildGatewayUrl(containerName: string, hostPort: number): string {
 }
 
 /** Resolve model provider from request body or environment defaults. */
-function resolveModelProvider(
-  input?: { name: string; apiKey: string; api?: string; baseUrl?: string },
-): ModelProviderConfig | undefined {
+function resolveModelProvider(input?: {
+  name: string
+  apiKey: string
+  api?: string
+  baseUrl?: string
+}): ModelProviderConfig | undefined {
   if (input) {
     return input
   }
@@ -123,11 +128,23 @@ export const GET = withAuth(
     const statusFilter = url.searchParams.get('status') as InstanceStatus | null
     const search = url.searchParams.get('search') || ''
 
+    // Non-SYSTEM_ADMIN: restrict to instances accessible via InstanceAccess
+    let accessibleFilter: { id?: { in: string[] } } = {}
+    if (user.role !== 'SYSTEM_ADMIN') {
+      if (!user.departmentId) {
+        return NextResponse.json({ instances: [], total: 0, page, pageSize })
+      }
+      const accessGrants = await prisma.instanceAccess.findMany({
+        where: { departmentId: user.departmentId },
+        select: { instanceId: true },
+      })
+      accessibleFilter = { id: { in: accessGrants.map((a) => a.instanceId) } }
+    }
+
     const where = {
+      ...accessibleFilter,
       ...(statusFilter ? { status: statusFilter } : {}),
-      ...(search
-        ? { name: { contains: search, mode: 'insensitive' as const } }
-        : {}),
+      ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
     }
 
     const [instances, total] = await Promise.all([
@@ -222,9 +239,7 @@ async function createDockerInstance(
 
   // 4. Determine Docker image
   const imageName =
-    body.docker?.imageName ||
-    process.env.DEFAULT_OPENCLAW_IMAGE ||
-    'alpine/openclaw:latest'
+    body.docker?.imageName || process.env.DEFAULT_OPENCLAW_IMAGE || 'alpine/openclaw:latest'
 
   // 5. Pull image if not present, or if user requested latest
   const exists = await dockerManager.imageExists(imageName)
@@ -315,7 +330,10 @@ async function createDockerInstance(
       await dockerManager.restartContainer(containerId)
     } catch (sandboxErr) {
       // Non-fatal: instance works without sandbox, log and continue
-      console.warn(`[instance:create] Sandbox init failed for ${name}:`, (sandboxErr as Error).message)
+      console.warn(
+        `[instance:create] Sandbox init failed for ${name}:`,
+        (sandboxErr as Error).message,
+      )
     }
   } catch (err) {
     // Keep container for debugging — create DB record with ERROR status
@@ -454,7 +472,10 @@ async function createExternalInstance(
       data: { status: 'ONLINE' },
     })
   } catch (err) {
-    console.error(`[instance:create] External gateway connect failed for ${name}:`, (err as Error).message)
+    console.error(
+      `[instance:create] External gateway connect failed for ${name}:`,
+      (err as Error).message,
+    )
   }
 
   const updated = await prisma.instance.findUnique({

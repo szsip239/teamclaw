@@ -1,76 +1,84 @@
-"use client"
+'use client'
 
-import { useState, useRef, useCallback, useEffect } from "react"
-import { Send, Square, Paperclip, X, FileText, FolderOpen } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { useChatStore } from "@/stores/chat-store"
-import { useT } from "@/stores/language-store"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { Send, Square, Paperclip, X, FileText, FolderOpen } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { useChatStore } from '@/stores/chat-store'
+import { useT } from '@/stores/language-store'
+import { useIsMobile } from '@/hooks/use-mobile'
 
-const IMAGE_MAX_SIZE = 10 * 1024 * 1024  // 10MB
-const FILE_MAX_SIZE = 5 * 1024 * 1024    // 5MB
-const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
-const FILE_ACCEPT = "image/*,.pdf,.txt,.md,.csv,.json,.html"
+const IMAGE_MAX_SIZE = 10 * 1024 * 1024 // 10MB
+const FILE_MAX_SIZE = 5 * 1024 * 1024 // 5MB
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+const FILE_ACCEPT = 'image/*,.pdf,.txt,.md,.csv,.json,.html'
 
 interface PendingFile {
   name: string
   mimeType: string
   size: number
-  content: string   // pure base64 (for API)
-  dataUrl: string   // data URL (for preview)
+  content: string // pure base64 (for API)
+  dataUrl: string // data URL (for preview)
 }
 
 export function ChatInput() {
   const t = useT()
   const isMobile = useIsMobile()
-  const [input, setInput] = useState("")
+  const [input, setInput] = useState('')
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const isStreaming = useChatStore((s) => s.isStreaming)
-  const abortController = useChatStore((s) => s.abortController)
+  const remoteStreaming = useChatStore((s) => s.remoteStreaming)
+  const abortChat = useChatStore((s) => s.abortChat)
   const sendMessage = useChatStore((s) => s.sendMessage)
+  const queueMessage = useChatStore((s) => s.queueMessage)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const mobileFilePanelOpen = useChatStore((s) => s.mobileFilePanelOpen)
   const setMobileFilePanelOpen = useChatStore((s) => s.setMobileFilePanelOpen)
 
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if ((!text && pendingFiles.length === 0) || !selectedAgent || isStreaming) return
+    if ((!text && pendingFiles.length === 0) || !selectedAgent) return
 
     const message = text || '__attachment_only__'
     const attachments = pendingFiles.length > 0 ? pendingFiles : undefined
 
-    setInput("")
+    setInput('')
     setPendingFiles([])
-    sendMessage(
-      selectedAgent.instanceId,
-      selectedAgent.agentId,
-      message,
-      activeSessionId ?? undefined,
-      attachments,
-    )
+
+    if (isStreaming || remoteStreaming) {
+      // Agent is running — queue the message (gateway handles serialization)
+      queueMessage(message, attachments)
+    } else {
+      sendMessage(
+        selectedAgent.instanceId,
+        selectedAgent.agentId,
+        message,
+        activeSessionId ?? undefined,
+        attachments,
+      )
+    }
 
     // Reset textarea height
     if (textareaRef.current) {
-      textareaRef.current.style.height = "auto"
+      textareaRef.current.style.height = 'auto'
     }
     // Reset file input
     if (fileInputRef.current) {
-      fileInputRef.current.value = ""
+      fileInputRef.current.value = ''
     }
-  }, [input, pendingFiles, selectedAgent, isStreaming, sendMessage, activeSessionId])
+  }, [input, pendingFiles, selectedAgent, isStreaming, sendMessage, queueMessage, activeSessionId])
 
   function handleStop() {
-    abortController?.abort()
+    abortChat()
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Ignore Enter during IME composition (e.g. Chinese/Japanese input)
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleSend()
     }
@@ -80,8 +88,8 @@ export function ChatInput() {
     setInput(e.target.value)
     // Auto-resize
     const el = e.target
-    el.style.height = "auto"
-    el.style.height = Math.min(el.scrollHeight, 200) + "px"
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -91,7 +99,7 @@ export function ChatInput() {
       const isImage = IMAGE_TYPES.has(file.type)
       const maxSize = isImage ? IMAGE_MAX_SIZE : FILE_MAX_SIZE
       if (file.size > maxSize) {
-        alert(t('chat.fileTooLarge', { name: file.name, limit: isImage ? "10MB" : "5MB" }))
+        alert(t('chat.fileTooLarge', { name: file.name, limit: isImage ? '10MB' : '5MB' }))
         continue
       }
       // Check total count
@@ -103,26 +111,29 @@ export function ChatInput() {
       const reader = new FileReader()
       reader.onload = () => {
         const dataUrl = reader.result as string
-        const base64 = dataUrl.split(",")[1]
-        setPendingFiles(prev => {
+        const base64 = dataUrl.split(',')[1]
+        setPendingFiles((prev) => {
           if (prev.length >= 5) return prev
-          return [...prev, {
-            name: file.name,
-            mimeType: file.type || "application/octet-stream",
-            size: file.size,
-            content: base64,
-            dataUrl,
-          }]
+          return [
+            ...prev,
+            {
+              name: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              size: file.size,
+              content: base64,
+              dataUrl,
+            },
+          ]
         })
       }
       reader.readAsDataURL(file)
     }
     // Reset so the same file can be selected again
-    e.target.value = ""
+    e.target.value = ''
   }
 
   function removeFile(index: number) {
-    setPendingFiles(prev => prev.filter((_, i) => i !== index))
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
   function formatFileSize(bytes: number): string {
@@ -137,10 +148,10 @@ export function ChatInput() {
     const vv = window.visualViewport
     if (!vv) return
     function onResize() {
-      textareaRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+      textareaRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
     }
-    vv.addEventListener("resize", onResize)
-    return () => vv.removeEventListener("resize", onResize)
+    vv.addEventListener('resize', onResize)
+    return () => vv.removeEventListener('resize', onResize)
   }, [isMobile])
 
   const showFilePanelButton = isMobile && activeSessionId && selectedAgent?.hasContainer !== false
@@ -153,7 +164,7 @@ export function ChatInput() {
           <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
             {pendingFiles.map((file, i) => (
               <div key={i} className="group relative shrink-0">
-                {file.mimeType.startsWith("image/") ? (
+                {file.mimeType.startsWith('image/') ? (
                   <img
                     src={file.dataUrl}
                     alt={file.name}
@@ -163,8 +174,12 @@ export function ChatInput() {
                   <div className="bg-muted flex h-16 items-center gap-1.5 rounded-lg border px-3">
                     <FileText className="text-muted-foreground size-4 shrink-0" />
                     <div className="flex flex-col">
-                      <span className="max-w-[120px] truncate text-xs font-medium">{file.name}</span>
-                      <span className="text-muted-foreground text-[10px]">{formatFileSize(file.size)}</span>
+                      <span className="max-w-[120px] truncate text-xs font-medium">
+                        {file.name}
+                      </span>
+                      <span className="text-muted-foreground text-[10px]">
+                        {formatFileSize(file.size)}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -224,28 +239,21 @@ export function ChatInput() {
             placeholder={t('chat.inputPlaceholder')}
             className="min-h-[44px] max-h-[200px] resize-none"
             rows={1}
-            disabled={isStreaming}
             enterKeyHint="send"
           />
-          {isStreaming ? (
-            <Button
-              variant="destructive"
-              size="icon"
-              className="shrink-0"
-              onClick={handleStop}
-            >
+          {isStreaming && (
+            <Button variant="destructive" size="icon" className="shrink-0" onClick={handleStop}>
               <Square className="size-4" />
             </Button>
-          ) : (
-            <Button
-              size="icon"
-              className="shrink-0"
-              onClick={handleSend}
-              disabled={!input.trim() && pendingFiles.length === 0 || !selectedAgent}
-            >
-              <Send className="size-4" />
-            </Button>
           )}
+          <Button
+            size="icon"
+            className="shrink-0"
+            onClick={handleSend}
+            disabled={(!input.trim() && pendingFiles.length === 0) || !selectedAgent}
+          >
+            <Send className="size-4" />
+          </Button>
         </div>
       </div>
     </div>

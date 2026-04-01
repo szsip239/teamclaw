@@ -364,8 +364,11 @@ const en: Record<TranslationKey, string> = {
   'chat.maxAttachments': 'Maximum of 5 attachments allowed',
   'chat.attachment': '(attachment)',
   'chat.thinking': 'Thinking',
+  'chat.thinkingN': 'Thinking ×{n}',
   'chat.toolInput': 'Input',
   'chat.toolOutput': 'Output',
+  'chat.processSteps': '{n} steps',
+  'chat.queued': 'Queued',
   'chat.imageAlt': 'Image',
   'chat.downloadImage': 'Download image',
   'chat.contextRestart': 'AI context restarted from here',
@@ -987,6 +990,15 @@ const en: Record<TranslationKey, string> = {
   'profile.currentPasswordWrong': 'Current password is incorrect',
   'profile.save': 'Save',
   'profile.noDepartment': 'None',
+
+  // ── Chart Rendering ─────────────────────────────────
+  'chat.chartLoading': 'Loading chart...',
+  'chat.chartError': 'Failed to render chart',
+  'chat.chartJsonInvalid': 'Invalid chart configuration',
+  'chat.chartTooLarge': 'Chart data too large (max 50KB)',
+  'chat.chartShowRaw': 'Show raw config',
+  'chat.mermaidError': 'Failed to render diagram',
+  'chat.mermaidShowRaw': 'Show raw syntax',
 
   // ── File Panel ────────────────────────────────────
   'chat.filePanel': 'Files',

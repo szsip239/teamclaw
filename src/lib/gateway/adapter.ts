@@ -38,10 +38,16 @@ export interface GatewayAdapter {
     options?: ChatOptions,
   ): Promise<unknown>
 
+  abortChat(client: GatewayClient, sessionKey: string): Promise<void>
+
   // Config operations — read/write openclaw.json via gateway protocol
   getConfig(client: GatewayClient): Promise<ConfigGetResult>
   getSchema(client: GatewayClient): Promise<ConfigSchemaResult>
-  patchConfig(client: GatewayClient, patch: Record<string, unknown>, baseHash: string): Promise<void>
+  patchConfig(
+    client: GatewayClient,
+    patch: Record<string, unknown>,
+    baseHash: string,
+  ): Promise<void>
   applyConfig(client: GatewayClient, raw: string, baseHash: string): Promise<void>
 
   // Chat history
@@ -52,7 +58,10 @@ export interface GatewayAdapter {
 
   // Cron
   listCronJobs(client: GatewayClient): Promise<CronListResult>
-  getCronRuns(client: GatewayClient, params?: { jobId?: string; limit?: number }): Promise<CronRunsResult>
+  getCronRuns(
+    client: GatewayClient,
+    params?: { jobId?: string; limit?: number },
+  ): Promise<CronRunsResult>
   toggleCronJob(client: GatewayClient, jobId: string, enabled: boolean): Promise<{ ok: boolean }>
   runCronJob(client: GatewayClient, jobId: string): Promise<{ ok: boolean; runId?: string }>
   deleteCronJob(client: GatewayClient, jobId: string): Promise<{ ok: boolean }>
@@ -121,6 +130,10 @@ export class GatewayV1Adapter implements GatewayAdapter {
     return client.request('chat.send', params, timeoutMs)
   }
 
+  async abortChat(client: GatewayClient, sessionKey: string): Promise<void> {
+    await client.request('chat.abort', { sessionKey })
+  }
+
   async getHistory(
     client: GatewayClient,
     sessionKey: string,
@@ -148,11 +161,7 @@ export class GatewayV1Adapter implements GatewayAdapter {
     })
   }
 
-  async applyConfig(
-    client: GatewayClient,
-    raw: string,
-    baseHash: string,
-  ): Promise<void> {
+  async applyConfig(client: GatewayClient, raw: string, baseHash: string): Promise<void> {
     await client.request('config.apply', { raw, baseHash })
   }
 
@@ -165,7 +174,7 @@ export class GatewayV1Adapter implements GatewayAdapter {
     // Normalize: response may be { jobs: [...] } or a raw array
     const rawJobs: Record<string, unknown>[] = Array.isArray(result)
       ? result
-      : ((result as Record<string, unknown>)?.jobs as Record<string, unknown>[]) ?? []
+      : (((result as Record<string, unknown>)?.jobs as Record<string, unknown>[]) ?? [])
 
     // Gateway returns `id` not `jobId`, and timestamps as epoch ms inside `state`
     const jobs = rawJobs.map((raw) => {
@@ -179,7 +188,8 @@ export class GatewayV1Adapter implements GatewayAdapter {
         lastRunAt: state?.lastRunAtMs
           ? new Date(state.lastRunAtMs as number).toISOString()
           : (raw.lastRunAt as string | undefined),
-        lastRunStatus: (state?.lastRunStatus as string) ?? (raw.lastRunStatus as string | undefined),
+        lastRunStatus:
+          (state?.lastRunStatus as string) ?? (raw.lastRunStatus as string | undefined),
         createdAt: raw.createdAtMs
           ? new Date(raw.createdAtMs as number).toISOString()
           : (raw.createdAt as string | undefined),
@@ -203,9 +213,9 @@ export class GatewayV1Adapter implements GatewayAdapter {
     const obj = result as Record<string, unknown> | null
     const rawRuns: Record<string, unknown>[] = Array.isArray(result)
       ? result
-      : (obj?.runs as Record<string, unknown>[])
-        ?? (obj?.entries as Record<string, unknown>[])
-        ?? []
+      : ((obj?.runs as Record<string, unknown>[]) ??
+        (obj?.entries as Record<string, unknown>[]) ??
+        [])
 
     // Normalize: gateway returns entries with field names that differ from our CronRun type.
     // Key mappings: runAtMs→startedAt, ts→endedAt, sessionId→runId, status "ok"→"success",
@@ -248,19 +258,13 @@ export class GatewayV1Adapter implements GatewayAdapter {
     return { ok: true }
   }
 
-  async runCronJob(
-    client: GatewayClient,
-    jobId: string,
-  ): Promise<{ ok: boolean; runId?: string }> {
+  async runCronJob(client: GatewayClient, jobId: string): Promise<{ ok: boolean; runId?: string }> {
     const result = await client.request('cron.run', { jobId, mode: 'force' })
     const obj = result as Record<string, unknown> | null
     return { ok: true, runId: obj?.runId as string | undefined }
   }
 
-  async deleteCronJob(
-    client: GatewayClient,
-    jobId: string,
-  ): Promise<{ ok: boolean }> {
+  async deleteCronJob(client: GatewayClient, jobId: string): Promise<{ ok: boolean }> {
     await client.request('cron.remove', { jobId })
     return { ok: true }
   }

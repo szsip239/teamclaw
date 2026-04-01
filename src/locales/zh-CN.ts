@@ -359,8 +359,11 @@ const zhCN = {
   'chat.maxAttachments': '最多只能上传 5 个附件',
   'chat.attachment': '(附件)',
   'chat.thinking': '思考过程',
+  'chat.thinkingN': '思考 ×{n}',
   'chat.toolInput': '输入',
   'chat.toolOutput': '输出',
+  'chat.processSteps': '{n} 个步骤',
+  'chat.queued': '已排队',
   'chat.imageAlt': '图片',
   'chat.downloadImage': '下载图片',
   'chat.contextRestart': 'AI 上下文从此处重新开始',
@@ -972,6 +975,15 @@ const zhCN = {
   'profile.currentPasswordWrong': '当前密码不正确',
   'profile.save': '保存',
   'profile.noDepartment': '无',
+
+  // ── Chart Rendering ─────────────────────────────────
+  'chat.chartLoading': '加载图表中…',
+  'chat.chartError': '图表渲染失败',
+  'chat.chartJsonInvalid': '图表配置无效',
+  'chat.chartTooLarge': '图表数据过大（最大 50KB）',
+  'chat.chartShowRaw': '显示原始配置',
+  'chat.mermaidError': '图表渲染失败',
+  'chat.mermaidShowRaw': '显示原始语法',
 
   // ── File Panel ────────────────────────────────────
   'chat.filePanel': '文件',

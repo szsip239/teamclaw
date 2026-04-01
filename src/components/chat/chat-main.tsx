@@ -1,14 +1,14 @@
-"use client"
+'use client'
 
-import { useEffect, useRef } from "react"
-import { useQueryClient } from "@tanstack/react-query"
-import { useChatStore } from "@/stores/chat-store"
-import { chatKeys, useChatSessions, useChatHistory } from "@/hooks/use-chat"
-import { ChatHeader } from "./chat-header"
-import { ChatMessageList } from "./chat-message-list"
-import { ChatInput } from "./chat-input"
-import { ChatWelcome } from "./chat-welcome"
-import { assembleHistoryMessages } from "@/lib/chat/message-assembly"
+import { useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useChatStore } from '@/stores/chat-store'
+import { chatKeys, useChatSessions, useChatHistory } from '@/hooks/use-chat'
+import { ChatHeader } from './chat-header'
+import { ChatMessageList } from './chat-message-list'
+import { ChatInput } from './chat-input'
+import { ChatWelcome } from './chat-welcome'
+import { assembleHistoryMessages } from '@/lib/chat/message-assembly'
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
@@ -25,25 +25,25 @@ export function ChatMain() {
   // Prefer active session, fall back to the most recent inactive one (e.g. after gateway restart).
   const { data: sessions } = useChatSessions()
   const matchingSession = selectedAgent
-    ? (activeSessionId
+    ? ((activeSessionId
         ? sessions?.find((s) => s.id === activeSessionId)
-        : sessions?.find(
+        : (sessions?.find(
             (s) =>
               s.instanceId === selectedAgent.instanceId &&
               s.agentId === selectedAgent.agentId &&
               s.isActive,
           ) ??
           sessions?.find(
-            (s) =>
-              s.instanceId === selectedAgent.instanceId &&
-              s.agentId === selectedAgent.agentId,
-          )
-      ) ?? null
+            (s) => s.instanceId === selectedAgent.instanceId && s.agentId === selectedAgent.agentId,
+          ))) ?? null)
     : null
 
   // Fetch history when we have a matching session
-  const { data: historyData, isLoading: isLoadingHistoryQuery, dataUpdatedAt } =
-    useChatHistory(matchingSession?.id ?? null)
+  const {
+    data: historyData,
+    isLoading: isLoadingHistoryQuery,
+    dataUpdatedAt,
+  } = useChatHistory(matchingSession?.id ?? null)
 
   // Track which session + data version we've already loaded to avoid
   // redundant re-applies while still picking up background refetch results.
@@ -92,10 +92,12 @@ export function ChatMain() {
     // When streaming just ended, cached historyData.isRunning may be stale
     // (it was fetched before/during our run and never refreshed while
     // isStreaming was true). Skip re-enabling remoteStreaming until fresh
-    // data arrives from the next poll.
+    // data arrives from the next poll — UNLESS there are queued messages
+    // that need polling to pick up their responses.
     const justFinishedStreaming = wasStreamingRef.current
     if (justFinishedStreaming) wasStreamingRef.current = false
-    setRemoteStreaming(!!historyData?.isRunning && !justFinishedStreaming)
+    const hasPendingRuns = useChatStore.getState().pendingQueuedRuns > 0
+    setRemoteStreaming((!!historyData?.isRunning && !justFinishedStreaming) || hasPendingRuns)
 
     if (!alreadyLoaded) {
       loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
@@ -108,10 +110,69 @@ export function ChatMain() {
       // history fetch races ahead of gateway processing the first chat.send request.
       if (assembled.length > 0 || messagesLength === 0) {
         setMessages(assembled)
+
+        // Reconcile queued messages (two concerns):
+        const store = useChatStore.getState()
+        if (store.queuedMessages.length > 0 || store.pendingQueuedRuns > 0) {
+          const historyUserContents = new Set(
+            assembled.filter((m) => m.role === 'user').map((m) => m.content),
+          )
+          // 1. Display: hide bubble once user msg appears in history
+          const displayRemaining = store.queuedMessages.filter(
+            (q) => !historyUserContents.has(q.content),
+          )
+          // 2. Polling: count responses that arrived
+          let responsesArrived = 0
+          for (const q of store.queuedMessages) {
+            const idx = assembled.findIndex((m) => m.role === 'user' && m.content === q.content)
+            if (idx === -1) continue
+            if (assembled.slice(idx + 1).some((m) => m.role === 'assistant' && m.content)) {
+              responsesArrived++
+            }
+          }
+          // Fallback: queuedMessages already cleared by a prior poll but
+          // pendingQueuedRuns still > 0. Check if the last user message has a response.
+          if (
+            responsesArrived === 0 &&
+            store.queuedMessages.length === 0 &&
+            store.pendingQueuedRuns > 0
+          ) {
+            const lastUserIdx = assembled.findLastIndex((m) => m.role === 'user')
+            if (
+              lastUserIdx !== -1 &&
+              assembled.slice(lastUserIdx + 1).some((m) => m.role === 'assistant' && m.content)
+            ) {
+              responsesArrived = store.pendingQueuedRuns // clear all
+            }
+          }
+          const updates: Record<string, unknown> = {}
+          if (displayRemaining.length !== store.queuedMessages.length) {
+            updates.queuedMessages = displayRemaining
+          }
+          if (responsesArrived > 0) {
+            const newPending = Math.max(0, store.pendingQueuedRuns - responsesArrived)
+            updates.pendingQueuedRuns = newPending
+            if (newPending === 0 && !historyData.isRunning) {
+              setRemoteStreaming(false)
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            useChatStore.setState(updates)
+          }
+        }
       }
       setConnectionStatus(historyData.connectionStatus ?? 'ok')
     }
-  }, [historyData, matchingSession, setMessages, setConnectionStatus, setRemoteStreaming, messagesLength, dataUpdatedAt, isStreaming])
+  }, [
+    historyData,
+    matchingSession,
+    setMessages,
+    setConnectionStatus,
+    setRemoteStreaming,
+    messagesLength,
+    dataUpdatedAt,
+    isStreaming,
+  ])
 
   if (!selectedAgent) {
     return (
