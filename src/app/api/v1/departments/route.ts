@@ -7,9 +7,13 @@ import { auditLog } from '@/lib/audit'
 // ─── GET /api/v1/departments — List departments ────────────────────
 
 export const GET = withAuth(
-  withPermission('departments:view', async (_req) => {
+  withPermission('departments:view', async (_req, { user }) => {
     try {
+      // DEPT_ADMIN can only see their own department
+      const where = user.role === 'DEPT_ADMIN' && user.departmentId ? { id: user.departmentId } : {}
+
       const departments = await prisma.department.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         include: {
           _count: {
@@ -34,10 +38,7 @@ export const GET = withAuth(
       return NextResponse.json({ departments: result })
     } catch (err) {
       console.error('GET /api/v1/departments error:', err)
-      return NextResponse.json(
-        { error: 'Failed to fetch department list' },
-        { status: 500 },
-      )
+      return NextResponse.json({ error: 'Failed to fetch department list' }, { status: 500 })
     }
   }),
 )

@@ -29,9 +29,27 @@ export const GET = withAuth(
     const categoryFilter = url.searchParams.get('category') as AgentCategory | null
 
     const connectedIds = registry.getConnectedIds()
-    const targetIds = instanceFilter
+    let targetIds = instanceFilter
       ? connectedIds.filter((id) => id === instanceFilter)
       : connectedIds
+
+    // InstanceAccess filtering: non-SYSTEM_ADMIN can only see agents on accessible instances
+    // Also tracks per-instance agentIds restrictions (null = all, string[] = specific)
+    let allowedAgentIdsMap: Map<string, string[] | null> | null = null
+    if (user.role !== 'SYSTEM_ADMIN') {
+      if (!user.departmentId) {
+        return NextResponse.json({ agents: [], instanceCount: 0 })
+      }
+      const accessGrants = await prisma.instanceAccess.findMany({
+        where: { departmentId: user.departmentId },
+        select: { instanceId: true, agentIds: true },
+      })
+      const accessibleIds = new Set(accessGrants.map((a) => a.instanceId))
+      targetIds = targetIds.filter((id) => accessibleIds.has(id))
+      allowedAgentIdsMap = new Map(
+        accessGrants.map((a) => [a.instanceId, a.agentIds as string[] | null]),
+      )
+    }
 
     // Fetch instance names for display
     const instances = await prisma.instance.findMany({
@@ -59,7 +77,9 @@ export const GET = withAuth(
           // Fetch config and live agents in parallel
           const [configResult, agentsResult] = await Promise.all([
             adapter.getConfig(client),
-            adapter.getAgents(client).catch((): AgentsListResult => ({ agents: [], defaultId: null })),
+            adapter
+              .getAgents(client)
+              .catch((): AgentsListResult => ({ agents: [], defaultId: null })),
           ])
           const { agents: liveAgents, defaultId } = agentsResult
 
@@ -72,7 +92,7 @@ export const GET = withAuth(
           for (const live of liveAgents) allAgentIds.add(live.id)
 
           // Build name map from live agents (id → display name)
-          const liveNameMap = new Map(liveAgents.map(a => [a.id, a.name]))
+          const liveNameMap = new Map(liveAgents.map((a) => [a.id, a.name]))
 
           // Auto-register unknown agents as DEFAULT
           await autoRegisterAgents(instanceId, [...allAgentIds], user.id)
@@ -87,9 +107,15 @@ export const GET = withAuth(
           })
           const metaMap = new Map(metas.map((m) => [m.agentId, m]))
 
+          // InstanceAccess agentIds restriction (null = all, string[] = specific)
+          const allowedAgentIds = allowedAgentIdsMap?.get(instanceId)
+
           // Build agents from config list
           for (const entry of list) {
+            // Layer 1: InstanceAccess agentIds filter
+            if (allowedAgentIds && !allowedAgentIds.includes(entry.id)) continue
             const meta = metaMap.get(entry.id)
+            // Layer 2: AgentMeta category visibility
             if (meta && !isAgentVisible(meta, user)) continue
             if (categoryFilter && meta?.category !== categoryFilter) continue
 
@@ -111,6 +137,7 @@ export const GET = withAuth(
           // Merge implicit agents from live list (host instances without explicit agents.list)
           for (const live of liveAgents) {
             if (!configIds.has(live.id)) {
+              if (allowedAgentIds && !allowedAgentIds.includes(live.id)) continue
               const meta = metaMap.get(live.id)
               if (meta && !isAgentVisible(meta, user)) continue
               if (categoryFilter && meta?.category !== categoryFilter) continue
@@ -120,7 +147,10 @@ export const GET = withAuth(
                 instanceId,
                 instanceName: nameMap.get(instanceId) || instanceId,
                 name: live.name || live.id,
-                workspace: live.workspace || (defaults as Record<string, unknown>).workspace as string || '~/.openclaw/workspace',
+                workspace:
+                  live.workspace ||
+                  ((defaults as Record<string, unknown>).workspace as string) ||
+                  '~/.openclaw/workspace',
                 isDefault: defaultId ? live.id === defaultId : live.id === 'main',
                 models: defaults.models,
                 sandbox: defaults.sandbox,
@@ -156,7 +186,15 @@ export const POST = withAuth(
       }
       await ensureRegistryInitialized()
 
-      const { instanceId, id: agentId, workspace, models, sandbox, category: requestedCategory, departmentId } = body
+      const {
+        instanceId,
+        id: agentId,
+        workspace,
+        models,
+        sandbox,
+        category: requestedCategory,
+        departmentId,
+      } = body
 
       // Determine category (default based on role if not specified)
       const category = requestedCategory || getDefaultCategory(user.role)
@@ -216,7 +254,11 @@ export const POST = withAuth(
       // adds it to the existing list. Avoids sending back redacted values from
       // existing entries which would crash OpenClaw (SIGUSR1 on "truncated" detection).
       try {
-        await adapter.patchConfig(client, { agents: { list: [sanitizeAgentEntry(newAgent)] } }, hash)
+        await adapter.patchConfig(
+          client,
+          { agents: { list: [sanitizeAgentEntry(newAgent)] } },
+          hash,
+        )
       } catch (err) {
         return NextResponse.json(
           { error: `Configuration update failed:${(err as Error).message}` },
@@ -231,13 +273,13 @@ export const POST = withAuth(
           instanceId,
           agentId,
           category,
-          departmentId: category === 'DEPARTMENT' ? (departmentId || user.departmentId) : null,
+          departmentId: category === 'DEPARTMENT' ? departmentId || user.departmentId : null,
           ownerId: category === 'PERSONAL' ? user.id : null,
           createdById: user.id,
         },
         update: {
           category,
-          departmentId: category === 'DEPARTMENT' ? (departmentId || user.departmentId) : null,
+          departmentId: category === 'DEPARTMENT' ? departmentId || user.departmentId : null,
           ownerId: category === 'PERSONAL' ? user.id : null,
         },
       })

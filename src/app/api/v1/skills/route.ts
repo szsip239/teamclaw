@@ -4,8 +4,17 @@ import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { auditLog } from '@/lib/audit'
 import { createSkillSchema } from '@/lib/validations/skill'
-import { isSkillVisible, canCreateSkillWithCategory, getDefaultSkillCategory } from '@/lib/skills/permissions'
-import { ensureSkillDir, generateDefaultSkillMd, writeSkillFile, parseFrontmatter } from '@/lib/skills/fs'
+import {
+  isSkillVisible,
+  canCreateSkillWithCategory,
+  getDefaultSkillCategory,
+} from '@/lib/skills/permissions'
+import {
+  ensureSkillDir,
+  generateDefaultSkillMd,
+  writeSkillFile,
+  parseFrontmatter,
+} from '@/lib/skills/fs'
 import type { SkillOverview, SkillListResponse, SkillCategory } from '@/types/skill'
 
 // GET /api/v1/skills — List skills with pagination and filtering
@@ -19,7 +28,7 @@ export const GET = withAuth(
     const tag = url.searchParams.get('tag')
     const search = url.searchParams.get('search')
 
-    // Build where clause
+    // Build where clause with visibility baked in (so pagination works correctly)
     const where: Prisma.SkillWhereInput = {}
     if (category) where.category = category
     if (source) where.source = source
@@ -30,6 +39,29 @@ export const GET = withAuth(
         { slug: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
       ]
+    }
+
+    // Visibility filter at DB level: SYSTEM_ADMIN sees all, others see DEFAULT + own DEPARTMENT + own PERSONAL
+    if (user.role !== 'SYSTEM_ADMIN') {
+      const visibilityConditions: Prisma.SkillWhereInput[] = [
+        { category: 'DEFAULT' },
+        { category: 'PERSONAL', creatorId: user.id },
+      ]
+      if (user.departmentId) {
+        visibilityConditions.push({
+          category: 'DEPARTMENT',
+          departments: { some: { id: user.departmentId } },
+        })
+      }
+      // Merge with existing search OR conditions
+      if (where.OR) {
+        // search + visibility: AND(OR(search conditions), OR(visibility conditions))
+        const searchConditions = where.OR
+        delete where.OR
+        where.AND = [{ OR: searchConditions }, { OR: visibilityConditions }]
+      } else {
+        where.OR = visibilityConditions
+      }
     }
 
     const [skills, total] = await Promise.all([
@@ -47,25 +79,22 @@ export const GET = withAuth(
       prisma.skill.count({ where }),
     ])
 
-    // Filter by visibility
-    const visibleSkills: SkillOverview[] = skills
-      .filter((skill) => isSkillVisible(skill, user))
-      .map((skill) => ({
-        id: skill.id,
-        slug: skill.slug,
-        name: skill.name,
-        description: skill.description,
-        emoji: skill.emoji,
-        category: skill.category as SkillCategory,
-        source: skill.source as 'LOCAL' | 'CLAWHUB',
-        version: skill.version,
-        tags: skill.tags,
-        creatorName: skill.creator.name,
-        departments: skill.departments.map((d) => ({ id: d.id, name: d.name })),
-        installationCount: skill._count.installations,
-        createdAt: skill.createdAt.toISOString(),
-        updatedAt: skill.updatedAt.toISOString(),
-      }))
+    const visibleSkills: SkillOverview[] = skills.map((skill) => ({
+      id: skill.id,
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      emoji: skill.emoji,
+      category: skill.category as SkillCategory,
+      source: skill.source as 'LOCAL' | 'CLAWHUB',
+      version: skill.version,
+      tags: skill.tags,
+      creatorName: skill.creator.name,
+      departments: skill.departments.map((d) => ({ id: d.id, name: d.name })),
+      installationCount: skill._count.installations,
+      createdAt: skill.createdAt.toISOString(),
+      updatedAt: skill.updatedAt.toISOString(),
+    }))
 
     const response: SkillListResponse = {
       skills: visibleSkills,
@@ -88,7 +117,16 @@ export const POST = withAuth(
         body: typeof ctx.body
       }
 
-      const { slug, name, description, emoji, category: requestedCategory, departmentIds, tags, skillContent } = body
+      const {
+        slug,
+        name,
+        description,
+        emoji,
+        category: requestedCategory,
+        departmentIds,
+        tags,
+        skillContent,
+      } = body
 
       // Determine category
       const category = requestedCategory || getDefaultSkillCategory(user.role)
@@ -104,10 +142,7 @@ export const POST = withAuth(
       // Check slug uniqueness
       const existing = await prisma.skill.findUnique({ where: { slug } })
       if (existing) {
-        return NextResponse.json(
-          { error: `Slug "${slug}" is already in use` },
-          { status: 409 },
-        )
+        return NextResponse.json({ error: `Slug "${slug}" is already in use` }, { status: 409 })
       }
 
       // Resolve department IDs for DEPARTMENT category
@@ -122,7 +157,8 @@ export const POST = withAuth(
 
       // Create filesystem directory + initial SKILL.md
       await ensureSkillDir(slug)
-      const initialContent = skillContent || generateDefaultSkillMd(name, description ?? undefined, emoji ?? undefined)
+      const initialContent =
+        skillContent || generateDefaultSkillMd(name, description ?? undefined, emoji ?? undefined)
       await writeSkillFile(slug, 'SKILL.md', initialContent)
 
       // Parse frontmatter for caching in DB

@@ -14,8 +14,8 @@ import {
   extractAgentsConfig,
   resolveWorkspacePath,
   containerWorkspacePath,
-  isAgentVisible,
 } from '@/lib/agents/helpers'
+import { canInstallToAgent } from '@/lib/skills/permissions'
 import { auditLog } from '@/lib/audit'
 
 /**
@@ -86,12 +86,12 @@ export const POST = withAuth(
           return NextResponse.json({ error: 'No access to this instance' }, { status: 403 })
         }
 
-        // Layer 2: Agent visibility check
+        // Layer 2: Agent install permission check (stricter than visibility)
         const agentMeta = await prisma.agentMeta.findUnique({
           where: { instanceId_agentId: { instanceId, agentId } },
         })
         if (agentMeta) {
-          if (!isAgentVisible(agentMeta, user)) {
+          if (!canInstallToAgent(agentMeta, user)) {
             return NextResponse.json(
               { error: 'No permission to install to this agent' },
               { status: 403 },

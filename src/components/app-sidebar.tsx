@@ -52,7 +52,9 @@ export function AppSidebar() {
   const logout = useAuthStore((s) => s.logout)
   const t = useT()
 
-  const navGroups = [
+  const role = user?.role
+
+  const allNavGroups = [
     {
       label: t('nav.workspace'),
       items: [
@@ -63,7 +65,12 @@ export function AppSidebar() {
     {
       label: t('nav.management'),
       items: [
-        { title: t('nav.instances'), icon: Server, href: '/instances' },
+        {
+          title: t('nav.instances'),
+          icon: Server,
+          href: '/instances',
+          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
+        },
         { title: t('nav.agents'), icon: Bot, href: '/agents' },
         { title: t('nav.skills'), icon: Puzzle, href: '/skills' },
         { title: t('nav.knowledgeBases'), icon: BookOpen, href: '/knowledge-bases' },
@@ -72,19 +79,47 @@ export function AppSidebar() {
     },
     {
       label: t('nav.organization'),
+      roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
       items: [
-        { title: t('nav.users'), icon: Users, href: '/users' },
-        { title: t('nav.departments'), icon: Building2, href: '/departments' },
+        {
+          title: t('nav.users'),
+          icon: Users,
+          href: '/users',
+          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
+        },
+        {
+          title: t('nav.departments'),
+          icon: Building2,
+          href: '/departments',
+          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
+        },
       ],
     },
     {
       label: t('nav.system'),
+      roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
       items: [
-        { title: t('nav.resources'), icon: KeyRound, href: '/resources' },
-        { title: t('nav.logs'), icon: ScrollText, href: '/logs' },
+        { title: t('nav.resources'), icon: KeyRound, href: '/resources', roles: ['SYSTEM_ADMIN'] },
+        {
+          title: t('nav.logs'),
+          icon: ScrollText,
+          href: '/logs',
+          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
+        },
       ],
     },
   ]
+
+  // Filter groups and items by role
+  const navGroups = allNavGroups
+    .filter((group) => !group.roles || (role && group.roles.includes(role)))
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) => !('roles' in item) || (role && item.roles?.includes(role)),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
 
   const initials = user?.name
     ? user.name
