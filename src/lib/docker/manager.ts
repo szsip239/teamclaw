@@ -53,7 +53,7 @@ function demuxDockerStream(buf: Buffer): string {
 function stripAnsi(str: string): string {
   return str
     .replace(/\x1B(?:\[[0-9;]*[a-zA-Z]|\][^\x07]*\x07)/g, '') // ANSI CSI + OSC sequences
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')              // stray control chars (keep \t \n \r)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '') // stray control chars (keep \t \n \r)
 }
 
 const globalForDocker = globalThis as unknown as { dockerManager: DockerManager }
@@ -103,12 +103,15 @@ export class DockerManager {
       binds.push(...options.extraBinds)
     }
 
-    const env = options.env
-      ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
-      : []
+    const env = options.env ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`) : []
 
     const restartPolicy = options.restartPolicy
-      ? { Name: options.restartPolicy === 'on-failure' ? 'on-failure' as const : options.restartPolicy }
+      ? {
+          Name:
+            options.restartPolicy === 'on-failure'
+              ? ('on-failure' as const)
+              : options.restartPolicy,
+        }
       : { Name: 'unless-stopped' as const }
 
     const container = await this.docker.createContainer({
@@ -163,8 +166,7 @@ export class DockerManager {
     }
     if (!version && info.Config.Labels) {
       version =
-        info.Config.Labels['org.opencontainers.image.version'] ||
-        info.Config.Labels['version']
+        info.Config.Labels['org.opencontainers.image.version'] || info.Config.Labels['version']
     }
 
     // Extract port mappings
@@ -242,10 +244,11 @@ export class DockerManager {
       // whose Content-Digest header is the manifest-list digest — the same
       // digest stored in RepoDigests.
       const { execSync } = await import('child_process')
-      const raw = execSync(
-        `docker buildx imagetools inspect --raw ${imageName} 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 15000, maxBuffer: 1024 * 1024 },
-      )
+      const raw = execSync(`docker buildx imagetools inspect --raw ${imageName} 2>/dev/null`, {
+        encoding: 'utf-8',
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+      })
       // Compute sha256 of the raw manifest — this IS the manifest-list digest
       const { createHash } = await import('crypto')
       const remoteDigest = 'sha256:' + createHash('sha256').update(raw).digest('hex')
@@ -289,9 +292,9 @@ export class DockerManager {
 
     // Map to Docker's download architecture name
     const archMap: Record<string, string> = {
-      'x86_64': 'x86_64',
-      'aarch64': 'aarch64',
-      'arm64': 'aarch64',
+      x86_64: 'x86_64',
+      aarch64: 'aarch64',
+      arm64: 'aarch64',
     }
     const dockerArch = archMap[arch] || 'x86_64'
 
@@ -402,7 +405,7 @@ export class DockerManager {
     const escaped = content.replace(/'/g, "'\\''")
     const exec = await container.exec({
       // Pass filePath as a positional argument to avoid shell injection
-      Cmd: ['sh', '-c', "printf '%s' '" + escaped + "' > \"$1\"", '--', filePath],
+      Cmd: ['sh', '-c', "printf '%s' '" + escaped + '\' > "$1"', '--', filePath],
       AttachStdout: true,
       AttachStderr: true,
     })
@@ -443,7 +446,7 @@ export class DockerManager {
       Cmd: [
         'sh',
         '-c',
-        'cd "$1" 2>/dev/null && find . -maxdepth 1 -not -name \'.\' -printf \'%y %s %P\\n\' 2>/dev/null || ls -la "$1" 2>/dev/null || echo \'\'',
+        "cd \"$1\" 2>/dev/null && find . -maxdepth 1 -not -name '.' -printf '%y %s %P\\n' 2>/dev/null || ls -la \"$1\" 2>/dev/null || echo ''",
         '--',
         dirPath,
       ],
@@ -591,6 +594,29 @@ export class DockerManager {
     await container.putArchive(pack, { path: containerDir })
   }
 
+  /**
+   * Write multiple files to a container in a single tar archive.
+   * Intermediate directories are created automatically by putArchive.
+   */
+  async writeFilesToContainer(
+    containerId: string,
+    basePath: string,
+    files: { path: string; content: Buffer }[],
+  ): Promise<void> {
+    if (!isContainerPathSafe(basePath)) {
+      throw new Error(`Unsafe container path: ${basePath}`)
+    }
+    const container = this.docker.getContainer(containerId)
+
+    const pack = tar.pack()
+    for (const file of files) {
+      pack.entry({ name: file.path, size: file.content.length, uid: 1000, gid: 1000 }, file.content)
+    }
+    pack.finalize()
+
+    await container.putArchive(pack, { path: basePath })
+  }
+
   async downloadFileFromContainer(containerId: string, filePath: string): Promise<Buffer> {
     if (!isContainerPathSafe(filePath)) {
       throw new Error(`Unsafe container file path: ${filePath}`)
@@ -617,10 +643,7 @@ export class DockerManager {
     })
   }
 
-  async downloadDirAsArchive(
-    containerId: string,
-    dirPath: string,
-  ): Promise<NodeJS.ReadableStream> {
+  async downloadDirAsArchive(containerId: string, dirPath: string): Promise<NodeJS.ReadableStream> {
     if (!isContainerPathSafe(dirPath)) {
       throw new Error(`Unsafe container directory path: ${dirPath}`)
     }
@@ -650,11 +673,7 @@ export class DockerManager {
     })
   }
 
-  async moveContainerPath(
-    containerId: string,
-    source: string,
-    target: string,
-  ): Promise<void> {
+  async moveContainerPath(containerId: string, source: string, target: string): Promise<void> {
     if (!isContainerPathSafe(source) || !isContainerPathSafe(target)) {
       throw new Error(`Unsafe container path: ${source} → ${target}`)
     }
@@ -702,5 +721,4 @@ export class DockerManager {
 }
 
 export const dockerManager =
-  globalForDocker.dockerManager ||
-  (globalForDocker.dockerManager = new DockerManager())
+  globalForDocker.dockerManager || (globalForDocker.dockerManager = new DockerManager())

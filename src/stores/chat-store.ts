@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 import { streamChat } from '@/lib/chat-stream'
 import { assembleFromResponse } from '@/lib/chat/message-assembly'
-import type { ChatAgentInfo, ChatMessage, ChatToolCall, ChatHistoryResponse, ChatAttachment, ChatContentBlock } from '@/types/chat'
+import type {
+  ChatAgentInfo,
+  ChatMessage,
+  ChatToolCall,
+  ChatHistoryResponse,
+  ChatAttachment,
+  ChatContentBlock,
+} from '@/types/chat'
 
 interface ChatState {
   // Selected agent
@@ -19,6 +26,13 @@ interface ChatState {
   // Streaming message — isolated from messages[] to avoid full-list re-renders.
   // Only components subscribing to streamingMessage re-render on each delta.
   streamingMessage: ChatMessage | null
+
+  // Messages queued while agent is running — for display only.
+  // Removed once the user message appears in gateway history.
+  queuedMessages: ChatMessage[]
+  // Counter for queued runs awaiting response — drives polling independently of display.
+  // Decremented when the assistant response arrives in history.
+  pendingQueuedRuns: number
 
   // Streaming mutations (operate on streamingMessage, not messages[])
   addUserMessage: (content: string, attachments?: ChatAttachment[]) => void
@@ -44,8 +58,29 @@ interface ChatState {
     agentId: string,
     message: string,
     sessionId?: string,
-    attachments?: { name: string; content: string; mimeType: string; size: number; dataUrl: string }[],
+    attachments?: {
+      name: string
+      content: string
+      mimeType: string
+      size: number
+      dataUrl: string
+    }[],
   ) => Promise<void>
+
+  // Queue a message while agent is running (fire-and-forget to gateway)
+  queueMessage: (
+    message: string,
+    attachments?: {
+      name: string
+      content: string
+      mimeType: string
+      size: number
+      dataUrl: string
+    }[],
+  ) => void
+
+  // Abort the running agent + SSE stream
+  abortChat: () => void
 
   // Session management
   clearMessages: () => void
@@ -95,7 +130,10 @@ async function syncFromHistory(
       const existing = useChatStore.getState().messages
       // Build ordered lookup: content → array of preserved data entries.
       // Multiple user messages with the same text each keep their own images.
-      const preservedByContent = new Map<string, { attachments?: ChatAttachment[]; contentBlocks?: ChatContentBlock[] }[]>()
+      const preservedByContent = new Map<
+        string,
+        { attachments?: ChatAttachment[]; contentBlocks?: ChatContentBlock[] }[]
+      >()
       for (const msg of existing) {
         if (msg.role !== 'user') continue
         if (!msg.attachments?.length && !msg.contentBlocks?.length) continue
@@ -118,11 +156,55 @@ async function syncFromHistory(
           const saved = arr[idx]
           consumed.set(msg.content, idx + 1)
           if (!msg.attachments?.length && saved.attachments) msg.attachments = saved.attachments
-          if (!msg.contentBlocks?.length && saved.contentBlocks) msg.contentBlocks = saved.contentBlocks
+          if (!msg.contentBlocks?.length && saved.contentBlocks)
+            msg.contentBlocks = saved.contentBlocks
         }
       }
 
       set({ messages: assembled })
+
+      // Reconcile queued messages (two separate concerns):
+      // 1. Display: remove from queuedMessages when user msg appears in history
+      // 2. Polling: decrement pendingQueuedRuns when the RESPONSE arrives
+      const { queuedMessages, pendingQueuedRuns } = useChatStore.getState()
+      if (queuedMessages.length > 0 || pendingQueuedRuns > 0) {
+        const historyUserContents = new Set(
+          assembled.filter((m) => m.role === 'user').map((m) => m.content),
+        )
+        // Display: remove queued bubbles once they appear in history
+        const displayRemaining = queuedMessages.filter((q) => !historyUserContents.has(q.content))
+        // Polling: count how many queued messages got their response
+        let responsesArrived = 0
+        for (const q of queuedMessages) {
+          const idx = assembled.findIndex((m) => m.role === 'user' && m.content === q.content)
+          if (idx === -1) continue
+          if (assembled.slice(idx + 1).some((m) => m.role === 'assistant' && m.content)) {
+            responsesArrived++
+          }
+        }
+        // Fallback: queuedMessages already cleared but pendingQueuedRuns > 0
+        if (responsesArrived === 0 && queuedMessages.length === 0 && pendingQueuedRuns > 0) {
+          const lastUserIdx = assembled.findLastIndex((m) => m.role === 'user')
+          if (
+            lastUserIdx !== -1 &&
+            assembled.slice(lastUserIdx + 1).some((m) => m.role === 'assistant' && m.content)
+          ) {
+            responsesArrived = pendingQueuedRuns
+          }
+        }
+        const updates: Partial<ChatState> = {}
+        if (displayRemaining.length !== queuedMessages.length) {
+          updates.queuedMessages = displayRemaining
+        }
+        if (responsesArrived > 0) {
+          const newPending = Math.max(0, pendingQueuedRuns - responsesArrived)
+          updates.pendingQueuedRuns = newPending
+          if (newPending === 0) {
+            updates.remoteStreaming = false
+          }
+        }
+        if (Object.keys(updates).length > 0) set(updates)
+      }
     }
   } catch {
     // Silently fail — sync is a non-critical UI enhancement
@@ -138,6 +220,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   messages: [],
   streamingMessage: null,
+  queuedMessages: [],
+  pendingQueuedRuns: 0,
 
   setMessages: (messages) => set({ messages }),
 
@@ -190,10 +274,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // When a tool call arrives, any accumulated content is intermediate
       // narration (e.g. "Let me calculate..."), not the final answer.
       // Move it into thinking so it renders in the collapsible block.
-      const reclassifiedThinking =
-        msg.content
-          ? msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
-          : msg.thinking
+      const reclassifiedThinking = msg.content
+        ? msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
+        : msg.thinking
       return {
         streamingMessage: {
           ...msg,
@@ -227,7 +310,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let capturedSessionId = get().activeSessionId
 
     // 1. Add user message (with attachment previews for UI)
-    const uiAttachments: ChatAttachment[] | undefined = attachments?.map(a => ({
+    const uiAttachments: ChatAttachment[] | undefined = attachments?.map((a) => ({
       name: a.name,
       mimeType: a.mimeType,
       size: a.size,
@@ -258,14 +341,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const sid = capturedSessionId || get().activeSessionId
       if (sid && get().isStreaming && !syncing) {
         syncing = true
-        syncFromHistory(sid, set, { polling: true }).finally(() => { syncing = false })
+        syncFromHistory(sid, set, { polling: true }).finally(() => {
+          syncing = false
+        })
       }
     }, PROGRESS_POLL_INTERVAL)
 
     try {
       // 4. Stream events
       // Build attachments payload (base64 only, no data URL prefix)
-      const streamAttachments = attachments?.map(a => ({
+      const streamAttachments = attachments?.map((a) => ({
         name: a.name,
         content: a.content,
         mimeType: a.mimeType,
@@ -322,16 +407,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Merge streamingMessage into messages[] before clearing streaming state
       const finalStreaming = get().streamingMessage
+      // If queued messages exist, enable remoteStreaming so we poll for their results
+      const hasQueued = get().pendingQueuedRuns > 0
       if (finalStreaming) {
         set((s) => ({
           messages: [...s.messages, finalStreaming],
           streamingMessage: null,
           isStreaming: false,
-          remoteStreaming: false, // We just finished our own run — no remote streaming
+          remoteStreaming: hasQueued,
           abortController: null,
         }))
       } else {
-        set({ streamingMessage: null, isStreaming: false, remoteStreaming: false, abortController: null })
+        set({
+          streamingMessage: null,
+          isStreaming: false,
+          remoteStreaming: hasQueued,
+          abortController: null,
+        })
       }
 
       // 5. Sync with full history (gateway omits thinking + tool events during streaming)
@@ -350,14 +442,86 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (capturedSessionId) {
           qc.invalidateQueries({ queryKey: ['chat', 'history', capturedSessionId] })
         }
-      } catch { /* non-fatal */ }
+      } catch {
+        /* non-fatal */
+      }
+    }
+  },
+
+  queueMessage: (message, attachments) => {
+    const { selectedAgent } = get()
+    if (!selectedAgent) return
+
+    // Add to queuedMessages (NOT messages[]) — survives syncFromHistory overwrites
+    const uiAttachments: ChatAttachment[] | undefined = attachments?.map((a) => ({
+      name: a.name,
+      mimeType: a.mimeType,
+      size: a.size,
+      dataUrl: a.dataUrl,
+    }))
+    const queuedMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: message,
+      createdAt: new Date().toISOString(),
+      ...(uiAttachments ? { attachments: uiAttachments } : {}),
+    }
+    set((s) => ({
+      queuedMessages: [...s.queuedMessages, queuedMsg],
+      pendingQueuedRuns: s.pendingQueuedRuns + 1,
+    }))
+
+    // Fire-and-forget: send to gateway queue via lightweight endpoint
+    const queueAttachments = attachments?.map((a) => ({
+      fileName: a.name,
+      content: a.content,
+      mimeType: a.mimeType,
+    }))
+    fetch('/api/v1/chat/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instanceId: selectedAgent.instanceId,
+        agentId: selectedAgent.agentId,
+        message,
+        ...(queueAttachments?.length ? { attachments: queueAttachments } : {}),
+      }),
+      credentials: 'include',
+    }).catch(() => {})
+  },
+
+  abortChat: () => {
+    const { abortController, selectedAgent } = get()
+    // 1. Immediately abort the SSE fetch for instant UI feedback
+    if (abortController) abortController.abort()
+    // 2. Fire-and-forget: tell the gateway to abort the agent run
+    if (selectedAgent) {
+      fetch('/api/v1/chat/abort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: selectedAgent.instanceId,
+          agentId: selectedAgent.agentId,
+        }),
+        credentials: 'include',
+      }).catch(() => {})
     }
   },
 
   clearMessages: () => {
     const { abortController } = get()
     if (abortController) abortController.abort()
-    set({ messages: [], streamingMessage: null, isStreaming: false, abortController: null, activeSessionId: null, connectionStatus: 'ok', remoteStreaming: false })
+    set({
+      messages: [],
+      streamingMessage: null,
+      queuedMessages: [],
+      pendingQueuedRuns: 0,
+      isStreaming: false,
+      abortController: null,
+      activeSessionId: null,
+      connectionStatus: 'ok',
+      remoteStreaming: false,
+    })
   },
 
   connectionStatus: 'ok',
