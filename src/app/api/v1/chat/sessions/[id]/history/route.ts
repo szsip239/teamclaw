@@ -14,7 +14,13 @@ import {
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
-import type { ChatMessage, ChatToolCall, ChatSnapshotBatch, ChatHistoryResponse, ChatContentBlock } from '@/types/chat'
+import type {
+  ChatMessage,
+  ChatToolCall,
+  ChatSnapshotBatch,
+  ChatHistoryResponse,
+  ChatContentBlock,
+} from '@/types/chat'
 
 /**
  * Strip MEDIA:/Image saved:/file:/// references from assistant text.
@@ -152,7 +158,9 @@ export const GET = withAuth(
         id: row.id,
         role: row.role as 'user' | 'assistant',
         content: row.content,
-        ...(row.contentBlocks ? { contentBlocks: row.contentBlocks as unknown as ChatContentBlock[] } : {}),
+        ...(row.contentBlocks
+          ? { contentBlocks: row.contentBlocks as unknown as ChatContentBlock[] }
+          : {}),
         ...(row.thinking ? { thinking: row.thinking } : {}),
         ...(row.toolCalls ? { toolCalls: row.toolCalls as unknown as ChatToolCall[] } : {}),
         createdAt: row.createdAt.toISOString(),
@@ -178,7 +186,11 @@ export const GET = withAuth(
         const client = registry.getClient(session.instanceId)
         if (client) {
           const sessionKey = `agent:${session.agentId}:tc:${session.userId}`
-          const rawResult = await client.request('chat.history', { sessionKey, limit: 200 }, 10_000)
+          const rawResult = await client.request(
+            'chat.history',
+            { sessionKey, limit: 1000 },
+            10_000,
+          )
           const historyResult = rawResult as ChatHistoryResult
           const msgs = transformMessages(historyResult.messages ?? [])
 
@@ -199,7 +211,13 @@ export const GET = withAuth(
           // The session stays active so the user can simply send a new message to continue.
           const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
           const sessionAgeMs = Date.now() - session.createdAt.getTime()
-          if (!isPolling && !activeRuns.has(id) && currentMessages.length === 0 && sessionAgeMs > 30_000 && session.messageCount > 0) {
+          if (
+            !isPolling &&
+            !activeRuns.has(id) &&
+            currentMessages.length === 0 &&
+            sessionAgeMs > 30_000 &&
+            session.messageCount > 0
+          ) {
             connectionStatus = 'session-lost'
             if (session.liveMessages) {
               const cached = session.liveMessages as unknown as ChatMessage[]
@@ -239,8 +257,10 @@ export const GET = withAuth(
       const lastBatch = snapshots[snapshots.length - 1].messages
       let overlap = 0
       for (let i = 0; i < Math.min(lastBatch.length, currentMessages.length); i++) {
-        if (lastBatch[i].role === currentMessages[i].role &&
-            lastBatch[i].content === currentMessages[i].content) {
+        if (
+          lastBatch[i].role === currentMessages[i].role &&
+          lastBatch[i].content === currentMessages[i].content
+        ) {
           overlap++
         } else {
           break

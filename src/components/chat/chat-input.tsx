@@ -157,8 +157,8 @@ export function ChatInput() {
   const showFilePanelButton = isMobile && activeSessionId && selectedAgent?.hasContainer !== false
 
   return (
-    <div className="border-t px-4 py-3">
-      <div className="mx-auto max-w-3xl">
+    <div className="border-t px-3 py-3">
+      <div className="mx-auto max-w-[950px]">
         {/* Pending files preview */}
         {pendingFiles.length > 0 && (
           <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
