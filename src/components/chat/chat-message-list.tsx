@@ -170,7 +170,7 @@ function SessionLostBanner() {
 function HistoryLoadingSkeleton() {
   const t = useT()
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+    <div className="mx-auto flex max-w-[950px] flex-col gap-4 px-3 py-6">
       <div className="flex items-center justify-center gap-2 py-8">
         <Loader2 className="text-muted-foreground size-4 animate-spin" />
         <span className="text-muted-foreground text-sm">{t('chat.loadingHistory')}</span>
@@ -246,7 +246,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
 
   return (
     <ScrollArea className="flex-1" viewportRef={viewportRef} onScroll={handleScroll}>
-      <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+      <div className="mx-auto flex max-w-[950px] flex-col gap-4 px-3 py-6">
         {connectionStatus === 'unreachable' && (
           <div className="flex items-center gap-2 rounded-md bg-yellow-50 px-4 py-2 text-sm text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
             <span className="size-2 shrink-0 rounded-full bg-yellow-500" />

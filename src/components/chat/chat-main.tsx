@@ -91,11 +91,15 @@ export function ChatMain() {
 
     // When streaming just ended, cached historyData.isRunning may be stale
     // (it was fetched before/during our run and never refreshed while
-    // isStreaming was true). Skip re-enabling remoteStreaming until fresh
-    // data arrives from the next poll — UNLESS there are queued messages
-    // that need polling to pick up their responses.
+    // isStreaming was true). Keep suppressing isRunning until the server
+    // confirms the run is no longer active — otherwise intermediate effect
+    // re-runs (e.g. from syncFromHistory updating messagesLength) would
+    // re-enable remoteStreaming with stale data, causing the three-dot
+    // animation to briefly reappear after the reply has already arrived.
+    if (wasStreamingRef.current && !historyData?.isRunning) {
+      wasStreamingRef.current = false
+    }
     const justFinishedStreaming = wasStreamingRef.current
-    if (justFinishedStreaming) wasStreamingRef.current = false
     const hasPendingRuns = useChatStore.getState().pendingQueuedRuns > 0
     setRemoteStreaming((!!historyData?.isRunning && !justFinishedStreaming) || hasPendingRuns)
 
@@ -176,7 +180,7 @@ export function ChatMain() {
 
   if (!selectedAgent) {
     return (
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 min-w-0 flex-col">
         <ChatHeader />
         <ChatWelcome />
       </div>
@@ -184,7 +188,7 @@ export function ChatMain() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
       <ChatHeader />
       <ChatMessageList isLoadingHistory={isLoadingHistoryQuery} />
       <ChatInput />

@@ -14,11 +14,11 @@ export interface ChatAgentInfo {
 // Structured content block — represents a single piece of content in a message
 export interface ChatContentBlock {
   type: 'text' | 'image'
-  text?: string           // type=text
-  imageUrl?: string       // type=image (base64 data URL or http URL)
-  imageId?: string        // pre-computed hash for image endpoint lookup
-  mimeType?: string       // image/png, image/jpeg, etc.
-  alt?: string            // image description
+  text?: string // type=text
+  imageUrl?: string // type=image (base64 data URL or http URL)
+  imageId?: string // pre-computed hash for image endpoint lookup
+  mimeType?: string // image/png, image/jpeg, etc.
+  alt?: string // image description
 }
 
 // User-uploaded attachment metadata (for UI preview)
@@ -26,12 +26,12 @@ export interface ChatAttachment {
   name: string
   mimeType: string
   size: number
-  dataUrl: string    // base64 data URL for local preview
+  dataUrl: string // base64 data URL for local preview
 }
 
 export interface ChatSessionResponse {
   id: string
-  sessionId: string  // OpenClaw session key (e.g. "agent:<agentId>:tc:<userId>")
+  sessionId: string // OpenClaw session key (e.g. "agent:<agentId>:tc:<userId>")
   instanceId: string
   instanceName: string
   agentId: string
@@ -60,13 +60,13 @@ export interface ChatHistoryResponse {
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
-  content: string                    // plain text (backward compatible)
+  content: string // plain text (backward compatible)
   contentBlocks?: ChatContentBlock[] // structured content blocks (images, etc.)
   thinking?: string
   toolCalls?: ChatToolCall[]
   error?: string
   createdAt: string
-  attachments?: ChatAttachment[]     // user-uploaded attachments
+  attachments?: ChatAttachment[] // user-uploaded attachments
 }
 
 export interface ChatToolCall {
@@ -105,7 +105,7 @@ export interface ChatStreamErrorEvent {
 
 export interface ChatStreamImageEvent {
   type: 'image'
-  imageUrl: string   // base64 data URL or remote URL
+  imageUrl: string // base64 data URL or remote URL
   mimeType?: string
   alt?: string
 }
@@ -119,6 +119,10 @@ export interface ChatStreamSessionEvent {
   sessionId: string
 }
 
+export interface ChatStreamConfirmedEvent {
+  type: 'confirmed'
+}
+
 export type ChatStreamEvent =
   | ChatStreamTextEvent
   | ChatStreamThinkingEvent
@@ -128,3 +132,4 @@ export type ChatStreamEvent =
   | ChatStreamImageEvent
   | ChatStreamDoneEvent
   | ChatStreamSessionEvent
+  | ChatStreamConfirmedEvent

@@ -335,11 +335,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // tool calls and thinking that SSE can't deliver (OpenClaw doesn't broadcast
     // tool events). This is the equivalent of the user pressing "refresh" every
     // few seconds, but automatic.
+    //
+    // IMPORTANT: Don't start polling until the gateway confirms it has received
+    // the user message (first meaningful SSE event). chat.send is deferred behind
+    // async file ops (symlinks, image reads) in the server route — if the progress
+    // poll fires before the gateway receives the message, syncFromHistory would
+    // overwrite messages[] with stale history that doesn't include the user's
+    // latest message, causing it to disappear from the UI.
     let syncing = false
+    let gatewayConfirmed = false
+    const streamStartedAt = Date.now()
     const PROGRESS_POLL_INTERVAL = 5_000 // 5 seconds — fast enough to catch most tool calls
+    const CONFIRMED_FALLBACK_MS = 15_000 // fallback: start polling after 15s even without confirmed
     const progressTimer = setInterval(() => {
       const sid = capturedSessionId || get().activeSessionId
-      if (sid && get().isStreaming && !syncing) {
+      // Start polling once gateway confirms, or after fallback timeout
+      // (confirmed event might be lost due to connection issues or old client code)
+      const canPoll = gatewayConfirmed || Date.now() - streamStartedAt > CONFIRMED_FALLBACK_MS
+      if (sid && get().isStreaming && !syncing && canPoll) {
         syncing = true
         syncFromHistory(sid, set, { polling: true }).finally(() => {
           syncing = false
@@ -368,6 +381,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (!get().activeSessionId) {
               set({ activeSessionId: event.sessionId })
             }
+            break
+          case 'confirmed':
+            // Server confirms chat.send was dispatched to gateway —
+            // safe to start progress polling for thinking/tool calls.
+            gatewayConfirmed = true
             break
           case 'text':
             get().appendAssistantContent(event.content)

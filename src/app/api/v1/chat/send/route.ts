@@ -828,6 +828,9 @@ export async function POST(req: NextRequest) {
     await adapter.sendMessage(client, sessionKey, message, idempotencyKey, {
       attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
     })
+    // Signal client that gateway has received the message — safe to start
+    // progress polling for thinking/tool calls that aren't streamed via SSE.
+    write({ type: 'confirmed' })
   })().catch((err) => {
     write({ type: 'error', error: (err as Error).message || 'Failed to send message' })
     cleanup()
