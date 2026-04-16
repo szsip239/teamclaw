@@ -360,6 +360,12 @@ export class DockerManager {
       'for f in /home/node/.local/bin/*; do [ -x "$f" ] && ln -sf "$f" /usr/local/bin/ 2>/dev/null; done',
       // Also symlink root-installed tools (pip3 install as root lands here)
       'for f in /usr/local/lib/python3*/dist-packages/bin/* /usr/lib/python3*/dist-packages/bin/*; do [ -x "$f" ] && ln -sf "$f" /usr/local/bin/ 2>/dev/null; done',
+      // Install Chromium + system libs for agent-browser (headless browsing skills)
+      'apt-get install -y -qq chromium libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libxshmfence1 > /dev/null 2>&1 || true',
+      // Install agent-browser + qcc-agent-cli
+      'npm install -g agent-browser qcc-agent-cli > /dev/null 2>&1 || true',
+      // Symlink persisted .qcc config into home dir (config lives on mounted volume)
+      '[ -d /home/node/.openclaw/.qcc ] && ln -sf /home/node/.openclaw/.qcc /home/node/.qcc || true',
     ].join(' && ')
     const exec = await container.exec({
       Cmd: ['sh', '-c', script],

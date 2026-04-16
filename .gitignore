@@ -71,3 +71,9 @@ docker-compose.override.yml
 # Claude Code private config
 CLAUDE.md
 .claude/
+
+# local browser automation / tooling (not project code)
+chrome_user_data/
+log/
+drafts/
+config.toml

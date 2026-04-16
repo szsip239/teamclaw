@@ -1,18 +1,14 @@
-"use client"
+'use client'
 
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
-import { AppSidebar } from "@/components/app-sidebar"
-import { DashboardHeader } from "@/components/dashboard-header"
-import { useAuthStore } from "@/stores/auth-store"
-import { useT } from "@/stores/language-store"
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
+import { AppSidebar } from '@/components/app-sidebar'
+import { DashboardHeader } from '@/components/dashboard-header'
+import { useAuthStore } from '@/stores/auth-store'
+import { useT } from '@/stores/language-store'
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const isLoading = useAuthStore((s) => s.isLoading)
@@ -25,7 +21,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.push("/login")
+      router.push('/login')
     }
   }, [isLoading, user, router])
 
@@ -47,9 +43,9 @@ export default function DashboardLayout({
   return (
     <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <DashboardHeader />
-        <main className="flex flex-1 flex-col overflow-auto">{children}</main>
+        <main className="flex min-w-0 flex-1 flex-col overflow-auto">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   )

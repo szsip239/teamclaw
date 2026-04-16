@@ -1,9 +1,29 @@
 'use client'
 
 import { memo } from 'react'
+import dynamic from 'next/dynamic'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+function ChartLoadingSkeleton() {
+  return (
+    <div className="my-2 flex items-center justify-center h-40 rounded-md border bg-card text-muted-foreground text-xs">
+      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+    </div>
+  )
+}
+
+const ChatChartBlock = dynamic(() => import('./chat-chart-block').then((m) => m.ChatChartBlock), {
+  ssr: false,
+  loading: () => <ChartLoadingSkeleton />,
+})
+
+const ChatMermaidBlock = dynamic(
+  () => import('./chat-mermaid-block').then((m) => m.ChatMermaidBlock),
+  { ssr: false, loading: () => <ChartLoadingSkeleton /> },
+)
 
 interface ChatTextBlockProps {
   content: string
@@ -11,7 +31,7 @@ interface ChatTextBlockProps {
 
 export const ChatTextBlock = memo(function ChatTextBlock({ content }: ChatTextBlockProps) {
   return (
-    <div className="text-sm leading-relaxed prose-chat">
+    <div className="text-sm leading-relaxed prose-chat overflow-x-auto min-w-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -21,7 +41,13 @@ export const ChatTextBlock = memo(function ChatTextBlock({ content }: ChatTextBl
           },
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '')
-            const isBlock = String(children).includes('\n') || match
+            const lang = match?.[1]
+            const raw = String(children).replace(/\n$/, '')
+
+            if (lang === 'echarts') return <ChatChartBlock optionJson={raw} />
+            if (lang === 'mermaid') return <ChatMermaidBlock code={raw} />
+
+            const isBlock = raw.includes('\n') || match
             if (isBlock) {
               return (
                 <div>

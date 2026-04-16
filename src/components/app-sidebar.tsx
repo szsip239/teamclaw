@@ -31,7 +31,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
 } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
@@ -142,7 +141,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       {/* Header */}
-      <SidebarHeader>
+      <SidebarHeader className="h-14 shrink-0 justify-center border-b">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
@@ -161,8 +160,6 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-
-      <SidebarSeparator />
 
       {/* Navigation */}
       <SidebarContent>
