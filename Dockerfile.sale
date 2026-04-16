@@ -1,0 +1,18 @@
+FROM alpine/openclaw:latest
+
+USER root
+
+# Install Chromium and dependencies for headless browser
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Chromium path for Playwright/agent-browser
+ENV CHROME_PATH=/usr/bin/chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROMIUM_PATH=/usr/bin/chromium
+
+USER node
