@@ -1,4 +1,4 @@
-import type { ResourceType, ProviderInfo, ModelDefinition } from '@/types/resource'
+import type { ResourceType, ProviderInfo } from '@/types/resource'
 
 // ─── API Types ──────────────────────────────────────────────────────
 
@@ -14,14 +14,24 @@ export const API_TYPES = [
 export type ApiType = (typeof API_TYPES)[number]['value']
 
 // ─── Provider Definition ────────────────────────────────────────────
+//
+// Each entry is the static "override" teamclaw maintains on top of the
+// upstream models.dev catalog: connection params (baseUrl/apiType/env),
+// icon, testEndpoint, localization — things models.dev doesn't provide
+// or that teamclaw needs to customize. Model catalogs themselves are
+// pulled dynamically from models.dev via `modelsDevId`.
 
 export interface ProviderDef extends ProviderInfo {
-  defaultModels?: ModelDefinition[]
   testEndpoint: {
     url: string | ((baseUrl: string) => string)
     method: string
     headers: (key: string) => Record<string, string>
-    body?: (key: string) => unknown
+    /**
+     * Optional request body. Receives both the decrypted API key and the
+     * effective baseUrl so providers with multiple endpoints (variants) can
+     * pick a variant-appropriate model id.
+     */
+    body?: (key: string, baseUrl: string) => unknown
   }
 }
 
@@ -50,11 +60,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.anthropic.com',
     icon: 'anthropic',
     description: 'Claude 系列模型',
-    defaultModels: [
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', reasoning: true, input: ['text', 'image'], cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 }, contextWindow: 200000, maxTokens: 32000 },
-      { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', reasoning: true, input: ['text', 'image'], cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, contextWindow: 200000, maxTokens: 16000 },
-      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', reasoning: true, input: ['text', 'image'], cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 }, contextWindow: 200000, maxTokens: 16000 },
-    ],
+    modelsDevId: 'anthropic',
     testEndpoint: {
       url: 'https://api.anthropic.com/v1/messages',
       method: 'POST',
@@ -76,12 +82,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.openai.com',
     icon: 'openai',
     description: 'GPT 系列模型',
-    defaultModels: [
-      { id: 'o3', name: 'o3', reasoning: true, input: ['text', 'image'], cost: { input: 10, output: 40, cacheRead: 2.5, cacheWrite: 10 }, contextWindow: 200000, maxTokens: 100000 },
-      { id: 'o4-mini', name: 'o4-mini', reasoning: true, input: ['text', 'image'], cost: { input: 1.1, output: 4.4, cacheRead: 0.275, cacheWrite: 1.1 }, contextWindow: 200000, maxTokens: 100000 },
-      { id: 'gpt-4.1', name: 'GPT-4.1', reasoning: false, input: ['text', 'image'], cost: { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 2 }, contextWindow: 1047576, maxTokens: 32768 },
-      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', reasoning: false, input: ['text', 'image'], cost: { input: 0.4, output: 1.6, cacheRead: 0.1, cacheWrite: 0.4 }, contextWindow: 1047576, maxTokens: 32768 },
-    ],
+    modelsDevId: 'openai',
     testEndpoint: {
       url: 'https://api.openai.com/v1/models',
       method: 'GET',
@@ -98,10 +99,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://generativelanguage.googleapis.com',
     icon: 'google',
     description: 'Gemini 系列模型',
-    defaultModels: [
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', reasoning: true, input: ['text', 'image'], cost: { input: 1.25, output: 10, cacheRead: 0.31, cacheWrite: 1.25 }, contextWindow: 1048576, maxTokens: 65536 },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', reasoning: true, input: ['text', 'image'], cost: { input: 0.15, output: 0.6, cacheRead: 0.0375, cacheWrite: 0.15 }, contextWindow: 1048576, maxTokens: 65536 },
-    ],
+    modelsDevId: 'google',
     testEndpoint: {
       url: (baseUrl: string) => `${baseUrl}/v1/models`,
       method: 'GET',
@@ -121,6 +119,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://openrouter.ai/api',
     icon: 'openrouter',
     description: '多模型路由',
+    modelsDevId: 'openrouter',
     testEndpoint: {
       url: 'https://openrouter.ai/api/v1/models',
       method: 'GET',
@@ -137,6 +136,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.groq.com/openai',
     icon: 'groq',
     description: '超快推理引擎',
+    modelsDevId: 'groq',
     testEndpoint: {
       url: 'https://api.groq.com/openai/v1/models',
       method: 'GET',
@@ -153,6 +153,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.cerebras.ai',
     icon: 'cerebras',
     description: 'Cerebras 推理',
+    modelsDevId: 'cerebras',
     testEndpoint: {
       url: 'https://api.cerebras.ai/v1/models',
       method: 'GET',
@@ -169,6 +170,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.mistral.ai',
     icon: 'mistral',
     description: 'Mistral 系列模型',
+    modelsDevId: 'mistral',
     testEndpoint: {
       url: 'https://api.mistral.ai/v1/models',
       method: 'GET',
@@ -185,10 +187,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.x.ai',
     icon: 'xai',
     description: 'Grok 系列模型',
-    defaultModels: [
-      { id: 'grok-3', name: 'Grok 3', reasoning: false, input: ['text', 'image'], cost: { input: 3, output: 15 }, contextWindow: 131072, maxTokens: 16384 },
-      { id: 'grok-3-mini', name: 'Grok 3 Mini', reasoning: true, input: ['text', 'image'], cost: { input: 0.3, output: 0.5 }, contextWindow: 131072, maxTokens: 16384 },
-    ],
+    modelsDevId: 'xai',
     testEndpoint: {
       url: 'https://api.x.ai/v1/models',
       method: 'GET',
@@ -205,10 +204,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.deepseek.com',
     icon: 'deepseek',
     description: 'DeepSeek 系列模型',
-    defaultModels: [
-      { id: 'deepseek-chat', name: 'DeepSeek V3', reasoning: false, input: ['text'], cost: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 }, contextWindow: 65536, maxTokens: 8192 },
-      { id: 'deepseek-reasoner', name: 'DeepSeek R1', reasoning: true, input: ['text'], cost: { input: 0.55, output: 2.19, cacheRead: 0.14, cacheWrite: 0.55 }, contextWindow: 65536, maxTokens: 8192 },
-    ],
+    modelsDevId: 'deepseek',
     testEndpoint: {
       url: 'https://api.deepseek.com/v1/models',
       method: 'GET',
@@ -217,22 +213,26 @@ const modelProviders: ProviderDef[] = [
   },
   {
     id: 'moonshot',
-    name: 'Moonshot',
+    name: 'Moonshot (Kimi)',
     type: 'MODEL',
     authMethod: 'API_KEY',
     envVarName: 'MOONSHOT_API_KEY',
     apiType: 'openai-completions',
     baseUrl: 'https://api.moonshot.ai/v1',
     icon: 'moonshot',
-    description: 'Kimi 系列模型',
-    testEndpoint: {
-      url: 'https://api.moonshot.ai/v1/models',
-      method: 'GET',
-      headers: bearerAuth,
-    },
-    configFields: [
-      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.moonshot.ai/v1 或 https://api.moonshot.cn/v1', required: false },
+    description: 'Kimi 系列模型（国际/国内/Coding 三个端点）',
+    modelsDevId: 'moonshotai',
+    variants: [
+      { id: 'intl-regular', label: '国际 · 普通', baseUrl: 'https://api.moonshot.ai/v1', envVarName: 'MOONSHOT_API_KEY', apiType: 'openai-completions', modelsDevId: 'moonshotai' },
+      { id: 'cn-regular', label: '国内 · 普通', baseUrl: 'https://api.moonshot.cn/v1', envVarName: 'MOONSHOT_API_KEY', apiType: 'openai-completions', modelsDevId: 'moonshotai-cn' },
+      { id: 'coding', label: 'Coding Plan', baseUrl: 'https://api.kimi.com/coding/v1', envVarName: 'KIMI_CODING_API_KEY', apiType: 'openai-completions', modelsDevId: 'kimi-for-coding' },
     ],
+    testEndpoint: {
+      url: (baseUrl: string) => `${baseUrl}/chat/completions`,
+      method: 'POST',
+      headers: bearerAuth,
+      body: () => ({ model: 'moonshot-v1-8k', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+    },
   },
   {
     id: 'minimax',
@@ -243,13 +243,16 @@ const modelProviders: ProviderDef[] = [
     apiType: 'anthropic-messages',
     baseUrl: 'https://api.minimax.io/anthropic',
     icon: 'minimax',
-    description: 'MiniMax 系列模型',
-    defaultModels: [
-      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], cost: { input: 15, output: 60, cacheRead: 2, cacheWrite: 10 }, contextWindow: 200000, maxTokens: 8192 },
-      { id: 'MiniMax-M2.1', name: 'MiniMax M2.1', reasoning: true, input: ['text'], cost: { input: 4, output: 16, cacheRead: 1, cacheWrite: 4 }, contextWindow: 200000, maxTokens: 8192 },
+    description: 'MiniMax 系列模型（国际/国内 × 普通/Coding 四种组合）',
+    modelsDevId: 'minimax',
+    variants: [
+      { id: 'intl-regular', label: '国际 · 普通', baseUrl: 'https://api.minimax.io/anthropic', envVarName: 'MINIMAX_API_KEY', apiType: 'anthropic-messages', modelsDevId: 'minimax' },
+      { id: 'intl-coding', label: '国际 · Coding', baseUrl: 'https://api.minimax.io/anthropic', envVarName: 'MINIMAX_CODING_API_KEY', apiType: 'anthropic-messages', modelsDevId: 'minimax-coding-plan' },
+      { id: 'cn-regular', label: '国内 · 普通', baseUrl: 'https://api.minimaxi.com/anthropic', envVarName: 'MINIMAX_API_KEY', apiType: 'anthropic-messages', modelsDevId: 'minimax-cn' },
+      { id: 'cn-coding', label: '国内 · Coding', baseUrl: 'https://api.minimaxi.com/anthropic', envVarName: 'MINIMAX_CODING_API_KEY', apiType: 'anthropic-messages', modelsDevId: 'minimax-cn-coding-plan' },
     ],
     testEndpoint: {
-      url: 'https://api.minimax.io/anthropic/v1/messages',
+      url: (baseUrl: string) => `${baseUrl}/v1/messages`,
       method: 'POST',
       headers: anthropicAuth,
       body: () => ({
@@ -260,40 +263,20 @@ const modelProviders: ProviderDef[] = [
     },
   },
   {
-    id: 'venice',
-    name: 'Venice',
-    type: 'MODEL',
-    authMethod: 'API_KEY',
-    envVarName: 'VENICE_API_KEY',
-    apiType: 'openai-completions',
-    baseUrl: 'https://api.venice.ai/api/v1',
-    icon: 'venice',
-    description: 'Venice AI 隐私优先模型',
-    testEndpoint: {
-      url: 'https://api.venice.ai/api/v1/models',
-      method: 'GET',
-      headers: bearerAuth,
-    },
-  },
-  {
     id: 'xiaomi',
-    name: '小米 MiMo',
+    name: 'Xiaomi MiMo',
     type: 'MODEL',
     authMethod: 'API_KEY',
     envVarName: 'XIAOMI_API_KEY',
-    apiType: 'anthropic-messages',
-    baseUrl: 'https://api.xiaomimimo.com/anthropic',
+    apiType: 'openai-completions',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
     icon: 'xiaomi',
-    description: '小米 MiMo 推理模型',
+    description: '小米 MiMo 系列模型',
+    modelsDevId: 'xiaomi',
     testEndpoint: {
-      url: 'https://api.xiaomimimo.com/anthropic/v1/messages',
-      method: 'POST',
-      headers: anthropicAuth,
-      body: () => ({
-        model: 'MiMo-72B-preview',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'hi' }],
-      }),
+      url: (baseUrl: string) => `${baseUrl}/models`,
+      method: 'GET',
+      headers: bearerAuth,
     },
   },
   {
@@ -306,24 +289,9 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://api.together.xyz',
     icon: 'together',
     description: 'Together AI 开源模型',
+    modelsDevId: 'togetherai',
     testEndpoint: {
       url: 'https://api.together.xyz/v1/models',
-      method: 'GET',
-      headers: bearerAuth,
-    },
-  },
-  {
-    id: 'huggingface',
-    name: 'HuggingFace',
-    type: 'MODEL',
-    authMethod: 'API_KEY',
-    envVarName: 'HF_TOKEN',
-    apiType: 'openai-completions',
-    baseUrl: 'https://router.huggingface.co/v1',
-    icon: 'huggingface',
-    description: 'HuggingFace 推理路由',
-    testEndpoint: {
-      url: 'https://router.huggingface.co/v1/models',
       method: 'GET',
       headers: bearerAuth,
     },
@@ -338,27 +306,9 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     icon: 'nvidia',
     description: 'NVIDIA NIM 推理',
+    modelsDevId: 'nvidia',
     testEndpoint: {
       url: 'https://integrate.api.nvidia.com/v1/models',
-      method: 'GET',
-      headers: bearerAuth,
-    },
-  },
-  {
-    id: 'litellm',
-    name: 'LiteLLM',
-    type: 'MODEL',
-    authMethod: 'API_KEY',
-    envVarName: 'LITELLM_API_KEY',
-    apiType: 'openai-completions',
-    baseUrl: 'http://localhost:4000',
-    icon: 'litellm',
-    description: 'LiteLLM 代理网关',
-    configFields: [
-      { key: 'baseUrl', label: 'API 地址', placeholder: 'http://localhost:4000', required: false },
-    ],
-    testEndpoint: {
-      url: (baseUrl: string) => `${baseUrl}/v1/models`,
       method: 'GET',
       headers: bearerAuth,
     },
@@ -373,6 +323,9 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'http://127.0.0.1:11434',
     icon: 'ollama',
     description: 'Ollama 本地模型',
+    // No modelsDevId: teamclaw's default ollama is local (127.0.0.1); models.dev
+    // only has ollama-cloud (ollama.com). Models depend on what the user pulled
+    // locally, so auto-sync doesn't apply.
     configFields: [
       { key: 'baseUrl', label: 'API 地址', placeholder: 'http://127.0.0.1:11434', required: false },
     ],
@@ -392,6 +345,7 @@ const modelProviders: ProviderDef[] = [
     baseUrl: 'http://127.0.0.1:8000/v1',
     icon: 'vllm',
     description: 'vLLM 高性能推理',
+    // No modelsDevId: self-hosted, no public model registry.
     configFields: [
       { key: 'baseUrl', label: 'API 地址', placeholder: 'http://127.0.0.1:8000/v1', required: false },
     ],
@@ -410,18 +364,12 @@ const modelProviders: ProviderDef[] = [
     apiType: 'openai-completions',
     baseUrl: 'https://api.z.ai/api/coding/paas/v4',
     icon: 'zai',
-    description: 'GLM 系列模型（智谱清言）',
+    description: 'GLM 系列模型（智谱清言 / Coding Plan）',
+    modelsDevId: 'zai-coding-plan',
     baseUrlHint: 'zai',
-    configFields: [
-      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.z.ai/api/coding/paas/v4', required: false },
-    ],
-    defaultModels: [
-      { id: 'glm-5', name: 'GLM-5', reasoning: true, input: ['text', 'image'], contextWindow: 205000, maxTokens: 16000 },
-      { id: 'glm-4.7', name: 'GLM-4.7', reasoning: true, input: ['text', 'image'], contextWindow: 205000, maxTokens: 16000 },
-      { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', reasoning: false, input: ['text', 'image'], contextWindow: 200000, maxTokens: 16000 },
-      { id: 'glm-4.6', name: 'GLM-4.6', reasoning: false, input: ['text', 'image'], contextWindow: 205000, maxTokens: 16000 },
-      { id: 'glm-4.6v', name: 'GLM-4.6V', reasoning: false, input: ['text', 'image'], contextWindow: 128000, maxTokens: 4096 },
-      { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash', reasoning: false, input: ['text', 'image'], contextWindow: 131000, maxTokens: 4096 },
+    variants: [
+      { id: 'coding', label: 'Coding Plan', baseUrl: 'https://api.z.ai/api/coding/paas/v4', envVarName: 'ZAI_API_KEY', apiType: 'openai-completions', modelsDevId: 'zai-coding-plan' },
+      { id: 'regular', label: '普通', baseUrl: 'https://api.z.ai/api/paas/v4', envVarName: 'ZAI_API_KEY', apiType: 'openai-completions', modelsDevId: 'zai' },
     ],
     testEndpoint: {
       url: (baseUrl: string) => `${baseUrl}/chat/completions`,
@@ -435,33 +383,59 @@ const modelProviders: ProviderDef[] = [
     },
   },
   {
-    id: 'qianfan',
-    name: '千帆',
+    id: 'qwen',
+    name: '通义千问 (Qwen)',
     type: 'MODEL',
     authMethod: 'API_KEY',
-    envVarName: 'QIANFAN_API_KEY',
+    envVarName: 'DASHSCOPE_API_KEY',
     apiType: 'openai-completions',
-    baseUrl: 'https://qianfan.baidubce.com',
-    icon: 'qianfan',
-    description: '百度千帆大模型',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    icon: 'qwen',
+    description: '阿里云通义千问 / DashScope（国内/国际 × 普通/Coding 四种组合）',
+    modelsDevId: 'alibaba-cn',
+    variants: [
+      { id: 'cn-regular', label: '国内 · 普通', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', envVarName: 'DASHSCOPE_API_KEY', apiType: 'openai-completions', modelsDevId: 'alibaba-cn' },
+      { id: 'cn-coding', label: '国内 · Coding', baseUrl: 'https://coding.dashscope.aliyuncs.com/v1', envVarName: 'DASHSCOPE_CODING_API_KEY', apiType: 'openai-completions', modelsDevId: 'alibaba-coding-plan-cn' },
+      { id: 'intl-regular', label: '国际 · 普通', baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', envVarName: 'DASHSCOPE_API_KEY', apiType: 'openai-completions', modelsDevId: 'alibaba' },
+      { id: 'intl-coding', label: '国际 · Coding', baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1', envVarName: 'DASHSCOPE_CODING_API_KEY', apiType: 'openai-completions', modelsDevId: 'alibaba-coding-plan' },
+    ],
+    // Coding plan 端点只支持 coder 模型；普通端点不支持 coder。依 baseUrl 路由选 model。
     testEndpoint: {
-      url: 'https://qianfan.baidubce.com/v1/models',
-      method: 'GET',
+      url: (baseUrl: string) => `${baseUrl}/chat/completions`,
+      method: 'POST',
       headers: bearerAuth,
+      body: (_key, baseUrl) => ({
+        model: baseUrl.includes('coding.dashscope') || baseUrl.includes('coding-intl.dashscope')
+          ? 'qwen3-coder-plus'
+          : 'qwen-plus',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
     },
   },
   {
     id: 'doubao',
-    name: '豆包',
+    name: '火山方舟 (Volcengine ARK)',
     type: 'MODEL',
     authMethod: 'API_KEY',
-    envVarName: 'DOUBAO_API_KEY',
+    envVarName: 'ARK_API_KEY',
     apiType: 'openai-completions',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     icon: 'doubao',
-    description: '字节跳动豆包大模型',
+    description: '字节跳动火山方舟（普通/Coding 两种端点，Doubao / DeepSeek / GLM / Kimi 等）',
+    // No modelsDevId on any variant: models.dev has no volcengine entry.
+    variants: [
+      { id: 'regular', label: '普通', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', envVarName: 'ARK_API_KEY', apiType: 'openai-completions' },
+      { id: 'coding', label: 'Coding Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3', envVarName: 'ARK_CODING_API_KEY', apiType: 'anthropic-messages' },
+    ],
+    configFields: [
+      { key: 'baseUrl', label: 'API 地址', placeholder: 'https://ark.cn-beijing.volces.com/api/v3', required: false },
+    ],
+    // For the regular endpoint we hit /models (GET); the coding endpoint
+    // follows the Anthropic messages pattern. Variant-aware behavior is
+    // handled in the test handler based on apiType.
     testEndpoint: {
-      url: 'https://ark.cn-beijing.volces.com/api/v3/models',
+      url: (baseUrl: string) => `${baseUrl}/models`,
       method: 'GET',
       headers: bearerAuth,
     },
@@ -475,6 +449,7 @@ const modelProviders: ProviderDef[] = [
     apiType: 'openai-completions',
     icon: 'opencode',
     description: 'OpenCode 兼容模型',
+    modelsDevId: 'opencode',
     configFields: [
       { key: 'baseUrl', label: 'API 地址', placeholder: 'https://your-api.example.com/v1', required: true },
     ],
@@ -492,6 +467,7 @@ const modelProviders: ProviderDef[] = [
     icon: 'custom',
     description: '自定义 OpenAI 兼容 API',
     apiType: 'openai-completions',
+    // No modelsDevId: generic catchall.
     configFields: [
       { key: 'baseUrl', label: 'API 地址', placeholder: 'https://your-api.example.com/v1', required: true },
       { key: 'envVarName', label: '环境变量名', placeholder: 'CUSTOM_API_KEY', required: false },
@@ -588,8 +564,5 @@ export function getProviders(type?: ResourceType): ProviderDef[] {
 
 /** Return public ProviderInfo (without testEndpoint internals) */
 export function getProviderInfoList(type?: ResourceType): ProviderInfo[] {
-  return getProviders(type).map(({ testEndpoint: _te, defaultModels, ...info }) => ({
-    ...info,
-    defaultModels,
-  }))
+  return getProviders(type).map(({ testEndpoint: _te, ...info }) => info)
 }

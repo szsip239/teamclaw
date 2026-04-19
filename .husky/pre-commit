@@ -62,7 +62,9 @@ for file in $STAGED; do
   # Skip the hook file itself to avoid self-detection
   case "$file" in .husky/*) continue ;; esac
   if [ -f "$file" ]; then
-    MATCH=$(git diff --cached -- "$file" | grep -E "^\+" | grep -iE "$SECRETS_REGEX" | head -3 || true)
+    # Skip lines declaring env var *names* (not values) — e.g.
+    #   envVarName: 'ANTHROPIC_API_KEY'   ← identifier, not a secret
+    MATCH=$(git diff --cached -- "$file" | grep -E "^\+" | grep -iE "$SECRETS_REGEX" | grep -Ev "envVarName\s*:\s*['\"][A-Z_][A-Z0-9_]*['\"]" | head -3 || true)
     if [ -n "$MATCH" ]; then
       echo "❌ BLOCKED: possible secret in $file:"
       echo "$MATCH" | head -3

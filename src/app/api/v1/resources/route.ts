@@ -62,6 +62,7 @@ export const GET = withAuth(
         config: r.config as ResourceConfig | null,
         description: r.description,
         isDefault: r.isDefault,
+        isDefaultModel: r.isDefaultModel,
         lastTestedAt: r.lastTestedAt?.toISOString() ?? null,
         lastTestError: r.lastTestError,
         createdByName: getDisplayName(r.createdBy),
@@ -91,13 +92,20 @@ export const POST = withAuth(
         body: typeof ctx.body
       }
 
-      const { name, type, provider, apiKey, config, description, isDefault } = body
+      const { name, type, provider, apiKey, config, description, isDefault, isDefaultModel } = body
 
       // If setting as default, unset other defaults of same type+provider
       if (isDefault) {
         await prisma.resource.updateMany({
           where: { type, provider, isDefault: true },
           data: { isDefault: false },
+        })
+      }
+      // isDefaultModel is mutually exclusive across the same provider
+      if (isDefaultModel) {
+        await prisma.resource.updateMany({
+          where: { provider, isDefaultModel: true },
+          data: { isDefaultModel: false },
         })
       }
 
@@ -110,6 +118,7 @@ export const POST = withAuth(
           config: config ? (config as Prisma.InputJsonValue) : undefined,
           description: description ?? null,
           isDefault: isDefault ?? false,
+          isDefaultModel: isDefaultModel ?? false,
           createdById: user.id,
         },
         include: { createdBy: { select: { name: true, email: true } } },
@@ -138,6 +147,7 @@ export const POST = withAuth(
           config: resource.config,
           description: resource.description,
           isDefault: resource.isDefault,
+          isDefaultModel: resource.isDefaultModel,
           lastTestedAt: null,
           lastTestError: null,
           createdByName: getDisplayName(resource.createdBy),

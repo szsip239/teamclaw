@@ -4,7 +4,11 @@
 // and FIELD_KNOWLEDGE: exact path match first, then suffix fallback.
 
 export type EntityType = 'model'  // Extensible: 'agent' | 'skill' | 'user'
-export type PickerMode = 'single' | 'multi'
+// 'single': one picker, value is "provider/model" string
+// 'multi':  multi-picker, value is string[]
+// 'block':  primary picker + fallbacks multi-picker inline — value is either
+//           a "provider/model" string (short form) or `{primary, fallbacks[]}`
+export type PickerMode = 'single' | 'multi' | 'block'
 
 export interface EntityLink {
   type: EntityType
@@ -18,9 +22,25 @@ export interface EntityLink {
 // ─── Exact Path Matches ──────────────────────────────────────────────
 
 const EXACT_LINKS: Record<string, EntityLink> = {
+  // Bare paths use block mode → primary + fallbacks pickers inline.
+  // The `.primary` sub-paths are still registered for the case where the user
+  // has an explicit object form and we recurse into it from non-block entry
+  // points (e.g. advanced mode of other union renderers).
+  'agents.defaults.model': {
+    type: 'model',
+    mode: 'block',
+    format: 'provider/model',
+    allowCustom: true,
+  },
   'agents.defaults.model.primary': {
     type: 'model',
     mode: 'single',
+    format: 'provider/model',
+    allowCustom: true,
+  },
+  'agents.defaults.imageModel': {
+    type: 'model',
+    mode: 'block',
     format: 'provider/model',
     allowCustom: true,
   },

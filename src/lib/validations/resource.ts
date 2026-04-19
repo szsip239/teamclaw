@@ -24,6 +24,7 @@ const resourceConfigSchema = z.object({
   authHeader: z.boolean().optional(),
   headers: z.record(z.string(), z.string()).optional(),
   models: z.array(modelDefinitionSchema).optional(),
+  defaultModelId: z.string().optional(),
 })
 
 export const createResourceSchema = z.object({
@@ -34,6 +35,7 @@ export const createResourceSchema = z.object({
   config: resourceConfigSchema.optional(),
   description: z.string().max(2000).optional(),
   isDefault: z.boolean().optional(),
+  isDefaultModel: z.boolean().optional(),
 })
 
 export type CreateResourceInput = z.infer<typeof createResourceSchema>
@@ -46,6 +48,7 @@ export const updateResourceSchema = z.object({
   config: resourceConfigSchema.optional(),
   description: z.string().max(2000).optional().nullable(),
   isDefault: z.boolean().optional(),
+  isDefaultModel: z.boolean().optional(),
 })
 
 export type UpdateResourceInput = z.infer<typeof updateResourceSchema>

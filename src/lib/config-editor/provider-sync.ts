@@ -2,9 +2,6 @@ import { prisma } from '@/lib/db'
 import { decryptCredential } from '@/lib/resources/credential-utils'
 import { getProvider } from '@/lib/resources/providers'
 
-// OpenClaw's default API type — omit when it matches
-const DEFAULT_API_TYPE = 'openai-completions'
-
 // ─── Google provider baseUrl fix ─────────────────────────────────────
 // pi-ai's Google provider createClient() sets apiVersion="" when baseUrl
 // is present, assuming the URL already includes the version path. But the
@@ -171,10 +168,11 @@ export async function buildProviderEntries(
       }),
     }
 
-    // Set api type — always include for custom/unknown providers (OpenClaw can't infer),
-    // omit only for well-known providers using the default type
-    const isWellKnown = providerDef && providerDef.id !== 'custom' && providerDef.id !== 'opencode'
-    if (apiType && (!isWellKnown || apiType !== DEFAULT_API_TYPE)) {
+    // Always include api type in the pushed entry, even when it equals the default
+    // "openai-completions". Leaving it off causes the OpenClaw provider plugin's
+    // config-driven normalize path to leave `api` null in models.json, which in
+    // turn routes requests to the wrong endpoint and returns 404. Verified 2026-04-19.
+    if (apiType) {
       entry.api = apiType
     }
 
@@ -186,8 +184,15 @@ export async function buildProviderEntries(
 
 /**
  * Merge provider entries into an existing patch object.
- * Always overwrites with latest data from Resource DB
- * so that API key / baseUrl / model changes propagate.
+ *
+ * User-supplied patch fields take priority over Resource DB entries —
+ * explicit edits (including explicit apiKey changes) are preserved.
+ *
+ * **SecretRef protection**: only skip the Resource DB apiKey when the user's
+ * patch carries an actual SecretRef object (e.g. `{source:"env", id:"OPENAI_KEY"}`).
+ * If the user didn't set apiKey at all, we must push the plaintext key — OpenClaw
+ * schema requires apiKey on `models.providers.<id>`, and without it auth fails
+ * (`No API key found for provider`). Verified 2026-04-19.
  */
 export function mergeProvidersIntoPatch(
   patch: Record<string, unknown>,
@@ -197,7 +202,6 @@ export function mergeProvidersIntoPatch(
 
   const result = structuredClone(patch)
 
-  // Ensure models.providers path exists
   if (!result.models || typeof result.models !== 'object') {
     result.models = {}
   }
@@ -208,9 +212,17 @@ export function mergeProvidersIntoPatch(
   }
   const providers = models.providers as Record<string, unknown>
 
-  // Inject entries, always overwriting with latest Resource DB data
   for (const [id, entry] of Object.entries(entries)) {
-    providers[id] = entry
+    const userFields = (providers[id] as Record<string, unknown> | undefined) ?? {}
+    const userApiKey = userFields.apiKey
+    // Protect only when user set a SecretRef object — undefined / plain-string
+    // values mean the user didn't configure auth, so the Resource DB key must win.
+    const userHasSecretRef = userApiKey !== null && typeof userApiKey === 'object'
+    const base: Partial<ProviderEntry> = { ...entry }
+    if (userHasSecretRef) {
+      delete base.apiKey
+    }
+    providers[id] = { ...base, ...userFields }
   }
 
   return result
