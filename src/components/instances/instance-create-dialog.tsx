@@ -169,6 +169,7 @@ export function InstanceCreateDialog({
               placeholder="prod-01"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              autoComplete="off"
               required
             />
             <p className="text-[12px] text-muted-foreground">
@@ -186,6 +187,7 @@ export function InstanceCreateDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
+              autoComplete="off"
             />
           </div>
 
@@ -204,78 +206,19 @@ export function InstanceCreateDialog({
                   value={imageName}
                   onChange={(e) => setImageName(e.target.value)}
                   className="font-mono text-[13px]"
+                  autoComplete="off"
                 />
                 <p className="text-[12px] text-muted-foreground">
                   {t('instance.dockerImageHint')}
                 </p>
               </div>
 
-              {/* Model Provider */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[13px]">{t('instance.modelConfig')}</Label>
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="custom-key" className="text-[12px] text-muted-foreground">
-                      {t('instance.customApiKey')}
-                    </Label>
-                    <Switch
-                      id="custom-key"
-                      checked={useCustomApiKey}
-                      onCheckedChange={setUseCustomApiKey}
-                    />
-                  </div>
-                </div>
-                {!useCustomApiKey && (
-                  <p className="text-[12px] text-muted-foreground">
-                    {t('instance.useGlobalKey')}
-                  </p>
-                )}
-                {useCustomApiKey && (
-                  <div className="space-y-3 rounded-lg border p-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="provider" className="text-[12px]">
-                        Provider
-                      </Label>
-                      <Select value={providerName} onValueChange={setProviderName}>
-                        <SelectTrigger className="text-[13px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="anthropic">Anthropic</SelectItem>
-                          <SelectItem value="openai">OpenAI</SelectItem>
-                          <SelectItem value="google">Google</SelectItem>
-                          <SelectItem value="custom">{t('custom')}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="apiKey" className="text-[12px]">
-                        API Key
-                      </Label>
-                      <Input
-                        id="apiKey"
-                        type="password"
-                        placeholder="sk-ant-..."
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        className="font-mono text-[13px]"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="baseUrl" className="text-[12px]">
-                        Base URL
-                        <span className="ml-1 text-muted-foreground">{t('optional')}</span>
-                      </Label>
-                      <Input
-                        id="baseUrl"
-                        placeholder="https://api.anthropic.com"
-                        value={baseUrl}
-                        onChange={(e) => setBaseUrl(e.target.value)}
-                        className="font-mono text-[13px]"
-                      />
-                    </div>
-                  </div>
-                )}
+              {/* Model Provider — default uses Resources; custom override lives in Advanced */}
+              <div className="space-y-1.5">
+                <Label className="text-[13px]">{t('instance.modelConfig')}</Label>
+                <p className="text-[12px] text-muted-foreground">
+                  {t('instance.useGlobalKey')}
+                </p>
               </div>
 
               {/* Advanced Options */}
@@ -291,6 +234,66 @@ export function InstanceCreateDialog({
               </button>
               {showAdvanced && (
                 <div className="space-y-3 rounded-lg border p-3">
+                  {/* Custom API Key override (moved from main form) */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="custom-key" className="text-[12px]">
+                        {t('instance.customApiKeyOverride')}
+                      </Label>
+                      <Switch
+                        id="custom-key"
+                        checked={useCustomApiKey}
+                        onCheckedChange={setUseCustomApiKey}
+                      />
+                    </div>
+                    {useCustomApiKey && (
+                      <div className="space-y-3 rounded-md border p-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="provider" className="text-[12px]">
+                            Provider
+                          </Label>
+                          <Select value={providerName} onValueChange={setProviderName}>
+                            <SelectTrigger className="text-[13px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="anthropic">Anthropic</SelectItem>
+                              <SelectItem value="openai">OpenAI</SelectItem>
+                              <SelectItem value="google">Google</SelectItem>
+                              <SelectItem value="custom">{t('custom')}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="apiKey" className="text-[12px]">
+                            API Key
+                          </Label>
+                          <Input
+                            id="apiKey"
+                            type="password"
+                            placeholder="sk-ant-..."
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            className="font-mono text-[13px]"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="baseUrl" className="text-[12px]">
+                            Base URL
+                            <span className="ml-1 text-muted-foreground">{t('optional')}</span>
+                          </Label>
+                          <Input
+                            id="baseUrl"
+                            placeholder="https://api.anthropic.com"
+                            value={baseUrl}
+                            onChange={(e) => setBaseUrl(e.target.value)}
+                            className="font-mono text-[13px]"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <Separator />
                   <div className="flex items-center justify-between">
                     <div>
                       <Label htmlFor="pullLatest" className="text-[12px]">
@@ -355,6 +358,7 @@ export function InstanceCreateDialog({
                   value={gatewayUrl}
                   onChange={(e) => setGatewayUrl(e.target.value)}
                   className="font-mono text-[13px]"
+                  autoComplete="off"
                   required={mode === "external"}
                 />
               </div>

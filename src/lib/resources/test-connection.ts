@@ -57,7 +57,7 @@ async function executeTest(
   }
 
   const headers = testEndpoint.headers(apiKey)
-  const body = testEndpoint.body ? JSON.stringify(testEndpoint.body(apiKey)) : undefined
+  const body = testEndpoint.body ? JSON.stringify(testEndpoint.body(apiKey, baseUrl)) : undefined
 
   if (body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'

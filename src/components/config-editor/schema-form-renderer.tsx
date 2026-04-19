@@ -321,6 +321,18 @@ function FieldWrapper({
         />
       )
     }
+    if (entityLink.mode === 'block') {
+      return (
+        <ModelBlockField
+          path={path}
+          label={label}
+          help={help}
+          value={value}
+          onChange={onChange}
+          allowCustom={entityLink.allowCustom}
+        />
+      )
+    }
   }
 
   // Object with properties → collapsible group
@@ -1217,17 +1229,53 @@ function UnionFieldRenderer({
   depth: number
 }) {
   const t = useT()
-  const variants = schema.anyOf ?? []
+  const rawVariants = schema.anyOf ?? []
+  // Flatten one level of nested oneOf wrappers, so SecretRef-style schemas
+  // like { anyOf: [{type:"string"}, { oneOf: [envRef, fileRef, execRef] }] }
+  // surface their actual object variants instead of a type-less wrapper.
+  const variants = rawVariants.flatMap((v) =>
+    !v.type && !v.properties && Array.isArray(v.oneOf) ? v.oneOf : [v],
+  )
   // Determine current mode: is value a string or an object?
   const currentIsObject = value !== null && typeof value === 'object' && !Array.isArray(value)
+  // Entity link for simple-mode rendering (e.g. model pickers at bare paths)
+  const simpleEntityLink = getEntityLink(path)
 
-  // Find which variant matches
-  const objectVariant = variants.find(
+  // Object variants — prefer those with `properties` so we can render a form.
+  const objectVariants = variants.filter(
     (v) => v.type === 'object' || v.properties,
   )
+  const objectVariant = objectVariants[0]
   const simpleVariant = variants.find(
     (v) => v.type === 'string' || v.type === 'number' || v.type === 'boolean',
   )
+
+  // Pick the object variant that currently matches the value, if any.
+  // Match on a `const` property (e.g. SecretRef's `source: "env"|"file"|"exec"`).
+  const findMatchingVariant = (val: unknown): JsonSchema | undefined => {
+    if (!val || typeof val !== 'object' || objectVariants.length < 2) return objectVariant
+    const obj = val as Record<string, unknown>
+    return objectVariants.find((variant) => {
+      const props = variant.properties ?? {}
+      for (const [pk, pv] of Object.entries(props)) {
+        const constVal = (pv as JsonSchema)?.const
+        if (constVal !== undefined && obj[pk] !== constVal) return false
+      }
+      return true
+    }) ?? objectVariant
+  }
+  const activeObjectVariant = currentIsObject ? findMatchingVariant(value) : objectVariant
+
+  // Build a default value from a variant's schema: seed any `const` fields
+  // (e.g. source: "env") so the resulting object actually matches the variant.
+  const buildDefaultFromVariant = (variant: JsonSchema): Record<string, unknown> => {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(variant.properties ?? {})) {
+      const constVal = (v as JsonSchema)?.const
+      if (constVal !== undefined) out[k] = constVal
+    }
+    return out
+  }
 
   if (!objectVariant && !simpleVariant) {
     // Fallback: render as JSON string
@@ -1292,10 +1340,11 @@ function UnionFieldRenderer({
             className="h-6 text-[11px] px-2"
             onClick={() => {
               if (currentIsObject) return
-              // Switch to advanced mode
-              onChange(path, {
-                primary: typeof value === 'string' ? value : "",
-              })
+              // Switch to advanced mode — seed with the first object variant's
+              // const fields (e.g. source: "env") so the shape is valid. Prior
+              // behavior wrote { primary: "" } which didn't match any schema.
+              if (!objectVariant) return
+              onChange(path, buildDefaultFromVariant(objectVariant))
             }}
           >
             {t('config.advancedMode')}
@@ -1303,11 +1352,33 @@ function UnionFieldRenderer({
         </div>
       </div>
 
-      {currentIsObject && objectVariant ? (
+      {currentIsObject && objectVariants.length > 1 && (
+        <div className="flex gap-1 px-1">
+          {objectVariants.map((variant, idx) => {
+            const seed = buildDefaultFromVariant(variant)
+            const labelText = Object.values(seed)[0]
+            const isActive = variant === activeObjectVariant
+            return (
+              <Button
+                key={idx}
+                type="button"
+                variant={isActive ? "default" : "outline"}
+                size="sm"
+                className="h-6 text-[11px] px-2"
+                onClick={() => { if (!isActive) onChange(path, seed) }}
+              >
+                {typeof labelText === 'string' ? labelText : `#${idx + 1}`}
+              </Button>
+            )
+          })}
+        </div>
+      )}
+
+      {currentIsObject && activeObjectVariant ? (
         <div className="rounded border bg-muted/20 p-2">
-          {objectVariant.properties ? (
+          {activeObjectVariant.properties ? (
             <SchemaFormRenderer
-              schema={objectVariant}
+              schema={activeObjectVariant}
               path={path}
               config={config}
               uiHints={uiHints}
@@ -1325,6 +1396,18 @@ function UnionFieldRenderer({
             />
           )}
         </div>
+      ) : simpleEntityLink?.type === 'model' && simpleEntityLink.mode === 'single' ? (
+        // Union field that degraded to simple-mode string but the path is a
+        // known model reference (e.g. `agents.defaults.model`). Use picker
+        // instead of plain text so users can choose a configured Resource.
+        <ModelPickerField
+          path={path}
+          label=""
+          help={undefined}
+          value={(value ?? "") as string}
+          onChange={(v) => onChange(path, v || undefined)}
+          allowCustom={simpleEntityLink.allowCustom}
+        />
       ) : (
         <StringField
           path={path}
@@ -1333,6 +1416,68 @@ function UnionFieldRenderer({
           onChange={(v) => onChange(path, v)}
         />
       )}
+    </div>
+  )
+}
+
+// ─── Model Block Field (primary + fallbacks combo) ──────────────────
+// OpenClaw `agents.defaults.model` / `imageModel` schema is a union of
+// `"provider/model"` short string OR `{primary, fallbacks[]}`. Showing both
+// pickers together so users don't have to hunt for fallbacks in advanced mode.
+// Collapses back to the short string form when no fallbacks are set.
+
+function ModelBlockField({
+  path,
+  label,
+  help,
+  value,
+  onChange,
+  allowCustom,
+}: {
+  path: string
+  label: string
+  help?: string
+  value: unknown
+  onChange: (path: string, value: unknown) => void
+  allowCustom: boolean
+}) {
+  const t = useT()
+  const isObj = value !== null && typeof value === 'object' && !Array.isArray(value)
+  const primary = isObj
+    ? ((value as Record<string, unknown>).primary as string | undefined) ?? ''
+    : ((value as string | undefined) ?? '')
+  const fallbacks =
+    isObj && Array.isArray((value as Record<string, unknown>).fallbacks)
+      ? ((value as Record<string, unknown>).fallbacks as string[])
+      : []
+
+  const write = (nextPrimary: string, nextFallbacks: string[]) => {
+    if (!nextPrimary && nextFallbacks.length === 0) {
+      onChange(path, undefined)
+    } else if (nextFallbacks.length === 0) {
+      onChange(path, nextPrimary)
+    } else {
+      onChange(path, { primary: nextPrimary, fallbacks: nextFallbacks })
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <ModelPickerField
+        path={`${path}.primary`}
+        label={label}
+        help={help}
+        value={primary}
+        onChange={(v) => write(v, fallbacks)}
+        allowCustom={allowCustom}
+      />
+      <MultiModelPickerField
+        path={`${path}.fallbacks`}
+        label={t('config.fallbackModels')}
+        value={fallbacks}
+        onChange={(v) => write(primary, v)}
+        allowCustom={allowCustom}
+      />
     </div>
   )
 }

@@ -43,6 +43,7 @@ export const GET = withAuth(
       config: resource.config as ResourceConfig | null,
       description: resource.description,
       isDefault: resource.isDefault,
+      isDefaultModel: resource.isDefaultModel,
       lastTestedAt: resource.lastTestedAt?.toISOString() ?? null,
       lastTestError: resource.lastTestError,
       createdByName: getDisplayName(resource.createdBy),
@@ -100,6 +101,18 @@ export const PUT = withAuth(
         }
       }
 
+      // Handle isDefaultModel — mutually exclusive across same provider
+      if (body.isDefaultModel !== undefined) {
+        updateData.isDefaultModel = body.isDefaultModel
+        if (body.isDefaultModel) {
+          const provider = body.provider ?? resource.provider
+          await prisma.resource.updateMany({
+            where: { provider, isDefaultModel: true, id: { not: id } },
+            data: { isDefaultModel: false },
+          })
+        }
+      }
+
       const updated = await prisma.resource.update({
         where: { id },
         data: updateData,
@@ -143,6 +156,7 @@ export const PUT = withAuth(
         config: updated.config,
         description: updated.description,
         isDefault: updated.isDefault,
+        isDefaultModel: updated.isDefaultModel,
         lastTestedAt: updated.lastTestedAt?.toISOString() ?? null,
         lastTestError: updated.lastTestError,
         createdByName: getDisplayName(updated.createdBy),

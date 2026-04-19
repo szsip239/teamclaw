@@ -31,33 +31,85 @@ function getAjv(): Ajv {
   return ajvInstance
 }
 
+// ─── Schema Pre-Processing ─────────────────────────────────────────
+//
+// OpenClaw 2026.4.15's config.schema violates JSON Schema spec:
+//   - Contains $ref like "#/$defs/secretInput" (absolute root path)
+//   - But $defs is deeply nested under `plugins.*.config.$defs` — not at root
+//
+// Ajv resolves "#/$defs/*" against the root per JSON Pointer spec, so compile
+// throws "can't resolve reference #/$defs/secretInput".
+//
+// Fix: walk the schema tree, collect all nested $defs into a root $defs before
+// passing to Ajv. If duplicate names appear at different nesting levels, the
+// last one wins (late-merge) — matching OpenClaw's own runtime behavior.
+function flattenDefs(schema: JsonSchema): JsonSchema {
+  const rootDefs: Record<string, unknown> = {
+    ...((schema as { $defs?: Record<string, unknown> }).$defs ?? {}),
+  }
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item)
+      return
+    }
+    const obj = node as Record<string, unknown>
+    const nested = obj.$defs
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      Object.assign(rootDefs, nested as Record<string, unknown>)
+    }
+    for (const [key, val] of Object.entries(obj)) {
+      if (key === '$defs') continue
+      walk(val)
+    }
+  }
+  walk(schema)
+
+  return { ...schema, $defs: rootDefs } as JsonSchema
+}
+
 // ─── Public API ────────────────────────────────────────────────────
 
 /**
  * Validate config data against a JSON Schema.
  * Returns empty array if valid.
+ *
+ * Ajv compile may throw when the schema contains unresolvable $refs (e.g.
+ * OpenClaw's schema where $defs are nested). Such exceptions are caught and
+ * swallowed so that a broken schema never blocks saves — the server-side
+ * gateway will still validate, so we degrade to "skip client validation"
+ * rather than freeze the UI.
  */
 export function validateConfig(
   schema: JsonSchema,
   config: Record<string, unknown>,
 ): ValidationError[] {
   const ajv = getAjv()
-
-  // Remove cached schema to avoid stale validator
   const key = '__teamclaw_config__'
   ajv.removeSchema(key)
 
-  const validate = ajv.compile({ ...schema, $id: key })
-  const valid = validate(config)
+  try {
+    const processed = flattenDefs(schema)
+    const validate = ajv.compile({ ...processed, $id: key })
+    const valid = validate(config)
 
-  if (valid) return []
+    if (valid) return []
 
-  return (validate.errors ?? []).map((err) => ({
-    path: ajvPathToDotPath(err.instancePath, err.params),
-    message: formatErrorMessage(err),
-    keyword: err.keyword,
-    schemaPath: err.schemaPath,
-  }))
+    return (validate.errors ?? []).map((err) => ({
+      path: ajvPathToDotPath(err.instancePath, err.params),
+      message: formatErrorMessage(err),
+      keyword: err.keyword,
+      schemaPath: err.schemaPath,
+    }))
+  } catch (err) {
+    console.warn(
+      '[config-validator] Ajv compile failed, skipping client validation. ' +
+      'Server will validate on save. Reason:',
+      (err as Error).message,
+    )
+    return []
+  }
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────

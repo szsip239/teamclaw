@@ -334,6 +334,7 @@ model Resource {
   lastTestError   String?
   description     String?          @db.Text
   isDefault       Boolean          @default(false)
+  isDefaultModel  Boolean          @default(false)  // Whether this Resource's defaultModelId is the primary for new instances
   createdById     String
   createdBy       User             @relation("ResourceCreator", fields: [createdById], references: [id])
   createdAt       DateTime         @default(now())

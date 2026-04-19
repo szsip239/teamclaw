@@ -80,6 +80,26 @@ export const POST = withAuth(
       } catch (err) {
         const message = (err as Error).message
 
+        // Rate-limit detection — OpenClaw 2026.4.15 returns:
+        //   "[UNAVAILABLE] rate limit exceeded for config.patch; retry after Ns"
+        // Limit is 3/60s per deviceId+clientIP on config.patch/config.apply/update.run.
+        // The retry value is seconds in the text message (not a JSON field).
+        if (message.includes('UNAVAILABLE') && message.includes('rate limit')) {
+          const retryMatch = message.match(/retry after (\d+)s/i)
+          const retryAfterSec = retryMatch ? Number(retryMatch[1]) : 60
+          return NextResponse.json(
+            {
+              error: 'Rate limit exceeded',
+              code: 'RATE_LIMITED',
+              retryAfterSec,
+            },
+            {
+              status: 429,
+              headers: { 'Retry-After': String(retryAfterSec) },
+            },
+          )
+        }
+
         // Hash conflict detection — gateway returns "[INVALID_REQUEST] config changed..."
         // Only match hash-specific messages; don't catch all INVALID_REQUEST errors
         // which could be patch validation failures (e.g., invalid provider entry format).

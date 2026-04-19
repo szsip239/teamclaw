@@ -92,9 +92,12 @@ export default function InstanceConfigPage({
       applyPatchResult(result.config ?? {}, result.hash ?? "")
       toast.success(t('config.saved'))
     } catch (err) {
-      const data = (err as { data?: { error?: string; code?: string } })?.data
+      const data = (err as { data?: { error?: string; code?: string; retryAfterSec?: number } })?.data
       if (data?.code === 'HASH_CONFLICT') {
         toast.error(t('config.hashConflict'))
+      } else if (data?.code === 'RATE_LIMITED') {
+        const sec = data.retryAfterSec ?? 60
+        toast.error(t('config.rateLimited', { sec }))
       } else {
         toast.error(data?.error ?? t('config.saveFailed'))
       }

@@ -332,9 +332,15 @@ export function extractReferencedProviders(
     }
   }
 
-  // Helper: scan a model block { primary, fallbacks }
+  // Helper: scan a model block. OpenClaw allows either the object form
+  // `{ primary, fallbacks }` or the short string form `"provider/model"`.
   const scanModelBlock = (block: unknown) => {
-    if (!block || typeof block !== 'object') return
+    if (!block) return
+    if (typeof block === 'string') {
+      addRef(block)
+      return
+    }
+    if (typeof block !== 'object') return
     const b = block as Record<string, unknown>
     addRef(b.primary)
     if (Array.isArray(b.fallbacks)) {

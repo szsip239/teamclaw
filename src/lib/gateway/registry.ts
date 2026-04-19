@@ -30,7 +30,20 @@ export class GatewayRegistry {
     const managed: ManagedInstance = { client, instanceId, status: 'connecting' }
 
     client.onStatusChange = (status) => {
+      const prev = managed.status
       managed.status = status
+      // Fire default-resource init the first time we reach `connected`.
+      // `initInstanceWithDefaultResources` has its own in-memory dedupe so
+      // retries/reconnects are safe.
+      if (status === 'connected' && prev !== 'connected') {
+        import('@/lib/config-editor/instance-init')
+          .then(({ initInstanceWithDefaultResources }) =>
+            initInstanceWithDefaultResources(instanceId),
+          )
+          .catch((err) =>
+            console.error(`[registry] init-on-connect failed for ${instanceId}:`, err),
+          )
+      }
     }
 
     client.onPermanentDisconnect = () => {

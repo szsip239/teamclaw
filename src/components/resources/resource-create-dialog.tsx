@@ -50,6 +50,7 @@ export function ResourceCreateDialog({
   const providers = providersData?.providers ?? []
 
   const [selectedProvider, setSelectedProvider] = useState("")
+  const [selectedVariant, setSelectedVariant] = useState("")
   const [name, setName] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
@@ -63,21 +64,36 @@ export function ResourceCreateDialog({
   const providerInfo: ProviderInfo | undefined = providers.find(
     (p) => p.id === selectedProvider,
   )
+  const variants = providerInfo?.variants ?? []
+  const activeVariant = variants.find((v) => v.id === selectedVariant) ?? variants[0]
 
-  // Auto-fill from provider when selection changes
+  // When provider changes, pick the first variant by default
   useEffect(() => {
     if (providerInfo) {
-      setBaseUrl(providerInfo.baseUrl ?? "")
-      setEnvVarName(providerInfo.envVarName ?? "")
-      setApiType(providerInfo.apiType ?? "openai-completions")
+      const firstVariant = providerInfo.variants?.[0]
+      setSelectedVariant(firstVariant?.id ?? "")
+      // Prefill from variant if any, otherwise from provider
+      setBaseUrl(firstVariant?.baseUrl ?? providerInfo.baseUrl ?? "")
+      setEnvVarName(firstVariant?.envVarName ?? providerInfo.envVarName ?? "")
+      setApiType(firstVariant?.apiType ?? providerInfo.apiType ?? "openai-completions")
       setModelsExpanded(false)
     }
   }, [providerInfo])
+
+  // When the user picks a different variant, re-prefill the connection fields
+  // (but leave name/apiKey/description alone).
+  useEffect(() => {
+    if (!activeVariant) return
+    setBaseUrl(activeVariant.baseUrl)
+    if (activeVariant.envVarName) setEnvVarName(activeVariant.envVarName)
+    if (activeVariant.apiType) setApiType(activeVariant.apiType)
+  }, [activeVariant])
 
   // Reset form on close
   useEffect(() => {
     if (!open) {
       setSelectedProvider("")
+      setSelectedVariant("")
       setName("")
       setApiKey("")
       setBaseUrl("")
@@ -143,6 +159,30 @@ export function ResourceCreateDialog({
               onValueChange={setSelectedProvider}
             />
           </div>
+
+          {/* Variant (region / plan) — shown only when the provider defines variants */}
+          {selectedProvider && variants.length > 0 && (
+            <div className="space-y-2">
+              <Label>{t('resource.variant')}</Label>
+              <Select value={selectedVariant} onValueChange={setSelectedVariant}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t('resource.variantPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {variants.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {activeVariant && (
+                <p className="text-xs text-muted-foreground">
+                  {t('resource.variantHint', { url: activeVariant.baseUrl })}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Rest of form — only after provider selected */}
           {selectedProvider && (
