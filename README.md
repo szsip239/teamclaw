@@ -146,9 +146,9 @@ npm run dev
 
 > 建议首次登录后立即修改默认密码。
 
-### 2. 配置模型 API 密钥
+### 2. 配置模型资源（**建议先做，再创建实例**）
 
-进入 **资源管理** 页面，创建模型资源：
+进入 **资源管理** 页面，创建模型资源。我们支持 25 个内置 Provider，包括多区域 / 多计划 variants（例如 qwen 的"国内 Standard"、"国内 Coding Plan"、"国际 Standard"、"国际 Coding Plan"）：
 
 | 提供商 | API 协议 | 说明 |
 |--------|----------|------|
@@ -156,21 +156,38 @@ npm run dev
 | OpenAI | `openai-completions` | GPT / o 系列 |
 | Google | `google-generative-ai` | Gemini 系列 |
 | DeepSeek | `openai-completions` | DeepSeek V3 / R1 |
-| MiniMax | `anthropic-messages` | Anthropic 兼容协议 |
+| Qwen（通义千问） | `openai-completions` | 含 Coding Plan 变体 |
+| MiniMax / Doubao / Moonshot | 多种 | 含多 region 变体 |
 | Groq / xAI / Mistral | `openai-completions` | OpenAI 兼容协议 |
 | Ollama / vLLM | `ollama` / `openai-completions` | 本地部署 |
 
-> 完整支持 20+ 提供商（智谱、豆包、千帆、Moonshot 等），详见资源管理页面。
+> 完整支持 25 个 Provider（智谱 GLM、千帆、z.ai、Kimi Coding 等），详见资源管理页面。
 
-点击 **创建资源** → 选择提供商 → 填入 API Key → 保存。可勾选"设为默认"供所有实例使用。
+**操作流程**：
+
+1. 点击 **创建资源** → 选择 Provider → 如有 variants，二级下拉选 region/plan → 填入 API Key → 保存
+2. 进入资源详情 → **Model 列表** → 点击其中一个模型右侧的 ⭐ **星标**，将它设为"新实例默认模型"
+3. 回到资源卡片，勾选 **"设为默认"**（让该 Resource 作为 provider 的首选 key）
+
+**为什么要先做这一步？** 从 v0.4.0 开始，teamclaw 会在新实例首次连接时**自动**把"默认 Resource + 默认模型"推送到实例配置里：
+
+```
+先配资源（设 ⭐ + "设为默认"）
+   ↓
+后创建实例
+   ↓
+实例首次 WebSocket 连接 → teamclaw 自动注入 models.providers + primary model
+   ↓
+开箱即用，无需在 Config Editor 手配
+```
 
 ### 3. 部署 OpenClaw 实例
 
 进入 **实例管理** 页面，选择以下任一方式：
 
-**Docker 容器（推荐）** — 点击"创建实例"，选择 Docker 模式，填写实例名称，选择镜像（默认 `alpine/openclaw:latest`），点击创建即可自动部署。
+**Docker 容器（推荐）** — 点击"创建实例"，选择 Docker 模式，填写实例名称，选择镜像（默认 `alpine/openclaw:latest`），点击创建即可自动部署。实例上线后会**自动**使用步骤 2 中你标记的默认资源与默认模型。
 
-**外部网关** — 如果已有运行中的 OpenClaw，选择外部网关模式，填入 WebSocket URL 和 Token 即可连接。
+**外部网关** — 如果已有运行中的 OpenClaw，选择外部网关模式，填入 WebSocket URL 和 Token 即可连接。已有模型配置的实例不会被覆盖，你可以通过 Config Editor 手动切换默认模型。
 
 等待实例状态变为 🟢 **ONLINE**（通常 5-10 秒）。
 
@@ -179,8 +196,23 @@ npm run dev
 进入 **AI 对话** 页面 — 实例上线后，默认 Agent 会自动出现在左侧栏。点击 Agent 即可开始对话。
 
 ```
-✅ 登录 → 配置 API Key → 创建实例 → 开始对话（约 3 分钟）
+✅ 登录 → 配置资源（⭐ 默认模型）→ 创建实例（自动绑定）→ 开始对话（约 2 分钟）
 ```
+
+### 5. 安装预置 Skills（可选）
+
+v0.4.0 预置了 15 个开箱即用的参考 Skills，涵盖浏览器自动化、内容创作、数据分析、多搜索引擎等场景：
+
+| 类别 | Skills |
+|---|---|
+| 浏览器自动化 | `agent-browser`、`browserwing`、`playwright-scraper-skill` |
+| 搜索 | `baidu-search`、`multi-search-engine`、`vane-search` |
+| 内容创作 | `anygen-skill`、`content-skills`（含包鱼 Markdown→公众号 / Markdown→HTML） |
+| 数据分析 | `data-analyst` |
+| 工作流辅助 | `agent-init`、`multi-agent-cn`、`self-improving`、`skill-creator`、`summarize` |
+| 商务 | `qcc-cli`（企查查） |
+
+**安装方法**：进入 **Skills 管理** 页面 → 选择 skill → 点击"安装到实例" → 选目标实例 / agent / 安装路径（workspace 或 global）。
 
 ## 系统架构
 
@@ -509,9 +541,9 @@ Visit `http://localhost:3100` and sign in with the default admin account:
 
 > Recommended: Change the default password after first login.
 
-### 2. Configure Model API Key
+### 2. Configure Model Resources (**Do this BEFORE creating instances**)
 
-Navigate to the **Resources** page to create a model resource:
+Go to the **Resources** page to create model resources. 25 built-in providers are supported, including region/plan variants (e.g. qwen's "CN Standard", "CN Coding Plan", "Intl Standard", "Intl Coding Plan"):
 
 | Provider | API Protocol | Notes |
 |----------|-------------|-------|
@@ -519,21 +551,38 @@ Navigate to the **Resources** page to create a model resource:
 | OpenAI | `openai-completions` | GPT / o series |
 | Google | `google-generative-ai` | Gemini series |
 | DeepSeek | `openai-completions` | DeepSeek V3 / R1 |
-| MiniMax | `anthropic-messages` | Anthropic-compatible protocol |
-| Groq / xAI / Mistral | `openai-completions` | OpenAI-compatible protocol |
+| Qwen | `openai-completions` | Includes Coding Plan variants |
+| MiniMax / Doubao / Moonshot | mixed | Multiple region variants |
+| Groq / xAI / Mistral | `openai-completions` | OpenAI-compatible |
 | Ollama / vLLM | `ollama` / `openai-completions` | Local deployment |
 
-> 20+ providers supported (OpenRouter, Together, HuggingFace, etc.). See the Resources page for the full list.
+> 25 providers supported (GLM, Qianfan, z.ai, Kimi Coding, etc.). See the Resources page for the full list.
 
-Click **Create Resource** → Select provider → Enter API key → Save. Toggle "Set as default" to use this key for all instances.
+**Workflow**:
+
+1. **Create Resource** → pick a provider → if it has variants, pick one from the second-level dropdown → enter API key → save
+2. Open the resource detail → **Model list** → click the ⭐ **star** next to one model to mark it as "default model for new instances"
+3. Toggle **"Set as default"** on the resource card so this resource becomes the preferred key for its provider
+
+**Why do this first?** Starting from v0.4.0, teamclaw **automatically** pushes your default resource + default model into every new instance on its first WebSocket connection:
+
+```
+Configure resources first (⭐ + "Set as default")
+   ↓
+Create an instance
+   ↓
+First WebSocket connect → teamclaw auto-injects models.providers + primary
+   ↓
+Works out of the box — no manual Config Editor setup needed
+```
 
 ### 3. Deploy an OpenClaw Instance
 
 Navigate to the **Instances** page and choose one of:
 
-**Docker Container (Recommended)** — Click "Create Instance", select Docker mode, enter a name, choose an image (default: `alpine/openclaw:latest`), and create. The container deploys automatically.
+**Docker Container (Recommended)** — Click "Create Instance", select Docker mode, enter a name, choose an image (default: `alpine/openclaw:latest`), and create. Once online, it **automatically** uses the default resource + default model you marked in Step 2.
 
-**External Gateway** — If you already have a running OpenClaw, select external gateway mode, enter the WebSocket URL and token to connect.
+**External Gateway** — If you already have a running OpenClaw, select external gateway mode, enter the WebSocket URL and token to connect. Existing model configurations are not overwritten — use the Config Editor to switch models if needed.
 
 Wait for instance status to become 🟢 **ONLINE** (typically 5-10 seconds).
 
@@ -542,8 +591,23 @@ Wait for instance status to become 🟢 **ONLINE** (typically 5-10 seconds).
 Navigate to the **Chat** page — once the instance is online, default agents appear in the left sidebar. Click an agent to start your conversation.
 
 ```
-✅ Login → Configure API Key → Create Instance → Start Chatting (~3 minutes)
+✅ Login → Configure Resources (⭐ default model) → Create Instance (auto-bound) → Start Chatting (~2 minutes)
 ```
+
+### 5. Install Pre-packaged Skills (Optional)
+
+v0.4.0 ships with 15 ready-to-use reference skills covering browser automation, content creation, data analysis, multi-search, and more:
+
+| Category | Skills |
+|---|---|
+| Browser automation | `agent-browser`, `browserwing`, `playwright-scraper-skill` |
+| Search | `baidu-search`, `multi-search-engine`, `vane-search` |
+| Content creation | `anygen-skill`, `content-skills` (incl. baoyu markdown → WeChat / markdown → HTML) |
+| Data analysis | `data-analyst` |
+| Workflow helpers | `agent-init`, `multi-agent-cn`, `self-improving`, `skill-creator`, `summarize` |
+| Business | `qcc-cli` (QCC enterprise lookup) |
+
+**How to install**: Open **Skills** → pick a skill → click "Install to Instance" → choose target instance / agent / install path (workspace or global).
 
 ## Screenshots
 
