@@ -15,6 +15,8 @@ export interface ModelOption {
   providerName: string
   /** Provider ID: "anthropic" */
   providerId: string
+  /** Variant label resolved from Resource.baseUrl, e.g. "国内 · Coding" */
+  variantLabel?: string
   /** Data source */
   source: 'resource' | 'default'
   /** Resource status (only for 'resource' source) */
@@ -26,8 +28,12 @@ export interface ModelOption {
 }
 
 export interface ModelGroup {
+  /** Unique group key — `providerId` or `providerId:variantId` when multiple variants coexist */
+  key: string
   providerId: string
   providerName: string
+  /** Variant label shown after providerName, e.g. "国内 · Coding" */
+  variantLabel?: string
   models: ModelOption[]
 }
 
@@ -66,6 +72,21 @@ export function useConfigModels() {
       const provider = providerMap.get(resource.provider)
       const providerName = provider?.name ?? resource.providerName ?? resource.provider
 
+      // Resolve variant label from Resource.baseUrl matching one of the provider's
+      // registered variants. When a provider has no variants, or the Resource uses
+      // a custom baseUrl not in the registry, we just omit the label.
+      const effectiveBaseUrl = resource.config?.baseUrl ?? provider?.baseUrl
+      const matchingVariant =
+        effectiveBaseUrl && provider?.variants
+          ? provider.variants.find((v) => v.baseUrl === effectiveBaseUrl)
+          : undefined
+      const variantLabel = matchingVariant?.label
+      const variantId = matchingVariant?.id
+
+      // Group key: include variant id so multiple variants of the same provider
+      // show up as separate groups (e.g. qwen-cn-coding vs qwen-cn-regular)
+      const groupKey = variantId ? `${resource.provider}:${variantId}` : resource.provider
+
       // Get models: resource config first, then provider defaults
       const models = getModelsForResource(resource, provider)
 
@@ -80,6 +101,7 @@ export function useConfigModels() {
           label: model.name || model.id,
           providerName,
           providerId: resource.provider,
+          variantLabel,
           source: resource.config?.models?.some((m) => m.id === model.id)
             ? 'resource'
             : 'default',
@@ -89,15 +111,16 @@ export function useConfigModels() {
         }
         allModels.push(option)
 
-        // Group by provider
-        if (!groupMap.has(resource.provider)) {
-          groupMap.set(resource.provider, {
+        if (!groupMap.has(groupKey)) {
+          groupMap.set(groupKey, {
+            key: groupKey,
             providerId: resource.provider,
             providerName,
+            variantLabel,
             models: [],
           })
         }
-        groupMap.get(resource.provider)!.models.push(option)
+        groupMap.get(groupKey)!.models.push(option)
       }
     }
 

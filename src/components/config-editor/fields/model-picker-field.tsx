@@ -123,12 +123,27 @@ export function ModelPickerField({
                 {isLoading ? t('config.loadingModels') : t('config.noMatchingModel')}
               </CommandEmpty>
               {groups.map((group) => (
-                <CommandGroup key={group.providerId} heading={group.providerName}>
+                <CommandGroup
+                  key={group.key}
+                  heading={
+                    group.variantLabel
+                      ? `${group.providerName} · ${group.variantLabel}`
+                      : group.providerName
+                  }
+                >
                   {group.models.map((model) => (
                     <CommandItem
                       key={model.value}
-                      value={model.value}
-                      onSelect={handleSelect}
+                      // Command's filter matches against `value`; stuff all
+                      // searchable fields in so users can search by model name,
+                      // provider/id, or variant ("国内", "Coding") alike.
+                      value={[
+                        model.value,
+                        model.label,
+                        model.providerName,
+                        model.variantLabel ?? '',
+                      ].join(' ')}
+                      onSelect={() => handleSelect(model.value)}
                       className="gap-2"
                     >
                       <Check
@@ -321,14 +336,26 @@ export function MultiModelPickerField({
                 {isLoading ? t('config.loadingModels') : t('config.noMatchingModel')}
               </CommandEmpty>
               {groups.map((group) => (
-                <CommandGroup key={group.providerId} heading={group.providerName}>
+                <CommandGroup
+                  key={group.key}
+                  heading={
+                    group.variantLabel
+                      ? `${group.providerName} · ${group.variantLabel}`
+                      : group.providerName
+                  }
+                >
                   {group.models.map((model) => {
                     const selected = value.includes(model.value)
                     return (
                       <CommandItem
                         key={model.value}
-                        value={model.value}
-                        onSelect={toggleModel}
+                        value={[
+                          model.value,
+                          model.label,
+                          model.providerName,
+                          model.variantLabel ?? '',
+                        ].join(' ')}
+                        onSelect={() => toggleModel(model.value)}
                         className="gap-2"
                       >
                         <div
