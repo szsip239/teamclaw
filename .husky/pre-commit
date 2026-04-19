@@ -56,15 +56,21 @@ for pattern in $PRIVATE_PATTERNS; do
 done
 
 # --- 2. Scan for hardcoded secrets ---
-SECRETS_REGEX='(PRIVATE_KEY|SECRET_KEY|ENCRYPTION_KEY|API_KEY|sk-[a-zA-Z0-9]{20,}|-----BEGIN\s*(RSA\s*)?PRIVATE\s*KEY)'
+# Match only actual secret *values* — not identifier/env var names like
+# `OPENAI_API_KEY` in docs, `process.env.X_API_KEY` code, or
+# `envVarName: 'Y_API_KEY'` declarations. We look for:
+#   - Provider-specific prefixed keys: sk-..., sk_live_..., sk_test_..., ghp_..., xoxb-..., AKIA...
+#   - PEM private keys (RSA/DSA/EC/OPENSSH)
+#   - JWT tokens (three base64 segments joined by dots)
+#   - Feishu/DingTalk webhook URLs with embedded tokens
+#   - `apiKey/password/secret = "<20+ char value>"` style assignments
+SECRETS_REGEX='(sk-[a-zA-Z0-9]{20,}|sk_(live|test)_[a-zA-Z0-9_]{20,}|gh[pso]_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16}|xoxb-[0-9]+-[0-9]+-[A-Za-z0-9]{20,}|-----BEGIN[[:space:]]*(RSA|DSA|EC|OPENSSH)?[[:space:]]*PRIVATE[[:space:]]+KEY|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|webhook\.feishu\.cn/open-apis/bot/v2/hook/[a-f0-9-]{20,}|oapi\.dingtalk\.com/robot/send\?access_token=[a-zA-Z0-9]{20,}|(api[_-]?key|apiKey|access[_-]?token|password)[[:space:]]*[:=][[:space:]]*["'"'"'][a-zA-Z0-9+/=_-]{20,}["'"'"'])'
 
 for file in $STAGED; do
   # Skip the hook file itself to avoid self-detection
   case "$file" in .husky/*) continue ;; esac
   if [ -f "$file" ]; then
-    # Skip lines declaring env var *names* (not values) — e.g.
-    #   envVarName: 'ANTHROPIC_API_KEY'   ← identifier, not a secret
-    MATCH=$(git diff --cached -- "$file" | grep -E "^\+" | grep -iE "$SECRETS_REGEX" | grep -Ev "envVarName\s*:\s*['\"][A-Z_][A-Z0-9_]*['\"]" | head -3 || true)
+    MATCH=$(git diff --cached -- "$file" | grep -E "^\+" | grep -iE "$SECRETS_REGEX" | head -3 || true)
     if [ -n "$MATCH" ]; then
       echo "❌ BLOCKED: possible secret in $file:"
       echo "$MATCH" | head -3

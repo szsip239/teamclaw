@@ -1,0 +1,23 @@
+{
+  "name": "multi-agent-cn",
+  "version": "1.2.0",
+  "description": "通用多Agent调度系统（中文版）：将主Agent变为纯调度员，所有任务通过 sessions_spawn 委派给5个持久化子Agent（alpha~echo）。轮询调度、先回复再派遣、sessionKey固定复用。无主题绑定，用户可自定义调度员角色和子Agent名称。Generic multi-agent dispatcher (Chinese version).",
+  "author": "cloudboy",
+  "homepage": "https://clawhub.ai",
+  "keywords": [
+    "multi-agent",
+    "多agent",
+    "dispatcher",
+    "调度",
+    "generic",
+    "通用",
+    "sessions_spawn",
+    "轮询",
+    "round-robin",
+    "sub-agents",
+    "中文",
+    "chinese",
+    "coordinator",
+    "task-delegation"
+  ]
+}
