@@ -48,8 +48,28 @@ next-env.d.ts
 
 /src/generated/prisma
 
-# runtime data
-/data/
+# runtime data — ignore everything under /data except the pre-vetted reference skills below
+/data/*
+!/data/skills/
+/data/skills/*
+# Whitelist: pre-vetted reference skills committed to the repo
+!/data/skills/agent-browser/
+!/data/skills/agent-init/
+!/data/skills/anygen-skill/
+!/data/skills/baidu-search/
+!/data/skills/browserwing/
+!/data/skills/content-skills/
+!/data/skills/data-analyst/
+!/data/skills/multi-agent-cn/
+!/data/skills/multi-search-engine/
+!/data/skills/playwright-scraper-skill/
+!/data/skills/qcc-cli/
+!/data/skills/self-improving/
+!/data/skills/skill-creator/
+!/data/skills/summarize/
+!/data/skills/vane-search/
+# _meta.json carries per-user ownerId from the OpenClaw marketplace — never commit
+/data/skills/*/_meta.json
 
 # reference & study docs
 openclaw*.md
