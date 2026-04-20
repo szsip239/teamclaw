@@ -29,6 +29,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/src/generated/prisma ./src/generated/prisma
+# Reference skills are bind-mounted from host at runtime via docker-compose
+# (./data/skills:/app/data/skills:ro) — seed.ts reads them there.
 
 CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npx tsx prisma/seed.ts"]
 

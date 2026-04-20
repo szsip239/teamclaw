@@ -12,6 +12,10 @@ services:
         condition: service_healthy
     networks:
       - data-net
+    volumes:
+      # Read-only mount so seed.ts can scan SKILL.md frontmatter and
+      # populate the Skill table. Matches the app service mount.
+      - ./data/skills:/app/data/skills:ro
     restart: "no"
 
   app:
