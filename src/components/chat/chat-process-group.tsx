@@ -18,6 +18,14 @@ interface ProcessStep {
   toolCall?: ChatToolCall
 }
 
+/** Extract a human-readable snippet from a tool call's input for the summary line. */
+function toolDesc(tc: ChatToolCall): string {
+  const raw = tc.toolInput
+  if (raw == null || raw === '' || (typeof raw === 'object' && Object.keys(raw as Record<string,unknown>).length === 0)) return ''
+  const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  return text
+}
+
 export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
@@ -70,7 +78,7 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
           </span>
         </span>
       ))}
-      <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground/60">
+      <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground/60 shrink-0">
         {t("chat.processSteps", { n: String(flatSteps.length) })}
         <ChevronRight
           className={cn(
@@ -124,7 +132,12 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
               onClick={() => setExpandedIdx(isExpanded ? null : i)}
             >
               <Wrench className="size-2.5 shrink-0 opacity-60" />
-              <span className="font-mono">{tc.toolName}</span>
+              <span className="font-mono line-clamp-1 flex-1 break-all">
+                {(() => {
+                  const desc = toolDesc(tc)
+                  return desc ? `${tc.toolName} ${desc}` : tc.toolName
+                })()}
+              </span>
               <ChevronRight
                 className={cn(
                   "mt-0.5 ml-auto size-2.5 shrink-0 opacity-40 transition-transform",

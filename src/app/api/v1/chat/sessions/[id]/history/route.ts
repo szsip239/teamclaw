@@ -10,6 +10,7 @@ import {
   stripFinalTags,
   splitThinkingFallback,
   mergeExistingContentBlocks,
+  mergeToolInputs,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { activeRuns } from '@/lib/chat/active-runs'
@@ -201,6 +202,7 @@ export const GET = withAuth(
             const cached = session.liveMessages as unknown as ChatMessage[]
             if (Array.isArray(cached)) {
               mergeExistingContentBlocks(msgs, cached)
+              mergeToolInputs(msgs, cached)
             }
           }
 

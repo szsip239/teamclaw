@@ -18,12 +18,11 @@ interface ChatAssistantMessageProps {
 
 export function ChatAssistantMessage({ message, isStreaming, processSteps }: ChatAssistantMessageProps) {
   // Determine if this message's own thinking/tools should use compact layout.
-  // Use compact when there are 2+ items (thinking + toolCalls combined)
-  // and the message also has content (final response).
+  // Always compact when there are thinking or tool calls — even when content
+  // was reclassified to thinking mid-stream (e.g. after a tool_call event).
   const ownThinkingToolCount =
     (message.thinking ? 1 : 0) + (message.toolCalls?.length ?? 0)
-  const hasContent = !!message.content
-  const useCompactOwn = hasContent && ownThinkingToolCount >= 1
+  const useCompactOwn = ownThinkingToolCount >= 1
 
   // Merge: if processSteps exist, combine them with this message's own thinking/tools
   // into a single compact process group.
