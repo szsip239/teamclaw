@@ -9,9 +9,10 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Pencil, Trash2, Download, Loader2, Star } from "lucide-react"
+import { Plus, Pencil, Trash2, Download, Loader2, Star, Send } from "lucide-react"
 import { ModelRow } from "./model-row"
 import { ResourceModelDialog } from "./resource-model-dialog"
+import { ModelPushDialog } from "./model-push-dialog"
 import { useUpdateResource, useProviders } from "@/hooks/use-resources"
 import { api } from "@/lib/api-client"
 import { useT } from "@/stores/language-store"
@@ -47,6 +48,8 @@ export function ResourceModelPanel({ resource }: ResourceModelPanelProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelDefinition | null>(null)
   const [pulling, setPulling] = useState(false)
+  const [pushDialogOpen, setPushDialogOpen] = useState(false)
+  const [pushingModel, setPushingModel] = useState<ModelDefinition | null>(null)
 
   async function saveModels(newModels: ModelDefinition[]) {
     try {
@@ -221,6 +224,18 @@ export function ResourceModelPanel({ resource }: ResourceModelPanelProps) {
                         <Button
                           size="icon"
                           variant="ghost"
+                          className="size-7 text-primary/70 hover:text-primary"
+                          onClick={() => {
+                            setPushingModel(model)
+                            setPushDialogOpen(true)
+                          }}
+                          title={t('resource.pushModel')}
+                        >
+                          <Send className="size-3" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
                           className="size-7"
                           onClick={() => handleEdit(model)}
                         >
@@ -249,6 +264,14 @@ export function ResourceModelPanel({ resource }: ResourceModelPanelProps) {
         onOpenChange={setDialogOpen}
         model={editingModel}
         onSave={handleSave}
+      />
+
+      <ModelPushDialog
+        open={pushDialogOpen}
+        onOpenChange={setPushDialogOpen}
+        resourceId={resource.id}
+        resourceProvider={resource.provider}
+        model={pushingModel}
       />
     </>
   )

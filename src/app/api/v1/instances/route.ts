@@ -302,8 +302,13 @@ async function createDockerInstance(
         [`${GATEWAY_PORT}`]: String(hostPort),
       },
       env: {
-        OPENCLAW_GATEWAY_TOKEN: gatewayToken,
+        // Docker bridge networks don't reliably forward mDNS multicast
+        // (224.0.0.251:5353), causing the bonjour plugin's CIAO probe to
+        // hang and throw an unhandled rejection that kills the gateway.
+        // OpenClaw's official compose preset disables it for the same reason.
+        OPENCLAW_DISABLE_BONJOUR: '1',
         ...body.docker?.env,
+        OPENCLAW_GATEWAY_TOKEN: gatewayToken,
       },
       restartPolicy: body.docker?.restartPolicy || 'unless-stopped',
       memoryLimit: body.docker?.memoryLimit,
