@@ -40,6 +40,7 @@ interface ChatState {
   appendAssistantImage: (imageUrl: string, mimeType?: string, alt?: string) => void
   appendThinking: (content: string) => void
   appendToolCall: (toolCall: ChatToolCall) => void
+  completeToolCall: (toolName: string, toolOutput: unknown) => void
   setAssistantError: (error: string) => void
 
   // Streaming state
@@ -101,6 +102,68 @@ interface ChatState {
 }
 
 /**
+ * Lightweight poll: only reconcile queued messages without touching messages[].
+ * Used by the progress timer once SSE has delivered tool events, to avoid
+ * duplicating tool blocks (SSE's streamingMessage already shows them).
+ */
+async function reconcileQueuedFromHistory(activeSessionId: string) {
+  // Early guard: skip fetch entirely if there's nothing to reconcile
+  const { queuedMessages, pendingQueuedRuns } = useChatStore.getState()
+  if (queuedMessages.length === 0 && pendingQueuedRuns === 0) return
+
+  try {
+    const url = `/api/v1/chat/sessions/${activeSessionId}/history?polling=true`
+    const res = await fetch(url, { credentials: 'include' })
+    if (!res.ok) return
+    const data: ChatHistoryResponse = await res.json()
+
+    // Lightweight extraction — avoid full assembleFromResponse for polling.
+    // We only need user message contents and whether assistants follow them.
+    const historyMsgs: { role: string; content: string }[] = []
+    for (const batch of data.snapshots ?? []) {
+      for (const m of batch.messages) historyMsgs.push(m)
+    }
+    for (const m of data.currentMessages ?? []) historyMsgs.push(m)
+    if (historyMsgs.length === 0) return
+
+    const historyUserContents = new Set(
+      historyMsgs.filter((m) => m.role === 'user').map((m) => m.content),
+    )
+    const displayRemaining = queuedMessages.filter((q) => !historyUserContents.has(q.content))
+    let responsesArrived = 0
+    for (const q of queuedMessages) {
+      const idx = historyMsgs.findIndex((m) => m.role === 'user' && m.content === q.content)
+      if (idx === -1) continue
+      if (historyMsgs.slice(idx + 1).some((m) => m.role === 'assistant' && m.content)) {
+        responsesArrived++
+      }
+    }
+    // Fallback: queuedMessages empty but pendingQueuedRuns > 0
+    if (responsesArrived === 0 && queuedMessages.length === 0 && pendingQueuedRuns > 0) {
+      const lastUserIdx = [...historyMsgs].reverse().findIndex((m) => m.role === 'user')
+      if (lastUserIdx !== -1) {
+        const absIdx = historyMsgs.length - 1 - lastUserIdx
+        if (historyMsgs.slice(absIdx + 1).some((m) => m.role === 'assistant' && m.content)) {
+          responsesArrived = pendingQueuedRuns
+        }
+      }
+    }
+    const updates: Partial<ChatState> = {}
+    if (displayRemaining.length !== queuedMessages.length) {
+      updates.queuedMessages = displayRemaining
+    }
+    if (responsesArrived > 0) {
+      const newPending = Math.max(0, pendingQueuedRuns - responsesArrived)
+      updates.pendingQueuedRuns = newPending
+      if (newPending === 0) updates.remoteStreaming = false
+    }
+    if (Object.keys(updates).length > 0) useChatStore.setState(updates)
+  } catch {
+    /* non-critical */
+  }
+}
+
+/**
  * After streaming completes, replace messages with full history from the API.
  *
  * During streaming, the store only has 1 assistant message (text-only).
@@ -113,21 +176,39 @@ async function syncFromHistory(
   activeSessionId: string,
   set: (partial: Partial<ChatState>) => void,
   opts?: { polling?: boolean },
-) {
+): Promise<boolean> {
   try {
     const url = `/api/v1/chat/sessions/${activeSessionId}/history${opts?.polling ? '?polling=true' : ''}`
     const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) return
+    if (!res.ok) return false
     const data: ChatHistoryResponse = await res.json()
     const assembled = assembleFromResponse(data)
 
     // Don't overwrite existing messages with empty history — gateway may temporarily
     // return empty results mid-run (race condition between tool calls).
     if (assembled.length > 0) {
+      const existing = useChatStore.getState().messages
+
+      // Safety check: if this is a polling sync, verify the gateway snapshot
+      // includes the latest local user message.  If not, the gateway hasn't
+      // persisted it yet — skip replacement to prevent the message from
+      // temporarily disappearing from the UI.
+      if (opts?.polling) {
+        const localUserContents = new Set(
+          existing.filter((m) => m.role === 'user').map((m) => m.content),
+        )
+        const assembledUserContents = new Set(
+          assembled.filter((m) => m.role === 'user').map((m) => m.content),
+        )
+        const allLocalInAssembled = [...localUserContents].every((c) =>
+          assembledUserContents.has(c),
+        )
+        if (!allLocalInAssembled) return false
+      }
+
       // Preserve user-uploaded attachments and contentBlocks: gateway chat.history
       // doesn't return image attachments/blocks in user messages, so we carry them
       // forward from existing local messages. Match by message text content.
-      const existing = useChatStore.getState().messages
       // Build ordered lookup: content → array of preserved data entries.
       // Multiple user messages with the same text each keep their own images.
       const preservedByContent = new Map<
@@ -158,6 +239,30 @@ async function syncFromHistory(
           if (!msg.attachments?.length && saved.attachments) msg.attachments = saved.attachments
           if (!msg.contentBlocks?.length && saved.contentBlocks)
             msg.contentBlocks = saved.contentBlocks
+        }
+      }
+
+      // Merge SSE-captured toolInput into assembled messages.
+      // chat.history doesn't include tool call arguments — only results.
+      // The SSE stream captures toolInput from agent:item events, so
+      // carry it forward so the UI can show tool descriptions.
+      // Match in REVERSE order with toolName validation.
+      const sm = useChatStore.getState().streamingMessage
+      if (sm?.toolCalls?.length) {
+        const sseInputs = sm.toolCalls
+          .filter((t) => t.toolInput != null && t.toolInput !== '')
+          .map((t) => ({ name: t.toolName, input: t.toolInput as string }))
+        let si = sseInputs.length - 1
+        for (let mi = assembled.length - 1; mi >= 0 && si >= 0; mi--) {
+          const msg = assembled[mi]
+          if (msg.role !== 'assistant' || !msg.toolCalls?.length) continue
+          for (let ti = msg.toolCalls.length - 1; ti >= 0 && si >= 0; ti--) {
+            const tc = msg.toolCalls[ti]
+            if (tc.toolInput != null) continue
+            if (tc.toolName !== sseInputs[si].name) continue
+            tc.toolInput = sseInputs[si].input
+            si--
+          }
         }
       }
 
@@ -206,8 +311,10 @@ async function syncFromHistory(
         if (Object.keys(updates).length > 0) set(updates)
       }
     }
+    return false // empty assembled — gateway hasn't caught up yet
   } catch {
     // Silently fail — sync is a non-critical UI enhancement
+    return false
   }
 }
 
@@ -288,6 +395,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
   },
 
+  completeToolCall: (toolName, toolOutput) => {
+    set((s) => {
+      const msg = s.streamingMessage
+      if (!msg) return {}
+      const tcs = [...(msg.toolCalls ?? [])]
+      // Find the latest matching entry without output and update it in-place.
+      // This avoids creating a duplicate entry and avoids re-triggering the
+      // content→thinking reclassification that appendToolCall performs.
+      for (let i = tcs.length - 1; i >= 0; i--) {
+        if (tcs[i].toolName === toolName && tcs[i].toolOutput == null) {
+          tcs[i] = { ...tcs[i], toolOutput }
+          return { streamingMessage: { ...msg, toolCalls: tcs } }
+        }
+      }
+      return {}
+    })
+  },
+
   setAssistantError: (error) => {
     set((s) => {
       const msg = s.streamingMessage
@@ -331,30 +456,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const controller = new AbortController()
     set({ isStreaming: true, abortController: controller })
 
-    // 3b. Progress polling — periodically sync from history to show intermediate
-    // tool calls and thinking that SSE can't deliver (OpenClaw doesn't broadcast
-    // tool events). This is the equivalent of the user pressing "refresh" every
-    // few seconds, but automatic.
+    // 3b. Progress polling — lightweight: only reconcile queued messages.
+    // SSE now delivers all content (text, thinking, tool_call, tool_result)
+    // in real-time via stream=item + stream=command_output (OpenClaw 2026.4+).
+    // messages[] stays untouched during streaming — only streamingMessage
+    // carries live content.  The final syncFromHistory at stream-end replaces
+    // messages[] with the authoritative gateway snapshot.
     //
-    // IMPORTANT: Don't start polling until the gateway confirms it has received
-    // the user message (first meaningful SSE event). chat.send is deferred behind
-    // async file ops (symlinks, image reads) in the server route — if the progress
-    // poll fires before the gateway receives the message, syncFromHistory would
-    // overwrite messages[] with stale history that doesn't include the user's
-    // latest message, causing it to disappear from the UI.
+    // Don't start polling until the gateway confirms it has received the
+    // user message.  Otherwise history might not include the latest message.
     let syncing = false
     let gatewayConfirmed = false
     const streamStartedAt = Date.now()
-    const PROGRESS_POLL_INTERVAL = 5_000 // 5 seconds — fast enough to catch most tool calls
-    const CONFIRMED_FALLBACK_MS = 15_000 // fallback: start polling after 15s even without confirmed
+    const PROGRESS_POLL_INTERVAL = 5_000
+    const CONFIRMED_FALLBACK_MS = 15_000
     const progressTimer = setInterval(() => {
       const sid = capturedSessionId || get().activeSessionId
-      // Start polling once gateway confirms, or after fallback timeout
-      // (confirmed event might be lost due to connection issues or old client code)
       const canPoll = gatewayConfirmed || Date.now() - streamStartedAt > CONFIRMED_FALLBACK_MS
       if (sid && get().isStreaming && !syncing && canPoll) {
         syncing = true
-        syncFromHistory(sid, set, { polling: true }).finally(() => {
+        reconcileQueuedFromHistory(sid).finally(() => {
           syncing = false
         })
       }
@@ -400,11 +521,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             })
             break
           case 'tool_result':
-            get().appendToolCall({
-              toolName: event.toolName,
-              toolInput: null,
-              toolOutput: event.toolOutput,
-            })
+            get().completeToolCall(event.toolName, event.toolOutput)
             break
           case 'image':
             get().appendAssistantImage(event.imageUrl, event.mimeType, event.alt)
@@ -423,11 +540,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } finally {
       clearInterval(progressTimer)
 
-      // Merge streamingMessage into messages[] before clearing streaming state
-      const finalStreaming = get().streamingMessage
-      // If queued messages exist, enable remoteStreaming so we poll for their results
       const hasQueued = get().pendingQueuedRuns > 0
-      if (finalStreaming) {
+
+      // 5. Sync with full history FIRST (primary path — contains complete data with tool calls).
+      // Only merge streamingMessage as a fallback if sync fails (gateway unreachable / empty).
+      let historySynced = false
+      if (capturedSessionId && get().activeSessionId) {
+        historySynced = await syncFromHistory(capturedSessionId, set)
+      }
+
+      const finalStreaming = get().streamingMessage
+      if (historySynced) {
+        // History has authoritative data — discard streamingMessage to prevent duplicates
+        set({
+          streamingMessage: null,
+          isStreaming: false,
+          remoteStreaming: hasQueued,
+          abortController: null,
+        })
+      } else if (finalStreaming) {
+        // Sync failed — merge streamingMessage as best-effort fallback
         set((s) => ({
           messages: [...s.messages, finalStreaming],
           streamingMessage: null,
@@ -442,13 +574,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           remoteStreaming: hasQueued,
           abortController: null,
         })
-      }
-
-      // 5. Sync with full history (gateway omits thinking + tool events during streaming)
-      // Use captured ID to avoid reading a stale/changed activeSessionId.
-      // Skip if session was cleared (abort) — don't restore messages the user deliberately removed.
-      if (capturedSessionId && get().activeSessionId) {
-        syncFromHistory(capturedSessionId, set)
       }
 
       // 6. Invalidate TanStack caches so isActive flags and history data are fresh.

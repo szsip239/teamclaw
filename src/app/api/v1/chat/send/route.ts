@@ -313,6 +313,13 @@ export async function POST(req: NextRequest) {
   const pendingImageReads: Promise<void>[] = []
   // Resolved in the async IIFE below; used by fetchAndEmitImages + tool result handler
   let containerId: string | null = null
+  // Track the active tool name for command_output routing and buffer per-tool output
+  // between item:start and item:end events.
+  let activeToolName: string | null = null
+  const toolOutputBuf = new Map<string, string>()
+  // Capture tool inputs from SSE item events for liveMessages persistence.
+  // chat.history only returns tool results (output), not the original args/input.
+  const capturedToolInputs: { toolName: string; toolInput: unknown }[] = []
   // Capture images from SSE events for liveMessages persistence.
   // chat.history doesn't return inline image blocks, so we must capture
   // them from the live chat events where OpenClaw embeds them.
@@ -335,9 +342,9 @@ export async function POST(req: NextRequest) {
   write({ type: 'session', sessionId: chatSessionId })
 
   // SSE heartbeat: keep connection alive during long tool-use runs.
-  // OpenClaw doesn't broadcast tool events, so the stream can be idle
-  // for minutes while the agent works. Without heartbeat, proxies and
-  // browsers may close the idle connection (nginx proxy_read_timeout, etc.).
+  // OpenClaw broadcasts tool events via stream=item + stream=command_output (2026.4+),
+  // but during extended tool execution the stream can still be idle.
+  // Without heartbeat, proxies and browsers may close the idle connection.
   const heartbeatTimer = setInterval(() => {
     if (closed) {
       clearInterval(heartbeatTimer)
@@ -499,6 +506,7 @@ export async function POST(req: NextRequest) {
               containerId,
               capturedImages,
               userImageAttachments,
+              capturedToolInputs,
             )
           } catch (err) {
             console.error('[live-snapshot] Save failed:', err)
@@ -515,6 +523,7 @@ export async function POST(req: NextRequest) {
               containerId,
               capturedImages,
               userImageAttachments,
+              capturedToolInputs,
             )
           } catch {
             /* non-fatal */
@@ -558,7 +567,7 @@ export async function POST(req: NextRequest) {
 
     const stream = evt.stream as string | undefined
 
-    // Use agent lifecycle "end"/"error" as a safety net for missing chat final
+    // ── Lifecycle: safety net for missing chat final ──
     if (stream === 'lifecycle') {
       const data = (evt.data ?? {}) as Record<string, unknown>
       const phase = data.phase as string
@@ -577,6 +586,7 @@ export async function POST(req: NextRequest) {
               containerId,
               capturedImages,
               userImageAttachments,
+              capturedToolInputs,
             )
           } catch {
             /* non-fatal */
@@ -585,49 +595,80 @@ export async function POST(req: NextRequest) {
           cleanup()
         }, 5_000)
       }
+      return
     }
 
-    if (stream === 'tool') {
+    // ── Item: tool lifecycle events (OpenClaw 2026.4+) ──
+    if (stream === 'item') {
       const data = (evt.data ?? {}) as Record<string, unknown>
+      const kind = data.kind as string | undefined
       const phase = data.phase as string
       const toolName = String(data.name ?? 'tool')
 
-      if (phase === 'start') {
-        write({
-          type: 'tool_call',
-          toolName,
-          toolInput: data.args ?? {},
-        })
-      } else if (phase === 'result') {
-        write({
-          type: 'tool_result',
-          toolName,
-          toolOutput: data.result ?? null,
-        })
+      if (kind === 'tool') {
+        if (phase === 'start') {
+          activeToolName = toolName
+          toolOutputBuf.set(toolName, '')
+          const toolInput = data.args ?? data.meta ?? {}
+          capturedToolInputs.push({ toolName, toolInput })
+          write({
+            type: 'tool_call',
+            toolName,
+            toolInput,
+          })
+        } else if (phase === 'end') {
+          // Flush accumulated command_output + any result text
+          const accumulated = toolOutputBuf.get(toolName) ?? ''
+          const resultText = typeof data.result === 'string' ? data.result : ''
+          const combinedOutput = resultText || accumulated || data.status || null
 
-        // Detect image file paths in tool output (e.g. "MEDIA: /path/to/image.png")
-        // and emit them as image SSE events
-        const resultText = typeof data.result === 'string' ? data.result : ''
-        const mediaPaths = extractMediaPaths(resultText)
-        if (mediaPaths.length > 0) {
-          const imageReadPromise = Promise.all(
-            mediaPaths.map(async (p) => {
-              const dataUrl = containerId
-                ? await readContainerImageAsDataUrl(containerId, p)
-                : await readImageAsDataUrl(p)
-              if (dataUrl) {
-                const ext = extname(p).toLowerCase()
-                const mimeType = MIME_BY_EXT[ext]
-                write({ type: 'image', imageUrl: dataUrl, mimeType })
-                capturedImages.push({ imageUrl: dataUrl, mimeType })
-              }
-            }),
-          )
-            .then(() => {})
-            .catch(() => {})
-          pendingImageReads.push(imageReadPromise)
+          write({
+            type: 'tool_result',
+            toolName,
+            toolOutput: combinedOutput,
+          })
+          toolOutputBuf.delete(toolName)
+          if (activeToolName === toolName) activeToolName = null
+
+          // Detect image file paths in tool output (e.g. "MEDIA: /path/to/image.png")
+          // and emit them as image SSE events
+          const outputText = combinedOutput ? String(combinedOutput) : ''
+          const mediaPaths = extractMediaPaths(outputText)
+          if (mediaPaths.length > 0) {
+            const imageReadPromise = Promise.all(
+              mediaPaths.map(async (p) => {
+                const dataUrl = containerId
+                  ? await readContainerImageAsDataUrl(containerId, p)
+                  : await readImageAsDataUrl(p)
+                if (dataUrl) {
+                  const ext = extname(p).toLowerCase()
+                  const mimeType = MIME_BY_EXT[ext]
+                  write({ type: 'image', imageUrl: dataUrl, mimeType })
+                  capturedImages.push({ imageUrl: dataUrl, mimeType })
+                }
+              }),
+            )
+              .then(() => {})
+              .catch(() => {})
+            pendingImageReads.push(imageReadPromise)
+          }
         }
+        // phase === 'update' — no SSE event needed
       }
+      // kind === 'command' — lifecycle only, output arrives via command_output
+      return
+    }
+
+    // ── Command output: tool result text stream (OpenClaw 2026.4+) ──
+    if (stream === 'command_output') {
+      const data = (evt.data ?? {}) as Record<string, unknown>
+      const output = data.output as string | undefined
+      if (output) {
+        const target = String(data.toolName ?? activeToolName ?? '__current__')
+        const current = toolOutputBuf.get(target) ?? ''
+        toolOutputBuf.set(target, current + output)
+      }
+      return
     }
   })
 
@@ -829,7 +870,7 @@ export async function POST(req: NextRequest) {
       attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
     })
     // Signal client that gateway has received the message — safe to start
-    // progress polling for thinking/tool calls that aren't streamed via SSE.
+    // progress polling for any tool events that may have been missed.
     write({ type: 'confirmed' })
   })().catch((err) => {
     write({ type: 'error', error: (err as Error).message || 'Failed to send message' })

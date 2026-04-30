@@ -22,9 +22,16 @@ export function assembleHistoryMessages(
   isActive: boolean,
 ): ChatMessage[] {
   const result: ChatMessage[] = []
+  // Assign stable position-based IDs so React keys survive transitions
+  // between currentMessages ↔ snapshots (e.g. context reset).  Without
+  // this, the ID change (DB UUID → current-N or vice versa) causes React
+  // to unmount/remount every message component, producing a visible flash.
+  let gi = 0
 
   for (let i = 0; i < snapshots.length; i++) {
-    result.push(...snapshots[i].messages)
+    for (const msg of snapshots[i].messages) {
+      result.push({ ...msg, id: `msg-${gi++}` })
+    }
 
     const isLastBatch = i === snapshots.length - 1
     const hasMoreContent = !isLastBatch || (isActive && currentMessages.length > 0)
@@ -34,7 +41,9 @@ export function assembleHistoryMessages(
   }
 
   if (isActive && currentMessages.length > 0) {
-    result.push(...currentMessages)
+    for (const msg of currentMessages) {
+      result.push({ ...msg, id: `msg-${gi++}` })
+    }
   }
 
   return result

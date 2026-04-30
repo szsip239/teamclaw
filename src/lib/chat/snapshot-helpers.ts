@@ -441,6 +441,7 @@ export async function saveLiveSnapshot(
   containerId?: string | null,
   capturedImages?: { imageUrl: string; mimeType?: string }[],
   userAttachments?: { name: string; mimeType: string; content: string }[],
+  capturedToolInputs?: { toolName: string; toolInput: unknown }[],
 ): Promise<void> {
   const rawResult = await client.request('chat.history', { sessionKey, limit: 200 }, 10_000)
   const historyResult = rawResult as ChatHistoryResult
@@ -483,6 +484,15 @@ export async function saveLiveSnapshot(
     mergeCapturedImages(liveMessages, capturedImages)
   }
 
+  // 2b. SSE-captured tool inputs: agent:item events carry tool arguments that
+  //     chat.history omits.
+  if (capturedToolInputs?.length) {
+    applyToolInputsToMessages(
+      liveMessages,
+      capturedToolInputs.map((t) => ({ name: t.toolName, input: String(t.toolInput) })),
+    )
+  }
+
   // Detect session reset via gateway session ID.
   // OpenClaw assigns an internal session ID (e.g. "16a0f62a") that changes
   // when the session is rebuilt (SIGUSR1, reconnect, etc.). If it changes,
@@ -507,6 +517,10 @@ export async function saveLiveSnapshot(
     // Previous runs' images are already persisted; don't lose them when
     // saveLiveSnapshot overwrites with fresh (image-less) chat.history data.
     mergeExistingContentBlocks(liveMessages, existingLive)
+    // Also carry forward toolInput captured during SSE streaming.
+    // chat.history only returns tool results (output), not the original
+    // arguments/input.  SSE agent:item events have the descriptions.
+    mergeToolInputs(liveMessages, existingLive)
   }
 
   // Pre-compute imageId on all image blocks so the image endpoint
@@ -598,6 +612,52 @@ export function mergeExistingContentBlocks(
       consumed.set(key, idx + 1)
     }
   }
+}
+
+/**
+ * Apply toolInput entries to messages in reverse order (last input → last tool).
+ * Shared by saveLiveSnapshot, mergeToolInputs, and the client-side merge.
+ */
+function applyToolInputsToMessages(
+  messages: ChatMessage[],
+  inputs: { name: string; input: string }[],
+): void {
+  let si = inputs.length - 1
+  for (let mi = messages.length - 1; mi >= 0 && si >= 0; mi--) {
+    const msg = messages[mi]
+    if (msg.role !== 'assistant' || !msg.toolCalls?.length) continue
+    for (let ti = msg.toolCalls.length - 1; ti >= 0 && si >= 0; ti--) {
+      const tc = msg.toolCalls[ti]
+      if (tc.toolInput != null) continue
+      if (tc.toolName !== inputs[si].name) continue
+      tc.toolInput = inputs[si].input
+      si--
+    }
+  }
+}
+
+/**
+ * Carry forward toolInput from old liveMessages into new ones.
+ * chat.history doesn't include tool call arguments — only results.
+ * SSE agent:item events capture the descriptions; this merge prevents
+ * them from being lost when saveLiveSnapshot overwrites liveMessages.
+ */
+export function mergeToolInputs(
+  newMessages: ChatMessage[],
+  oldMessages: ChatMessage[],
+): void {
+  const oldInputs: { name: string; input: string }[] = []
+  for (const msg of oldMessages) {
+    if (msg.role !== 'assistant' || !msg.toolCalls?.length) continue
+    for (const tc of msg.toolCalls) {
+      const inp = tc.toolInput
+      if (inp != null && inp !== '' && typeof inp === 'string') {
+        oldInputs.push({ name: tc.toolName, input: inp })
+      }
+    }
+  }
+  if (oldInputs.length === 0) return
+  applyToolInputsToMessages(newMessages, oldInputs)
 }
 
 /**
