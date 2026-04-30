@@ -16,8 +16,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const t = useT()
 
   useEffect(() => {
-    fetchUser()
-  }, [fetchUser])
+    // Only bootstrap when we have no user yet (e.g. hard refresh on a protected route).
+    // After a successful login the store already has the user — refetching here
+    // races with the redirect and a transient /me failure would bounce us back to /login.
+    if (!user) {
+      fetchUser()
+    }
+  }, [fetchUser, user])
 
   useEffect(() => {
     if (!isLoading && !user) {

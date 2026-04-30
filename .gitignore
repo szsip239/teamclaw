@@ -98,3 +98,4 @@ chrome_user_data/
 log/
 drafts/
 config.toml
+scripts/poc-ws-direct.ts

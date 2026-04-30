@@ -51,6 +51,7 @@ export function useInstances(params?: {
   return useQuery({
     queryKey: instanceKeys.list({
       page: params?.page?.toString(),
+      pageSize: params?.pageSize?.toString(),
       status: params?.status,
       search: params?.search,
     }),

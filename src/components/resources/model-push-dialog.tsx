@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,7 @@ import { Loader2, Send } from "lucide-react"
 import { api } from "@/lib/api-client"
 import { useInstances } from "@/hooks/use-instances"
 import { useT } from "@/stores/language-store"
+import type { TranslationKey } from "@/locales/zh-CN"
 import { toast } from "sonner"
 import type { ModelDefinition } from "@/types/resource"
 
@@ -51,12 +52,11 @@ export function ModelPushDialog({
   model,
 }: ModelPushDialogProps) {
   const t = useT()
-  const { data: instancesData, isLoading: instancesLoading } = useInstances({ pageSize: 100 })
-
-  const instances = useMemo(
-    () => (instancesData?.instances ?? []).filter((i) => i.status === "ONLINE"),
-    [instancesData?.instances],
-  )
+  const { data: instancesData, isLoading: instancesLoading } = useInstances({
+    pageSize: 100,
+    status: "ONLINE",
+  })
+  const instances = instancesData?.instances ?? []
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [role, setRole] = useState<PushRole>("primary")
@@ -259,5 +259,3 @@ export function ModelPushDialog({
   )
 }
 
-// Keep type-key strict by importing the locale's TranslationKey union.
-type TranslationKey = import("@/locales/zh-CN").TranslationKey

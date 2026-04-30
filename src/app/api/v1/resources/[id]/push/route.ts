@@ -1,20 +1,26 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { withAuth, withPermission, withValidation, param } from '@/lib/middleware/auth'
+import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { auditLog } from '@/lib/audit'
 import { buildProviderEntries, sanitizeProviderPatch } from '@/lib/config-editor/provider-sync'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import type { ResourceConfig, ModelDefinition } from '@/types/resource'
 
-// Each role maps to one canonical config path on the instance side. fallbacks
-// is the only "append" target; everything else is overwrite-on-push.
-type ModelPushRole = 'primary' | 'fallbacks' | 'imageModel' | 'imageGenerationModel'
+const PUSH_ROLES = ['primary', 'fallbacks', 'imageModel', 'imageGenerationModel'] as const
+type ModelPushRole = (typeof PUSH_ROLES)[number]
+
+// Map non-fallback roles to the agents.defaults.<key>.primary slot.
+const PRIMARY_SLOT_KEY: Record<Exclude<ModelPushRole, 'fallbacks'>, string> = {
+  primary: 'model',
+  imageModel: 'imageModel',
+  imageGenerationModel: 'imageGenerationModel',
+}
 
 const pushSchema = z.object({
   modelId: z.string().min(1),
   instanceIds: z.array(z.string().min(1)).min(1),
-  role: z.enum(['primary', 'fallbacks', 'imageModel', 'imageGenerationModel']),
+  role: z.enum(PUSH_ROLES),
 })
 
 interface ConfigGetResult {
@@ -23,13 +29,9 @@ interface ConfigGetResult {
 }
 
 /**
- * Build a deep merge-patch fragment that lands the model in the requested
- * role-target on a single instance.
- *
- * For role=fallbacks the existing fallbacks array is read from `currentConfig`,
- * appended with the new ref (only if not already present), and emitted whole —
- * this keeps the user's existing chain intact. Other roles overwrite the
- * single primary slot.
+ * fallbacks needs the existing chain so we can append-if-missing without
+ * dropping the user's prior entries; primary/imageModel/imageGenerationModel
+ * are pure overwrites that don't read current state.
  */
 function buildRolePatch(params: {
   role: ModelPushRole
@@ -37,19 +39,13 @@ function buildRolePatch(params: {
   currentConfig: Record<string, unknown> | undefined
 }): Record<string, unknown> {
   const { role, modelRef, currentConfig } = params
+
+  if (role !== 'fallbacks') {
+    return { agents: { defaults: { [PRIMARY_SLOT_KEY[role]]: { primary: modelRef } } } }
+  }
+
   const defaults = (currentConfig?.agents as Record<string, unknown> | undefined)
     ?.defaults as Record<string, unknown> | undefined
-
-  if (role === 'primary') {
-    return { agents: { defaults: { model: { primary: modelRef } } } }
-  }
-  if (role === 'imageModel') {
-    return { agents: { defaults: { imageModel: { primary: modelRef } } } }
-  }
-  if (role === 'imageGenerationModel') {
-    return { agents: { defaults: { imageGenerationModel: { primary: modelRef } } } }
-  }
-  // role === 'fallbacks' → append-if-missing semantics
   const existing = (defaults?.model as Record<string, unknown> | undefined)?.fallbacks
   const existingArr =
     Array.isArray(existing) && existing.every((x) => typeof x === 'string')
@@ -65,9 +61,6 @@ interface PushOutcome {
   error?: string
 }
 
-// POST /api/v1/resources/[id]/push — Push a single model to multiple instances
-//   under a chosen role. Provider entry is co-pushed so brand new instances
-//   that lack the provider key auto-receive the credentials/baseUrl/models.
 export const POST = withAuth(
   withPermission(
     'resources:manage',
@@ -76,7 +69,7 @@ export const POST = withAuth(
         user: NonNullable<typeof ctx.user>
         body: typeof ctx.body
       }
-      const id = param(ctx, 'id')
+      const id = ctx.params?.id as string
       if (!id) {
         return NextResponse.json({ error: 'Missing resource ID' }, { status: 400 })
       }
@@ -121,6 +114,9 @@ export const POST = withAuth(
             return { instanceId, ok: false, error: 'Instance not connected' }
           }
           try {
+            // config.get is required to obtain baseHash — OpenClaw rejects
+            // config.patch without it. fallbacks additionally consumes
+            // cur.config to append-if-missing; overwrite roles ignore it.
             const cur = (await registry.request(instanceId, 'config.get')) as ConfigGetResult
             const rolePatch = buildRolePatch({
               role: body.role as ModelPushRole,
