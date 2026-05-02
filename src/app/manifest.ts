@@ -4,10 +4,10 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "TeamClaw",
     short_name: "TeamClaw",
-    start_url: "/chat",
+    start_url: "/login",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#0f172a",
+    background_color: "#023262",
+    theme_color: "#023262",
     icons: [
       {
         src: "/icons/icon-192x192.png",
