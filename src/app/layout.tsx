@@ -19,10 +19,14 @@ export const metadata: Metadata = {
   title: "TeamClaw - 企业级 OpenClaw 管理平台",
   description:
     "TeamClaw 是一个企业级 OpenClaw 管理平台，提供实例管理、Agent 管理、权限控制、审计日志等功能。",
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+  },
   appleWebApp: {
     capable: true,
     title: "TeamClaw",
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
   },
 }
 
