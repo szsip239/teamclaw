@@ -43,7 +43,7 @@ export function InstanceActionsDropdown({
 }: InstanceActionsDropdownProps) {
   const t = useT()
   const isOnline = instance.status === "ONLINE"
-  const isOffline = instance.status === "OFFLINE"
+  const isOffline = instance.status === "OFFLINE" || instance.status === "INITIALIZING"
 
   return (
     <DropdownMenu>

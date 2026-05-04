@@ -99,6 +99,13 @@ interface ChatState {
   setMobileSidebarOpen: (v: boolean) => void
   mobileFilePanelOpen: boolean
   setMobileFilePanelOpen: (v: boolean) => void
+
+  // Export mode
+  exportMode: boolean
+  setExportMode: (v: boolean) => void
+  selectedExportIds: string[]
+  toggleExportSelection: (id: string) => void
+  selectAllExportMessages: () => void
 }
 
 /**
@@ -320,7 +327,13 @@ async function syncFromHistory(
 
 export const useChatStore = create<ChatState>((set, get) => ({
   selectedAgent: null,
-  setSelectedAgent: (agent) => set({ selectedAgent: agent }),
+  setSelectedAgent: (agent) =>
+    set((s) => ({
+      selectedAgent: agent,
+      ...(agent && agent !== s.selectedAgent && s.exportMode
+        ? { exportMode: false, selectedExportIds: [] }
+        : {}),
+    })),
 
   activeSessionId: null,
   setActiveSessionId: (id) => set({ activeSessionId: id }),
@@ -677,4 +690,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
   mobileFilePanelOpen: false,
   setMobileFilePanelOpen: (v) => set({ mobileFilePanelOpen: v }),
+
+  exportMode: false,
+  setExportMode: (v) => set({ exportMode: v, selectedExportIds: v ? get().selectedExportIds : [] }),
+  selectedExportIds: [],
+  toggleExportSelection: (id) =>
+    set((s) => ({
+      selectedExportIds: s.selectedExportIds.includes(id)
+        ? s.selectedExportIds.filter((x) => x !== id)
+        : [...s.selectedExportIds, id],
+    })),
+  selectAllExportMessages: () =>
+    set((s) => {
+      const eligible = s.messages
+        .filter((m) => {
+          if (m.content.startsWith('__separator__:')) return false
+          if (m.role === 'assistant' && !m.content && !m.error && (m.thinking || (m.toolCalls?.length ?? 0) > 0)) return false
+          return true
+        })
+        .map((m) => m.id)
+      // Default: select only the latest 2 messages
+      const ids = eligible.slice(-2)
+      return { selectedExportIds: ids }
+    }),
 }))

@@ -120,14 +120,12 @@ export class GatewayV1Adapter implements GatewayAdapter {
       message,
       idempotencyKey,
     }
-    // Use longer timeout (120s) when attachments are present since
-    // base64-encoded images make the WebSocket frame much larger
-    let timeoutMs: number | undefined
+    // Rely on client's default REQUEST_TIMEOUT_MS (120s): first-chat
+    // system-prompt generation takes ~60s, pnpm staging can add ~20s.
     if (options?.attachments?.length) {
       params.attachments = options.attachments
-      timeoutMs = 120_000
     }
-    return client.request('chat.send', params, timeoutMs)
+    return client.request('chat.send', params)
   }
 
   async abortChat(client: GatewayClient, sessionKey: string): Promise<void> {

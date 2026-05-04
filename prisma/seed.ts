@@ -7,6 +7,13 @@ import fs from 'fs/promises'
 import path from 'path'
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+
+// Prisma 7 db push fails to add new enum values to native PostgreSQL enums.
+// Run ALTER TYPE before any Prisma operations so the enum is always in sync.
+const enumMigration = pool.query(
+  `ALTER TYPE "InstanceStatus" ADD VALUE IF NOT EXISTS 'INITIALIZING'`,
+).catch(() => {})
+
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
@@ -178,8 +185,8 @@ async function main() {
   console.log('Seeding complete!')
 }
 
-main()
-  .catch((e) => {
+enumMigration.then(main)
+  .catch((e: Error) => {
     console.error('Seed error:', e)
     process.exit(1)
   })
