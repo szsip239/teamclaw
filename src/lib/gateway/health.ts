@@ -11,10 +11,10 @@ function usableVersion(v: string | null | undefined): string | null {
 }
 
 const CHECK_INTERVAL_MS = 60_000
-const RECOVERY_INTERVAL_MS = 120_000 // Try to recover ERROR/OFFLINE every 2 min
-const HEALTH_TIMEOUT_MS = 10_000
+const RECOVERY_INTERVAL_MS = 120_000
+const HEALTH_TIMEOUT_MS = 30_000 // Must exceed typical event-loop blocking (qwen pnpm ~8s, system-prompt ~60s can block but timeout covers lighter ops)
 const MAX_CONCURRENT = 5
-const FAILURE_THRESHOLD = 3
+const FAILURE_THRESHOLD = 5 // Require more failures before demoting (transient pnpm/agent blocking can hit 3 quickly)
 
 const globalForHealth = globalThis as unknown as {
   healthIntervalTimer?: ReturnType<typeof setInterval> | null

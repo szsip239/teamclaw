@@ -29,6 +29,12 @@ const STATUS_CONFIG = {
     badge: "bg-red-500/10 text-red-600 border-red-500/20 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25",
     pulse: false,
   },
+  INITIALIZING: {
+    labelKey: "instance.statusInitializing" as const,
+    dot: "bg-sky-500",
+    badge: "bg-sky-500/10 text-sky-600 border-sky-500/20 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25",
+    pulse: true,
+  },
   STARTING: {
     labelKey: "instance.statusStarting" as const,
     dot: "bg-sky-500",

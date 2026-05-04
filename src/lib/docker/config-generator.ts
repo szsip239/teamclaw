@@ -3,6 +3,10 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 
+// OpenClaw version used for meta.lastTouchedVersion in generated configs.
+// Bump this when updating the target OpenClaw image version.
+const OPENCLAW_CONFIG_VERSION = '2026.4.29'
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 export interface ModelProviderConfig {
@@ -20,6 +24,10 @@ export interface InstanceConfig {
   defaultAgentId?: string         // default "main"
   env?: Record<string, string>    // extra env vars for openclaw.json env block
   hostDataDir?: string            // host path to instance data dir (for sandbox workspace mapping)
+  /** Pre-built provider entries from Resource DB (avoids config.patch restart). */
+  providerEntries?: Record<string, Record<string, unknown>>
+  /** Default model ref like "qwen/qwen3.6-plus". Requires providerEntries. */
+  defaultModelRef?: string
 }
 
 // ─── Config Generation ──────────────────────────────────────────────
@@ -50,6 +58,12 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
     : '/workspace'
 
   const result: Record<string, unknown> = {
+    // OpenClaw 4.29+ requires `meta` — without it the gateway triggers
+    // auto-restore from last-good backup, potentially corrupting the config.
+    meta: {
+      lastTouchedVersion: OPENCLAW_CONFIG_VERSION,
+      lastTouchedAt: new Date().toISOString(),
+    },
     gateway: {
       port,
       mode: 'local',
@@ -90,8 +104,20 @@ export function generateOpenClawConfig(config: InstanceConfig): Record<string, u
     },
   }
 
-  // Add model provider if specified
-  if (config.modelProvider) {
+  // Add model providers: pre-built entries (from Resource DB) take priority
+  // over the single modelProvider field. Using pre-built entries avoids a
+  // config.patch after startup, which would trigger a gateway restart.
+  if (config.providerEntries && Object.keys(config.providerEntries).length > 0) {
+    result.models = {
+      mode: 'merge',
+      providers: config.providerEntries,
+    }
+    if (config.defaultModelRef) {
+      const agentsBlock = result.agents as Record<string, unknown>
+      const defaults = agentsBlock.defaults as Record<string, unknown>
+      defaults.model = { primary: config.defaultModelRef }
+    }
+  } else if (config.modelProvider) {
     const { name, apiKey, api, baseUrl } = config.modelProvider
     const providerEntry: Record<string, unknown> = { apiKey }
     if (api) providerEntry.api = api

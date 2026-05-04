@@ -13,6 +13,7 @@ import {
   cleanupInstanceFiles,
 } from '@/lib/docker/config-generator'
 import type { ModelProviderConfig } from '@/lib/docker/config-generator'
+import { buildProviderEntries } from '@/lib/config-editor/provider-sync'
 import { auditLog } from '@/lib/audit'
 import type { InstanceStatus, Prisma } from '@/generated/prisma'
 
@@ -90,6 +91,44 @@ function buildGatewayUrl(containerName: string, hostPort: number): string {
   }
   // Running on host — use host port mapping
   return `ws://127.0.0.1:${hostPort}`
+}
+
+/**
+ * Poll for gateway readiness in the background, then update DB status.
+ * Retries every 3s for up to 300s. Provider config is pre-seeded in
+ * openclaw.json so no config.patch restart is needed after connect.
+ */
+async function connectToGateway(
+  instanceId: string,
+  gatewayUrl: string,
+  gatewayToken: string,
+  instanceName: string,
+): Promise<void> {
+  const deadline = Date.now() + 300_000
+  while (Date.now() < deadline) {
+    try {
+      await registry.connect(instanceId, gatewayUrl, gatewayToken)
+      await prisma.instance.update({
+        where: { id: instanceId },
+        data: { status: 'ONLINE' },
+      })
+      console.log(`[instance:create] Gateway connected: ${instanceName}`)
+      return
+    } catch (err) {
+      if (Date.now() + 3000 >= deadline) {
+        console.error(
+          `[instance:create] Gateway connect timed out for ${instanceName}:`,
+          (err as Error).message,
+        )
+        await prisma.instance.update({
+          where: { id: instanceId },
+          data: { status: 'OFFLINE' },
+        }).catch(() => {})
+        return
+      }
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+  }
 }
 
 /** Resolve model provider from request body or environment defaults. */
@@ -217,6 +256,39 @@ async function createDockerInstance(
   // 2. Resolve model provider
   const modelProvider = resolveModelProvider(body.modelProvider)
 
+  // 2b. Pre-build provider entries from default Resources in DB.
+  // Writing them into the initial openclaw.json avoids a config.patch after
+  // startup, which would otherwise trigger a gateway restart.
+  let providerEntries: Record<string, Record<string, unknown>> | undefined
+  let defaultModelRef: string | undefined
+  if (!modelProvider) {
+    try {
+      const defaults = await prisma.resource.findMany({
+        where: { type: 'MODEL', isDefault: true, status: { not: 'ERROR' } },
+        select: { provider: true, isDefaultModel: true, config: true },
+      })
+      if (defaults.length > 0) {
+        const providerIds = [...new Set(defaults.map((r) => r.provider))]
+        const entries = await buildProviderEntries(providerIds)
+        if (Object.keys(entries).length > 0) {
+          providerEntries = entries as unknown as Record<string, Record<string, unknown>>
+          const primarySeed = defaults.find((r) => {
+            if (!r.isDefaultModel) return false
+            const cfg = r.config as { defaultModelId?: string } | null
+            return !!cfg?.defaultModelId
+          })
+          if (primarySeed) {
+            const cfg = primarySeed.config as { defaultModelId?: string }
+            defaultModelRef = `${primarySeed.provider}/${cfg.defaultModelId}`
+          }
+        }
+      }
+    } catch (err) {
+      // Non-fatal: instance will be seeded via initInstanceWithDefaultResources later
+      console.warn('[instance:create] Failed to pre-build provider entries:', (err as Error).message)
+    }
+  }
+
   // 3. Initialize host files (openclaw.json + directory structure)
   let dataDir: string
   try {
@@ -228,6 +300,8 @@ async function createDockerInstance(
       defaultAgentId: body.defaultAgentId || 'main',
       env: body.docker?.env,
       hostDataDir: 'resolve', // resolved to dataDir inside initializeInstanceFiles
+      providerEntries,
+      defaultModelRef,
     })
     dataDir = result.dataDir
   } catch (err) {
@@ -321,25 +395,9 @@ async function createDockerInstance(
     )
   }
 
-  // 8. Start container + initialize environment & sandbox support
+  // 8. Start container
   try {
     await dockerManager.startContainer(containerId)
-
-    // Fix common env issues (pip3 PATH, etc.) — always runs, independent of sandbox.
-    await dockerManager.initContainerEnv(containerId).catch(() => {})
-
-    // Install Docker CLI and set up permissions for sandbox mode (Docker-in-Docker).
-    // Must run after start (needs running container) and requires restart for group changes.
-    try {
-      await dockerManager.initSandboxSupport(containerId)
-      await dockerManager.restartContainer(containerId)
-    } catch (sandboxErr) {
-      // Non-fatal: instance works without sandbox, log and continue
-      console.warn(
-        `[instance:create] Sandbox init failed for ${name}:`,
-        (sandboxErr as Error).message,
-      )
-    }
   } catch (err) {
     // Keep container for debugging — create DB record with ERROR status
     const gatewayUrl = buildGatewayUrl(containerName, hostPort)
@@ -376,7 +434,25 @@ async function createDockerInstance(
     )
   }
 
-  // 9. Compute gateway URL and create DB record (initially OFFLINE)
+  // 9. Fire-and-forget: sandbox init (Docker CLI install + group changes).
+  // Non-critical — gateway works without it. We intentionally skip the
+  // container restart to avoid killing the gateway mid-flight.  Sandbox
+  // mode won't work until the instance is manually restarted once (needs
+  // docker group permissions applied via new login session).
+  ;(async () => {
+    await dockerManager.initContainerEnv(containerId).catch(() => {})
+    try {
+      await dockerManager.initSandboxSupport(containerId)
+      // restartContainer intentionally skipped — see comment above
+    } catch (err) {
+      console.warn(
+        `[instance:create] Sandbox init failed for ${name}:`,
+        (err as Error).message,
+      )
+    }
+  })().catch(() => {})
+
+  // 10. Compute gateway URL and create DB record
   const gatewayUrl = buildGatewayUrl(containerName, hostPort)
 
   const instance = await prisma.instance.create({
@@ -389,45 +465,31 @@ async function createDockerInstance(
       containerName,
       imageName,
       dockerConfig: { ...body.docker, hostPort } as Prisma.InputJsonValue,
-      status: 'OFFLINE',
+      status: 'INITIALIZING',
       createdById: user.id,
     },
     select: instanceSelectFields,
   })
 
-  // 10. Wait for gateway to initialize, then connect with the real instance ID
-  await new Promise((r) => setTimeout(r, 3000))
-
-  try {
-    await registry.connect(instance.id, gatewayUrl, gatewayToken)
-    await prisma.instance.update({
-      where: { id: instance.id },
-      data: { status: 'ONLINE' },
-    })
-  } catch (err) {
-    // Container is running but gateway connection failed — stays OFFLINE
-    // The start endpoint or health service can recover later
-    console.error(`[instance:create] Gateway connect failed for ${name}:`, (err as Error).message)
-  }
-
-  // Re-fetch to get the latest status after potential ONLINE update
-  const updated = await prisma.instance.findUnique({
-    where: { id: instance.id },
-    select: instanceSelectFields,
-  })
+  // 11. Connect to gateway in background with polling (3s interval, 300s timeout).
+  const connectPromise = connectToGateway(instance.id, gatewayUrl, gatewayToken, name)
 
   auditLog({
     userId: user.id,
     action: 'INSTANCE_CREATE',
     resource: 'instance',
     resourceId: instance.id,
-    details: { name, mode: 'docker', imageName, gatewayUrl, status: updated?.status ?? 'OFFLINE' },
+    details: { name, mode: 'docker', imageName, gatewayUrl, status: 'INITIALIZING' },
     ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
     userAgent: req.headers.get('user-agent') || undefined,
     result: 'SUCCESS',
   })
 
-  return NextResponse.json({ instance: updated ?? instance }, { status: 201 })
+  // Don't await sandbox or connect — return immediately so the UI responds.
+  // Attach a noop .catch to prevent unhandled rejection warnings.
+  connectPromise.catch(() => {})
+
+  return NextResponse.json({ instance }, { status: 201 })
 }
 
 // ─── External Mode ───────────────────────────────────────────────────

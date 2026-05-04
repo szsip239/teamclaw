@@ -7,7 +7,9 @@ import type {
 } from '@/types/gateway'
 
 const PROTOCOL_VERSION = 3
-const REQUEST_TIMEOUT_MS = 30_000
+// 120s default: first-chat system-prompt generation takes ~60s, plus
+// provider-plugin pnpm staging can block the event loop for ~20s.
+const REQUEST_TIMEOUT_MS = 120_000
 const MAX_RECONNECT_ATTEMPTS = 10
 const BASE_RECONNECT_DELAY_MS = 1_000
 const MAX_RECONNECT_DELAY_MS = 32_000
@@ -67,7 +69,7 @@ export class GatewayClient {
       this.connectResolve = resolve
       this.connectReject = reject
 
-      // 15s overall timeout: if handshake doesn't complete, reject and close
+      // 30s overall timeout: gateway may be slow during first-boot pnpm
       this.connectTimer = setTimeout(() => {
         this.clearConnectTimer()
         if (this.connectReject) {
@@ -76,7 +78,7 @@ export class GatewayClient {
           this.connectReject = null
         }
         this.ws?.close(4001, 'connect timeout')
-      }, 15_000)
+      }, 30_000)
 
       // resolveGatewayUrl may rewrite 127.0.0.1 → host.docker.internal for
       // Docker. OpenClaw's checkBrowserOrigin checks both Host and Origin
@@ -98,6 +100,7 @@ export class GatewayClient {
         this.clearConnectTimer()
         this.connected = false
         this.stopTickWatch()
+        this.rejectAllPending('Connection closed')
         this.onStatusChange?.('disconnected')
 
         // Reject any pending connect() promise so the caller doesn't hang.

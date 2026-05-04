@@ -5,12 +5,14 @@ import { Bot, Loader2, RefreshCw, Plus, Clock } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useChatStore } from '@/stores/chat-store'
 import { chatKeys, useNewConversation } from '@/hooks/use-chat'
 import { useT } from '@/stores/language-store'
 import { ChatMessageBubble } from './chat-message-bubble'
 import { ChatAssistantMessage } from './chat-assistant-message'
 import { ChatProcessGroup } from './chat-process-group'
+
 import type { ChatMessage } from '@/types/chat'
 
 const SEPARATOR_PREFIX = '__separator__:'
@@ -211,6 +213,51 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
 
+  // Export mode
+  const exportMode = useChatStore((s) => s.exportMode)
+  const selectedExportIds = useChatStore((s) => s.selectedExportIds)
+  const toggleExportSelection = useChatStore((s) => s.toggleExportSelection)
+  const selectAllExportMessages = useChatStore((s) => s.selectAllExportMessages)
+  const autoSelectedRef = useRef<Set<string>>(new Set())
+
+  // When entering export mode, auto-select all currently visible and reset tracker
+  useEffect(() => {
+    if (exportMode) {
+      selectAllExportMessages()
+      autoSelectedRef.current = new Set(messages.map((m) => m.id))
+    } else {
+      autoSelectedRef.current = new Set()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportMode])
+
+  // IntersectionObserver: auto-select messages as they scroll into view
+  useEffect(() => {
+    if (!exportMode) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const id = (entry.target as HTMLElement).dataset.messageId
+          if (!id) continue
+          // Only auto-select if not already auto-selected this session
+          if (!autoSelectedRef.current.has(id)) {
+            autoSelectedRef.current.add(id)
+            toggleExportSelection(id)
+          }
+        }
+      },
+      { threshold: 0.4 },
+    )
+
+    // Observe all message containers
+    const messageEls = viewportRef.current?.querySelectorAll('[data-message-id]')
+    messageEls?.forEach((el) => observer.observe(el))
+
+    return () => observer.disconnect()
+  }, [exportMode, messages.length, toggleExportSelection])
+
   // Reset scroll-to-bottom when session changes (component stays mounted across switches)
   useEffect(() => {
     setIsNearBottom(true)
@@ -245,6 +292,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
   }
 
   return (
+    <>
     <ScrollArea className="flex-1" viewportRef={viewportRef} onScroll={handleScroll}>
       <div className="mx-auto flex max-w-[950px] flex-col gap-4 px-3 py-6">
         {connectionStatus === 'unreachable' && (
@@ -258,17 +306,41 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
           if (item.type === 'process-only') {
             return <ChatProcessGroup key={item.id} steps={item.steps} />
           }
-          if (item.type === 'assistant-grouped') {
-            return (
-              <ChatAssistantMessage
-                key={item.id}
-                message={item.message}
-                isStreaming={false}
-                processSteps={item.steps}
-              />
-            )
-          }
-          return <MemoizedMessage key={item.id} message={item.message} />
+
+          // Get the display message ID for selection tracking
+          const msgId = item.message.id
+          const isSelected = selectedExportIds.includes(msgId)
+          // Skip checkbox for context separators
+          const isSep = item.type === 'message' && isSeparator(item.message.content)
+
+          const messageContent = (
+            <>
+              {item.type === 'assistant-grouped' ? (
+                <ChatAssistantMessage
+                  key={item.id}
+                  message={item.message}
+                  isStreaming={false}
+                  processSteps={item.steps}
+                />
+              ) : (
+                <MemoizedMessage key={item.id} message={item.message} />
+              )}
+            </>
+          )
+
+          return (
+            <div key={item.id} data-message-id={isSep ? undefined : msgId} className="flex items-start gap-2 group">
+              {exportMode && !isSep && (
+                <div className="shrink-0 pt-2">
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={() => toggleExportSelection(msgId)}
+                  />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">{messageContent}</div>
+            </div>
+          )
         })}
         {streamingMessage && (
           <ChatAssistantMessage
@@ -308,5 +380,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
         <div ref={bottomRef} />
       </div>
     </ScrollArea>
+
+    </>
   )
 }
