@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@/types/chat'
+import { EXPORT_BG_BASE64 } from '@/lib/chat/export-bg'
 
 export const MAX_EXPORT_MESSAGES = 10
 
@@ -10,6 +11,7 @@ interface ExportMeta {
   labelDonePng: string
   labelDonePdf: string
   labelFailed: string
+  labelFooter: string
 }
 
 // ─── Build export HTML ──────────────────────────────────────────────
@@ -30,11 +32,12 @@ export function buildExportHtml(
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"><\/script>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{width:800px;margin:0 auto;background:#fff;color:#1a1a2e;padding:32px 24px 16px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
-  .hdr{margin-bottom:24px;border-bottom:2px solid #e5e7eb;padding-bottom:16px}
-  .hdr h1{font-size:20px;font-weight:700;color:#023262}
-  .hdr p{font-size:12px;color:#6b7280;margin-top:4px}
-  .msgs{display:flex;flex-direction:column;gap:16px}
+  body{width:800px;margin:0 auto;background:linear-gradient(180deg,rgba(255,255,255,0.08) 0%,rgba(255,255,255,0.18) 50%,rgba(255,255,255,0.08) 100%),url(${EXPORT_BG_BASE64}) repeat-y top/100% auto;color:#1a1a2e;padding:32px 24px 16px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .hdr{margin-bottom:24px;border-bottom:2px solid rgba(255,255,255,0.25);padding-bottom:16px}
+  .hdr h1{font-size:20px;font-weight:700;color:#fff}
+  .hdr p{font-size:12px;color:rgba(255,255,255,0.8);margin-top:4px}
+  .msgs{display:flex;flex-direction:column;gap:16px;background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 16px rgba(0,0,0,0.08)}
+  .ftr{text-align:center;margin-top:20px;font-size:11px;color:rgba(255,255,255,0.7)}
   .u{display:flex;justify-content:flex-end}
   .ui{max-width:75%}
   .lbl{font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px}
@@ -65,17 +68,17 @@ export function buildExportHtml(
   .pre-lang{font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 8px;border-radius:4px 4px 0 0;display:inline-block}
   .echart-box{height:360px;margin:8px 0;border:1px solid #e5e7eb;border-radius:6px}
   .mermaid-box{display:flex;align-items:center;justify-content:center;height:120px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin:8px 0;color:#9ca3af;font-size:13px}
-  .btns{display:flex;gap:10px;justify-content:flex-end;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #e5e7eb}
+  .btns{display:flex;gap:10px;justify-content:flex-end;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid rgba(255,255,255,0.25)}
   .btns button{display:inline-flex;align-items:center;gap:6px;color:#fff;border:none;padding:7px 18px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:system-ui,sans-serif;transition:filter 0.15s}
   .btns button:hover{filter:brightness(1.12)}
   .btns .btn-png{background:linear-gradient(135deg,#1e40af,#3b82f6)}
   .btns .btn-pdf{background:linear-gradient(135deg,#b91c1c,#ef4444)}
   .btns svg{width:16px;height:16px;flex-shrink:0}
-  #dl-msg{margin-bottom:16px;font-size:12px;color:#6b7280;text-align:center}
+  #dl-msg{margin-bottom:16px;font-size:12px;color:rgba(255,255,255,0.7);text-align:center}
 </style>
 </head>
 <body>
-<div class="hdr"><h1>TeamClaw</h1><p>${escapeHtml(meta.agentName)}${meta.instanceName ? ` · ${escapeHtml(meta.instanceName)}` : ''} · ${new Date().toLocaleString()}</p></div>
+<div class="hdr"><h1>@TeamClaw</h1><p>${escapeHtml(meta.agentName)}${meta.instanceName ? ` · ${escapeHtml(meta.instanceName)}` : ''} · ${new Date().toLocaleString()}</p></div>
 <div class="btns">
   <button class="btn-png" onclick="downloadPNG()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -88,6 +91,7 @@ export function buildExportHtml(
 </div>
 <div id="dl-msg"></div>
 <div class="msgs">${messagesHtml}</div>
+<div class="ftr">${escapeHtml(meta.labelFooter)}</div>
 <script>
 // Render ECharts
 (function(){
@@ -108,7 +112,7 @@ function downloadPNG(){
   msg.textContent = '';
   msg.style.display = 'none';
   html2canvas(document.body, {
-    backgroundColor: '#ffffff',
+    backgroundColor: null,
     scale: 2,
     useCORS: true,
     allowTaint: true,
@@ -138,6 +142,12 @@ function downloadPDF(){
   btns.style.display = 'none';
   msg.textContent = '';
   msg.style.display = 'none';
+
+  // Override dark-bg styles for white-background PDF readability
+  var pdfStyle = document.createElement('style');
+  pdfStyle.id = 'pdf-override';
+  pdfStyle.textContent = 'body{background:#fff!important} .msgs{background:#fff!important;box-shadow:none!important;border-radius:0!important} .hdr h1{color:#023262!important} .hdr p{color:#6b7280!important} .ftr{color:#6b7280!important} .btns{border-bottom-color:#e5e7eb!important} .hdr{border-bottom-color:#e5e7eb!important} #dl-msg{color:#6b7280!important}';
+  document.head.appendChild(pdfStyle);
 
   var SCALE = 1.5;
   html2canvas(document.body, {
@@ -220,13 +230,14 @@ function downloadPDF(){
     }
 
     pdf.save('${agentLabel}-export.pdf');
-    btns.style.display = '';
-    msg.style.display = '';
     msg.textContent = '${escapeAttr(meta.labelDonePdf)}';
   }).catch(function(e){
+    msg.textContent = '${escapeAttr(meta.labelFailed)} ' + e.message;
+  }).finally(function(){
+    var s = document.getElementById('pdf-override');
+    if(s) s.remove();
     btns.style.display = '';
     msg.style.display = '';
-    msg.textContent = '${escapeAttr(meta.labelFailed)} ' + e.message;
   });
 }
 <\/script>

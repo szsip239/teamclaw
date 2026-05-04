@@ -388,6 +388,7 @@ const zhCN = {
   'chat.exportDonePng': 'PNG 已下载！',
   'chat.exportDonePdf': 'PDF 已下载！',
   'chat.exportFailed': '失败：',
+  'chat.exportFooter': '@TeamClaw AI生成，仅供参考',
 
   // ── Skill ───────────────────────────────────────────────
   'skill.management': 'Skills 管理',
