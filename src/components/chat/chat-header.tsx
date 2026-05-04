@@ -75,6 +75,7 @@ export function ChatHeader() {
       labelDonePng: t('chat.exportDonePng'),
       labelDonePdf: t('chat.exportDonePdf'),
       labelFailed: t('chat.exportFailed'),
+      labelFooter: t('chat.exportFooter'),
     }
 
     let html: string

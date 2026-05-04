@@ -393,6 +393,7 @@ const en: Record<TranslationKey, string> = {
   'chat.exportDonePng': 'PNG downloaded!',
   'chat.exportDonePdf': 'PDF downloaded!',
   'chat.exportFailed': 'Failed: ',
+  'chat.exportFooter': '@TeamClaw AI-generated, for reference only',
 
   // ── Skill ───────────────────────────────────────────────
   'skill.management': 'Skills Management',
