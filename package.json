@@ -57,7 +57,7 @@
     "lucide-react": "^0.563.0",
     "mermaid": "^11.13.0",
     "motion": "^12.34.0",
-    "next": "16.2.3",
+    "next": "16.2.6",
     "next-themes": "^0.4.6",
     "pg": "^8.18.0",
     "radix-ui": "^1.4.3",
@@ -85,7 +85,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.4",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.2.6",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
     "prisma": "^7.4.0",
@@ -103,6 +103,7 @@
     "protobufjs": "^7.5.5",
     "vite": "^7.3.2",
     "uuid": "^14.0.0",
+    "fast-uri": "^3.1.2",
     "postcss": "^8.5.10"
   }
 }
