@@ -1,5 +1,9 @@
 import { prisma } from '@/lib/db'
-import { buildProviderEntries, sanitizeProviderPatch } from '@/lib/config-editor/provider-sync'
+import {
+  buildProviderEntries,
+  resolveOpenClawProviderId,
+  sanitizeProviderPatch,
+} from '@/lib/config-editor/provider-sync'
 import type { ConfigGetResult } from '@/types/gateway'
 
 // Tracks which instances have already been auto-initialized in this gateway
@@ -83,8 +87,12 @@ export async function initInstanceWithDefaultResources(instanceId: string): Prom
     })
     if (primarySeed) {
       const cfg = primarySeed.config as { defaultModelId?: string }
+      const providerRef = resolveOpenClawProviderId(
+        primarySeed.provider,
+        primarySeed.config as Record<string, unknown> | null,
+      )
       patch.agents = {
-        defaults: { model: `${primarySeed.provider}/${cfg.defaultModelId}` },
+        defaults: { model: `${providerRef}/${cfg.defaultModelId}` },
       }
     }
   }

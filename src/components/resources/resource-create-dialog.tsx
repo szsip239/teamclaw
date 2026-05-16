@@ -110,7 +110,7 @@ export function ResourceCreateDialog({
     (f) => f.key === "envVarName",
   )
   const isModelType = providerInfo?.type === "MODEL"
-  const defaultModels = providerInfo?.defaultModels ?? []
+  const defaultModels = activeVariant?.defaultModels ?? providerInfo?.defaultModels ?? []
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -126,6 +126,7 @@ export function ResourceCreateDialog({
           baseUrl: baseUrl || undefined,
           apiType: apiType || providerInfo?.apiType || undefined,
           envVarName: envVarName || providerInfo?.envVarName || undefined,
+          openClawProviderId: activeVariant?.openClawProviderId || undefined,
           models: defaultModels.length > 0 ? defaultModels : undefined,
         },
         description: description || undefined,

@@ -24,6 +24,8 @@
 # misc
 .DS_Store
 *.pem
+AGENTS.md
+.skill-invocations.log
 
 # debug
 npm-debug.log*

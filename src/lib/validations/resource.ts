@@ -21,6 +21,7 @@ const resourceConfigSchema = z.object({
   baseUrl: z.string().url('请输入有效的 URL').optional(),
   apiType: z.string().optional(),
   envVarName: z.string().regex(envVarRegex, '环境变量名格式不正确').optional(),
+  openClawProviderId: z.string().min(1).optional(),
   authHeader: z.boolean().optional(),
   headers: z.record(z.string(), z.string()).optional(),
   models: z.array(modelDefinitionSchema).optional(),
