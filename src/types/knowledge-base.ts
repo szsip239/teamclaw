@@ -1,4 +1,5 @@
 export type KbScope = 'GLOBAL' | 'DEPARTMENT' | 'PERSONAL'
+export type KbCategory = 'INTERNAL' | 'EXTERNAL' | 'RULES'
 export type DocumentStatus = 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED'
 
 export interface KnowledgeBaseOverview {
@@ -6,6 +7,7 @@ export interface KnowledgeBaseOverview {
   name: string
   description: string | null
   scope: KbScope
+  category: KbCategory
   departmentId: string | null
   departmentName: string | null
   createdById: string
@@ -28,6 +30,7 @@ export interface KnowledgeDocumentInfo {
   status: DocumentStatus
   jobId: string | null
   errorMessage: string | null
+  hasOcrContent?: boolean
   createdAt: string
   updatedAt: string
 }

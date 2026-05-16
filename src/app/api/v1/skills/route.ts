@@ -5,7 +5,6 @@ import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { auditLog } from '@/lib/audit'
 import { createSkillSchema } from '@/lib/validations/skill'
 import {
-  isSkillVisible,
   canCreateSkillWithCategory,
   getDefaultSkillCategory,
 } from '@/lib/skills/permissions'
@@ -15,6 +14,11 @@ import {
   writeSkillFile,
   parseFrontmatter,
 } from '@/lib/skills/fs'
+import {
+  normalizeImportedSkillFiles,
+  readImportedSkillText,
+  writeImportedSkillFiles,
+} from '@/lib/skills/import'
 import type { SkillOverview, SkillListResponse, SkillCategory } from '@/types/skill'
 
 // GET /api/v1/skills — List skills with pagination and filtering
@@ -126,6 +130,7 @@ export const POST = withAuth(
         departmentIds,
         tags,
         skillContent,
+        importFiles,
       } = body
 
       // Determine category
@@ -145,6 +150,22 @@ export const POST = withAuth(
         return NextResponse.json({ error: `Slug "${slug}" is already in use` }, { status: 409 })
       }
 
+      let normalizedImportFiles: ReturnType<typeof normalizeImportedSkillFiles> | null = null
+      let importedSkillMdContent: string | null = null
+
+      if (importFiles && importFiles.length > 0) {
+        try {
+          normalizedImportFiles = normalizeImportedSkillFiles(importFiles)
+          const importedSkillMd = normalizedImportFiles.find((file) => file.path === 'SKILL.md')
+          importedSkillMdContent = importedSkillMd ? readImportedSkillText(importedSkillMd) : null
+        } catch (err) {
+          return NextResponse.json(
+            { error: (err as Error).message || 'Invalid imported skill folder' },
+            { status: 400 },
+          )
+        }
+      }
+
       // Resolve department IDs for DEPARTMENT category
       let connectDepts: { id: string }[] = []
       if (category === 'DEPARTMENT') {
@@ -158,8 +179,15 @@ export const POST = withAuth(
       // Create filesystem directory + initial SKILL.md
       await ensureSkillDir(slug)
       const initialContent =
-        skillContent || generateDefaultSkillMd(name, description ?? undefined, emoji ?? undefined)
-      await writeSkillFile(slug, 'SKILL.md', initialContent)
+        importedSkillMdContent ??
+        skillContent ??
+        generateDefaultSkillMd(name, description ?? undefined, emoji ?? undefined)
+
+      if (normalizedImportFiles) {
+        await writeImportedSkillFiles(slug, normalizedImportFiles)
+      } else {
+        await writeSkillFile(slug, 'SKILL.md', initialContent)
+      }
 
       // Parse frontmatter for caching in DB
       const frontmatter = parseFrontmatter(initialContent)
@@ -191,7 +219,12 @@ export const POST = withAuth(
         action: 'SKILL_CREATE',
         resource: 'skill',
         resourceId: skill.id,
-        details: { slug, name, category },
+        details: {
+          slug,
+          name,
+          category,
+          importFileCount: normalizedImportFiles?.length ?? 0,
+        },
         ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
         userAgent: req.headers.get('user-agent') || undefined,
         result: 'SUCCESS',

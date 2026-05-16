@@ -24,6 +24,7 @@ export const GET = withAuth(
       lastMessageAt: r.lastMessageAt?.toISOString() ?? null,
       messageCount: r.messageCount,
       isActive: r.isActive,
+      mountedKbIds: r.mountedKbIds,
       createdAt: r.createdAt.toISOString(),
     }))
 

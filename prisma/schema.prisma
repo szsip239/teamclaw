@@ -42,6 +42,12 @@ enum KbScope {
   PERSONAL     // 仅创建者可见
 }
 
+enum KbCategory {
+  INTERNAL     // 内部知识库 — company docs, policies, procedures
+  EXTERNAL     // 外部知识库 — industry standards, public references
+  RULES        // 规则库 — system rules, constraints, must-follow guidelines
+}
+
 enum DocumentStatus {
   PENDING      // 已上传，等待处理
   PROCESSING   // OCR / 向量化进行中
@@ -218,6 +224,7 @@ model ChatSession {
   messageCount  Int       @default(0)
   isActive      Boolean   @default(true)
   liveMessages  Json?     // Post-run auto-snapshot, overwritten after each chat reply
+  mountedKbIds  String[]  @default([])
   snapshots     ChatMessageSnapshot[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -351,6 +358,7 @@ model KnowledgeBase {
   name            String
   description     String?             @db.Text
   scope           KbScope             @default(PERSONAL)
+  category        KbCategory          @default(INTERNAL)
   departmentId    String?
   department      Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   createdById     String
@@ -363,6 +371,7 @@ model KnowledgeBase {
   @@index([scope])
   @@index([departmentId])
   @@index([createdById])
+  @@index([category])
 }
 
 model KnowledgeDocument {

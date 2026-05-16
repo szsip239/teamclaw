@@ -1,9 +1,11 @@
 "use client"
 
-import { FileText, Trash2, RotateCw } from "lucide-react"
+import { useState } from "react"
+import { FileText, Trash2, RotateCw, ScrollText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { KbDocumentStatusBadge } from "./kb-document-status-badge"
 import { KbIngestionLog } from "./kb-ingestion-log"
+import { KbDocumentContentDialog } from "./kb-document-content-dialog"
 import { useT } from "@/stores/language-store"
 import type { KnowledgeDocumentInfo } from "@/types/knowledge-base"
 
@@ -13,10 +15,12 @@ interface KbDocumentRowProps {
   canManage: boolean
   onDelete: (docId: string) => void
   onRetry: (docId: string) => void
+  isRetrying?: boolean
 }
 
-export function KbDocumentRow({ kbId, doc, canManage, onDelete, onRetry }: KbDocumentRowProps) {
+export function KbDocumentRow({ kbId, doc, canManage, onDelete, onRetry, isRetrying }: KbDocumentRowProps) {
   const t = useT()
+  const [contentOpen, setContentOpen] = useState(false)
 
   const sizeStr = doc.fileSize < 1024 * 1024
     ? `${(doc.fileSize / 1024).toFixed(1)} KB`
@@ -46,30 +50,44 @@ export function KbDocumentRow({ kbId, doc, canManage, onDelete, onRetry }: KbDoc
           </div>
         </div>
 
-        {canManage && (
-          <div className="flex items-center gap-1 ml-2">
-            {doc.status === "FAILED" && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-8 p-0"
-                onClick={() => onRetry(doc.id)}
-                title={t('kb.retry')}
-              >
-                <RotateCw className="size-3.5" />
-              </Button>
-            )}
+        <div className="flex items-center gap-1 ml-2">
+          {doc.status === "SUCCEEDED" && doc.hasOcrContent && (
             <Button
               variant="ghost"
               size="sm"
-              className="size-8 p-0 text-muted-foreground hover:text-destructive"
-              onClick={() => onDelete(doc.id)}
-              title={t('kb.deleteDoc')}
+              className="size-8 p-0"
+              onClick={() => setContentOpen(true)}
+              title={t('kb.viewOcrOriginal')}
             >
-              <Trash2 className="size-3.5" />
+              <ScrollText className="size-3.5" />
             </Button>
-          </div>
-        )}
+          )}
+          {canManage && (
+            <>
+              {doc.status === "FAILED" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="size-8 p-0"
+                  onClick={() => onRetry(doc.id)}
+                  disabled={isRetrying}
+                  title={t('kb.retry')}
+                >
+                  <RotateCw className={`size-3.5 ${isRetrying ? 'animate-spin' : ''}`} />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="size-8 p-0 text-muted-foreground hover:text-destructive"
+                onClick={() => onDelete(doc.id)}
+                title={t('kb.deleteDoc')}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Show ingestion log for PROCESSING documents */}
@@ -83,6 +101,13 @@ export function KbDocumentRow({ kbId, doc, canManage, onDelete, onRetry }: KbDoc
           {doc.errorMessage}
         </p>
       )}
+
+      <KbDocumentContentDialog
+        kbId={kbId}
+        doc={doc}
+        open={contentOpen}
+        onOpenChange={setContentOpen}
+      />
     </div>
   )
 }

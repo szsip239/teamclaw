@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, param, type AuthContext } from '@/lib/middleware/auth'
 import { canManageKb } from '@/lib/knowledge-base/permissions'
-import { saveUploadedFile } from '@/lib/knowledge-base/file-storage'
+import { saveUploadedFile, toContainerPath } from '@/lib/knowledge-base/file-storage'
 import { submitIngestionJob } from '@/lib/knowledge-base/rag-client'
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
@@ -60,7 +60,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     const job = await submitIngestionJob({
       kbId,
       docId: doc.docId,
-      filePath,
+      filePath: toContainerPath(filePath),
     })
 
     // Update document with job ID and status

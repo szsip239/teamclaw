@@ -4,7 +4,7 @@ import { withAuth, withPermission, param, type AuthContext } from '@/lib/middlew
 import { updateKbSchema } from '@/lib/validations/knowledge-base'
 import { isKbVisible, canManageKb } from '@/lib/knowledge-base/permissions'
 import { deleteVectors } from '@/lib/knowledge-base/rag-client'
-import { deleteKbDirectory } from '@/lib/knowledge-base/file-storage'
+import { deleteKbDirectory, hasOcrDocument } from '@/lib/knowledge-base/file-storage'
 
 // GET /api/v1/knowledge-bases/[id]
 export const GET = withAuth(
@@ -29,11 +29,26 @@ export const GET = withAuth(
       return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
+    const documents = await Promise.all(kb.documents.map(async (doc) => ({
+      id: doc.id,
+      docId: doc.docId,
+      fileName: doc.fileName,
+      fileSize: doc.fileSize,
+      pageCount: doc.pageCount,
+      status: doc.status,
+      jobId: doc.jobId,
+      errorMessage: doc.errorMessage,
+      hasOcrContent: await hasOcrDocument(kb.id, doc.docId),
+      createdAt: doc.createdAt.toISOString(),
+      updatedAt: doc.updatedAt.toISOString(),
+    })))
+
     return NextResponse.json({
       id: kb.id,
       name: kb.name,
       description: kb.description,
       scope: kb.scope,
+      category: kb.category,
       departmentId: kb.departmentId,
       departmentName: kb.department?.name ?? null,
       createdById: kb.createdById,
@@ -41,18 +56,7 @@ export const GET = withAuth(
       documentCount: kb.documentCount,
       createdAt: kb.createdAt.toISOString(),
       updatedAt: kb.updatedAt.toISOString(),
-      documents: kb.documents.map((doc) => ({
-        id: doc.id,
-        docId: doc.docId,
-        fileName: doc.fileName,
-        fileSize: doc.fileSize,
-        pageCount: doc.pageCount,
-        status: doc.status,
-        jobId: doc.jobId,
-        errorMessage: doc.errorMessage,
-        createdAt: doc.createdAt.toISOString(),
-        updatedAt: doc.updatedAt.toISOString(),
-      })),
+      documents,
     })
   }),
 )

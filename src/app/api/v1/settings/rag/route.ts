@@ -14,8 +14,8 @@ export const GET = withAuth(
     const result: Record<string, unknown> = {}
     for (const c of configs) {
       const val = c.value
-      // Mask API keys for display
-      if (c.key.endsWith('.apiKey') && typeof val === 'string' && val) {
+      // Mask API keys and tokens for display
+      if ((c.key.endsWith('.apiKey') || c.key.endsWith('.token')) && typeof val === 'string' && val) {
         try {
           // Try to decrypt and mask
           const { decrypt: dec } = await import('@/lib/auth/encryption')
@@ -49,6 +49,7 @@ export const PUT = withAuth(
       'rag.embedding.baseUrl', 'rag.embedding.apiKey', 'rag.embedding.model',
       'rag.rerank.enabled', 'rag.rerank.baseUrl', 'rag.rerank.apiKey', 'rag.rerank.model',
       'rag.ocr.model', 'rag.ocr.workers',
+      'rag.paddleocr.token', 'rag.paddleocr.model',
     ]
 
     for (const [key, value] of Object.entries(body)) {
@@ -56,10 +57,12 @@ export const PUT = withAuth(
 
       let storeValue: unknown = value
 
+      // Skip masked values (contain ***) — prevents overwriting real secrets
+      // with the masked placeholder the frontend received from GET.
+      if (typeof value === 'string' && value.includes('***')) continue
+
       // Encrypt API keys
       if (key.endsWith('.apiKey') && typeof value === 'string' && value) {
-        // Skip if it looks like a masked value (contains ***)
-        if (value.includes('***')) continue
         storeValue = encrypt(JSON.stringify({ apiKey: value }))
       }
 

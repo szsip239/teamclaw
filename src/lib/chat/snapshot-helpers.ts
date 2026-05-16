@@ -9,6 +9,7 @@ import {
   stampImageIds,
   MIME_BY_EXT,
 } from '@/lib/chat/image-helpers'
+import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import type { ChatHistoryMessage, ChatHistoryResult } from '@/types/gateway'
 import type { ChatToolCall, ChatContentBlock, ChatMessage } from '@/types/chat'
 import type { GatewayClient } from '@/lib/gateway/client'
@@ -121,7 +122,7 @@ export function buildSnapshotData(
 
   for (const msg of rawMessages) {
     if (msg.role === 'user') {
-      const text = stripUserMetadata(extractText(msg.content))
+      const text = stripRagContextForDisplay(stripUserMetadata(extractText(msg.content)))
       const cb = extractContentBlocks(msg.content)
       if (text) lastUserMessage = text
       snapshotData.push({
@@ -330,7 +331,7 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
       result.push({
         id: randomUUID(),
         role: 'user',
-        content: stripUserMetadata(extractText(msg.content)),
+        content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
         createdAt: new Date().toISOString(),
       })

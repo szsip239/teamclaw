@@ -16,7 +16,7 @@ function parseExtendYaml(yaml: string): Partial<ExtendConfig> {
     const colonIdx = trimmed.indexOf(":");
     if (colonIdx < 0) continue;
     const key = trimmed.slice(0, colonIdx).trim();
-    let value = trimmed.slice(colonIdx + 1).trim().replace(/^['"]|['"]$/g, "");
+    const value = trimmed.slice(colonIdx + 1).trim().replace(/^['"]|['"]$/g, "");
     if (value === "null" || value === "") continue;
 
     if (key === "default_theme") config.default_theme = value;

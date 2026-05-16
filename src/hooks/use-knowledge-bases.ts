@@ -33,11 +33,14 @@ export const kbKeys = {
 
 export function useKnowledgeBases(params?: {
   scope?: string
+  category?: string
   search?: string
 }) {
   const qs = new URLSearchParams()
   if (params?.scope && params.scope !== "all")
     qs.set("scope", params.scope)
+  if (params?.category && params.category !== "all")
+    qs.set("category", params.category)
   if (params?.search) qs.set("search", params.search)
 
   const qsStr = qs.toString()

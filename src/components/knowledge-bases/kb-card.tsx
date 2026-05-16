@@ -1,10 +1,30 @@
 "use client"
 
 import { motion } from "motion/react"
-import { BookOpen, FileText, Building2 } from "lucide-react"
+import { BookOpen, FileText, Building2, Shield, Link } from "lucide-react"
 import { KbScopeBadge } from "./kb-scope-badge"
 import { useT } from "@/stores/language-store"
 import type { KnowledgeBaseOverview } from "@/types/knowledge-base"
+import { Badge } from "@/components/ui/badge"
+import type { KbCategory } from "@/types/knowledge-base"
+
+const CATEGORY_CONFIG: Record<KbCategory, { labelKey: string; icon: typeof BookOpen; className: string }> = {
+  INTERNAL: {
+    labelKey: "kb.category.INTERNAL",
+    icon: FileText,
+    className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
+  },
+  EXTERNAL: {
+    labelKey: "kb.category.EXTERNAL",
+    icon: Link,
+    className: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800",
+  },
+  RULES: {
+    labelKey: "kb.category.RULES",
+    icon: Shield,
+    className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800",
+  },
+}
 
 interface KbCardProps {
   kb: KnowledgeBaseOverview
@@ -25,19 +45,22 @@ export function KbCard({ kb, index, onClick }: KbCardProps) {
       className="group cursor-pointer rounded-xl border bg-card p-5 ring-1 ring-black/[0.03] transition-all hover:ring-primary/20 hover:shadow-sm dark:ring-white/[0.06] dark:hover:ring-primary/30"
       onClick={() => onClick(kb)}
     >
-      {/* Header: Icon + Name + Scope Badge */}
+      {/* Header: Icon + Name + Badges */}
       <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-muted to-muted/60 ring-1 ring-black/[0.04] dark:ring-white/[0.08]">
             <BookOpen className="size-5 text-muted-foreground/70" />
           </div>
           <div className="min-w-0">
-            <span className="truncate text-sm font-semibold leading-tight">
+            <span className="truncate text-sm font-semibold leading-tight block">
               {kb.name}
             </span>
           </div>
         </div>
-        <KbScopeBadge scope={kb.scope} />
+        <div className="flex items-center gap-1 shrink-0">
+          <KbCategoryBadge category={kb.category} />
+          <KbScopeBadge scope={kb.scope} />
+        </div>
       </div>
 
       {/* Description */}
@@ -64,6 +87,17 @@ export function KbCard({ kb, index, onClick }: KbCardProps) {
         <span>{timeAgo}</span>
       </div>
     </motion.div>
+  )
+}
+
+function KbCategoryBadge({ category }: { category: KbCategory }) {
+  const t = useT()
+  const cfg = CATEGORY_CONFIG[category]
+  return (
+    <Badge variant="outline" className={`text-[10px] font-medium gap-0.5 ${cfg.className}`}>
+      <cfg.icon className="size-2.5" />
+      {t(cfg.labelKey as Parameters<typeof t>[0])}
+    </Badge>
   )
 }
 
