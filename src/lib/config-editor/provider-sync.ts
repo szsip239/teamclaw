@@ -9,6 +9,8 @@ import { getProvider } from '@/lib/resources/providers'
 // preview models. Fix: append /v1beta so the full path is correct.
 const GOOGLE_GENAI_BARE_ENDPOINT = 'https://generativelanguage.googleapis.com'
 const GOOGLE_GENAI_PROVIDER_IDS = new Set(['google', 'google-gemini-cli'])
+const VOLCENGINE_CODING_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
+const VOLCENGINE_AGENT_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3'
 
 function fixGoogleProviderBaseUrl(
   providerId: string,
@@ -24,6 +26,51 @@ function fixGoogleProviderBaseUrl(
     return `${GOOGLE_GENAI_BARE_ENDPOINT}/v1beta`
   }
   return baseUrl
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '')
+}
+
+function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
+  if (providerId !== 'doubao') return baseUrl
+
+  const normalized = normalizeBaseUrl(baseUrl)
+  if (normalized === 'https://ark.cn-beijing.volces.com/api/coding') {
+    return VOLCENGINE_CODING_PLAN_BASE_URL
+  }
+  if (normalized === 'https://ark.cn-beijing.volces.com/api/plan') {
+    return VOLCENGINE_AGENT_PLAN_BASE_URL
+  }
+
+  return baseUrl
+}
+
+export function resolveOpenClawProviderId(
+  providerId: string,
+  resourceConfig?: Record<string, unknown> | null,
+): string {
+  if (providerId === 'doubao') {
+    const baseUrl = typeof resourceConfig?.baseUrl === 'string' ? resourceConfig.baseUrl : ''
+    if (baseUrl.includes('/api/plan')) {
+      return 'volcengine-agent-plan'
+    }
+    if (baseUrl.includes('/api/coding')) {
+      return 'volcengine-plan'
+    }
+    if (baseUrl.includes('ark.cn-beijing.volces.com/api/v3')) {
+      return 'volcengine'
+    }
+  }
+
+  const explicit = resourceConfig?.openClawProviderId
+  if (typeof explicit === 'string' && explicit.length > 0) return explicit
+
+  if (providerId === 'doubao') {
+    return 'volcengine'
+  }
+
+  return providerId
 }
 
 /**
@@ -72,11 +119,78 @@ interface ProviderModelEntry {
   maxTokens?: number
 }
 
-interface ProviderEntry {
+export interface ProviderEntry {
   baseUrl: string
   apiKey: string
   api?: string
   models: ProviderModelEntry[]
+}
+
+interface ProviderResource {
+  provider: string
+  credentials: string
+  config: unknown
+}
+
+export function buildProviderEntryFromResource(resource: ProviderResource): {
+  providerId: string
+  entry: ProviderEntry
+} | null {
+  const providerDef = getProvider(resource.provider)
+
+  // Skip ollama — no API key needed
+  if (providerDef?.apiType === 'ollama') return null
+
+  // baseUrl is required by OpenClaw schema
+  const resourceConfig = resource.config as Record<string, unknown> | null
+  const effectiveProviderId = resolveOpenClawProviderId(resource.provider, resourceConfig)
+  const rawBaseUrl = (resourceConfig?.baseUrl as string) || providerDef?.baseUrl
+  const baseUrl = rawBaseUrl
+    ? normalizeProviderBaseUrl(resource.provider, rawBaseUrl)
+    : rawBaseUrl
+  if (!baseUrl) return null
+
+  // models array is required by OpenClaw schema
+  // Priority: resource config models (user-configured) → registry defaultModels (built-in fallback)
+  const registryModels = providerDef?.defaultModels
+  const resourceModels = resourceConfig?.models as ProviderModelEntry[] | undefined
+  const models = (resourceModels && resourceModels.length > 0)
+    ? resourceModels
+    : (registryModels && registryModels.length > 0 ? registryModels : null)
+  if (!models) return null
+
+  // Decrypt API key
+  let apiKey: string
+  try {
+    apiKey = decryptCredential(resource.credentials)
+  } catch {
+    return null
+  }
+
+  const apiType = (resourceConfig?.apiType as string) || providerDef?.apiType
+  const entry: ProviderEntry = {
+    baseUrl: fixGoogleProviderBaseUrl(resource.provider, baseUrl, apiType),
+    apiKey,
+    models: models.map(m => {
+      const modelEntry: ProviderModelEntry = { id: m.id, name: m.name }
+      if (m.reasoning !== undefined) modelEntry.reasoning = m.reasoning
+      if (m.input) modelEntry.input = m.input
+      if (m.cost) modelEntry.cost = m.cost
+      if (m.contextWindow !== undefined) modelEntry.contextWindow = m.contextWindow
+      if (m.maxTokens !== undefined) modelEntry.maxTokens = m.maxTokens
+      return modelEntry
+    }),
+  }
+
+  // Always include api type in the pushed entry, even when it equals the default
+  // "openai-completions". Leaving it off causes the OpenClaw provider plugin's
+  // config-driven normalize path to leave `api` null in models.json, which in
+  // turn routes requests to the wrong endpoint and returns 404. Verified 2026-04-19.
+  if (apiType) {
+    entry.api = apiType
+  }
+
+  return { providerId: effectiveProviderId, entry }
 }
 
 /**
@@ -85,7 +199,10 @@ interface ProviderEntry {
  *
  * OpenClaw schema requires: { baseUrl (required), models (required), apiKey, api, ... }
  *
- * For each provider ID, picks the best Resource (isDefault > ACTIVE > newest).
+ * For each effective OpenClaw provider ID, picks the best Resource
+ * (isDefault > ACTIVE > newest). This lets a single TeamClaw provider such as
+ * doubao contribute multiple OpenClaw providers: volcengine, volcengine-plan,
+ * and volcengine-agent-plan.
  * Models are resolved from: registry defaultModels → resource config.models
  * (the latter supports custom/opencode providers whose models come from DB).
  * Skips ollama (no API key needed), providers without baseUrl, and those
@@ -115,68 +232,14 @@ export async function buildProviderEntries(
     },
   })
 
-  // Group by provider, take first (best) per provider
-  const bestByProvider = new Map<string, typeof resources[number]>()
-  for (const r of resources) {
-    if (!bestByProvider.has(r.provider)) {
-      bestByProvider.set(r.provider, r)
-    }
-  }
-
   const entries: Record<string, ProviderEntry> = {}
 
-  for (const [providerId, resource] of bestByProvider) {
-    const providerDef = getProvider(providerId)
+  for (const resource of resources) {
+    const built = buildProviderEntryFromResource(resource)
+    if (!built) continue
+    if (entries[built.providerId]) continue
 
-    // Skip ollama — no API key needed
-    if (providerDef?.apiType === 'ollama') continue
-
-    // baseUrl is required by OpenClaw schema
-    const resourceConfig = resource.config as Record<string, unknown> | null
-    const baseUrl = (resourceConfig?.baseUrl as string) || providerDef?.baseUrl
-    if (!baseUrl) continue
-
-    // models array is required by OpenClaw schema
-    // Priority: resource config models (user-configured) → registry defaultModels (built-in fallback)
-    const registryModels = providerDef?.defaultModels
-    const resourceModels = resourceConfig?.models as ProviderModelEntry[] | undefined
-    const models = (resourceModels && resourceModels.length > 0)
-      ? resourceModels
-      : (registryModels && registryModels.length > 0 ? registryModels : null)
-    if (!models) continue
-
-    // Decrypt API key
-    let apiKey: string
-    try {
-      apiKey = decryptCredential(resource.credentials)
-    } catch {
-      continue
-    }
-
-    const apiType = (resourceConfig?.apiType as string) || providerDef?.apiType
-    const entry: ProviderEntry = {
-      baseUrl: fixGoogleProviderBaseUrl(providerId, baseUrl, apiType),
-      apiKey,
-      models: models.map(m => {
-        const entry: ProviderModelEntry = { id: m.id, name: m.name }
-        if (m.reasoning !== undefined) entry.reasoning = m.reasoning
-        if (m.input) entry.input = m.input
-        if (m.cost) entry.cost = m.cost
-        if (m.contextWindow !== undefined) entry.contextWindow = m.contextWindow
-        if (m.maxTokens !== undefined) entry.maxTokens = m.maxTokens
-        return entry
-      }),
-    }
-
-    // Always include api type in the pushed entry, even when it equals the default
-    // "openai-completions". Leaving it off causes the OpenClaw provider plugin's
-    // config-driven normalize path to leave `api` null in models.json, which in
-    // turn routes requests to the wrong endpoint and returns 404. Verified 2026-04-19.
-    if (apiType) {
-      entry.api = apiType
-    }
-
-    entries[providerId] = entry
+    entries[built.providerId] = built.entry
   }
 
   return entries
@@ -235,8 +298,7 @@ export function mergeProvidersIntoPatch(
 export async function syncProviderToInstances(providerId: string): Promise<void> {
   // Build latest provider entry from Resource DB
   const entries = await buildProviderEntries([providerId])
-  const entry = entries[providerId]
-  if (!entry) return
+  if (Object.keys(entries).length === 0) return
 
   // Dynamic import to avoid circular dependency (provider-sync → registry)
   const { registry, ensureRegistryInitialized } = await import('@/lib/gateway/registry')
@@ -254,14 +316,21 @@ export async function syncProviderToInstances(providerId: string): Promise<void>
       }
       const providers = (configResult.config?.models as Record<string, unknown>)
         ?.providers as Record<string, unknown> | undefined
-      if (!providers || !(providerId in providers)) return
+      if (!providers) return
 
-      const patch = { models: { providers: { [providerId]: entry } } }
+      const patchProviders = Object.fromEntries(
+        Object.entries(entries).filter(([id]) => id in providers || providerId in providers),
+      )
+      if (Object.keys(patchProviders).length === 0) return
+
+      const patch = { models: { providers: patchProviders } }
       await registry.request(instanceId, 'config.patch', {
         raw: JSON.stringify(patch),
         baseHash: configResult.hash,
       })
-      console.log(`[resource-sync] Synced provider "${providerId}" to instance ${instanceId}`)
+      console.log(
+        `[resource-sync] Synced provider "${Object.keys(patchProviders).join(',')}" to instance ${instanceId}`,
+      )
     }),
   )
 
