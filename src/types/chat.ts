@@ -1,4 +1,14 @@
 import type { AgentCategory } from './agent'
+import type { KbCategory } from './knowledge-base'
+
+/** Knowledge base source reference — shown under assistant messages */
+export interface KbSourceRef {
+  kbId: string
+  kbName: string
+  category: KbCategory
+  text: string
+  score: number
+}
 
 export interface ChatAgentInfo {
   instanceId: string
@@ -40,6 +50,7 @@ export interface ChatSessionResponse {
   lastMessageAt: string | null
   messageCount: number
   isActive: boolean
+  mountedKbIds?: string[]
   createdAt: string
 }
 
@@ -67,6 +78,7 @@ export interface ChatMessage {
   error?: string
   createdAt: string
   attachments?: ChatAttachment[] // user-uploaded attachments
+  kbSources?: KbSourceRef[] // KB source references for this message
 }
 
 export interface ChatToolCall {
@@ -123,6 +135,11 @@ export interface ChatStreamConfirmedEvent {
   type: 'confirmed'
 }
 
+export interface ChatStreamKbSourcesEvent {
+  type: 'kb_sources'
+  sources: KbSourceRef[]
+}
+
 export type ChatStreamEvent =
   | ChatStreamTextEvent
   | ChatStreamThinkingEvent
@@ -133,3 +150,4 @@ export type ChatStreamEvent =
   | ChatStreamDoneEvent
   | ChatStreamSessionEvent
   | ChatStreamConfirmedEvent
+  | ChatStreamKbSourcesEvent

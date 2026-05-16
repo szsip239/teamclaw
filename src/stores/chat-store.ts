@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { streamChat } from '@/lib/chat-stream'
 import { assembleFromResponse } from '@/lib/chat/message-assembly'
+import { attachKbSourcesToLatestAssistant } from '@/lib/chat/kb-sources'
 import type {
   ChatAgentInfo,
   ChatMessage,
@@ -8,6 +9,7 @@ import type {
   ChatHistoryResponse,
   ChatAttachment,
   ChatContentBlock,
+  KbSourceRef,
 } from '@/types/chat'
 
 interface ChatState {
@@ -89,6 +91,12 @@ interface ChatState {
   // Gateway connection status
   connectionStatus: 'ok' | 'unreachable' | 'session-lost'
   setConnectionStatus: (v: 'ok' | 'unreachable' | 'session-lost') => void
+
+  // Knowledge Base mounting
+  mountedKbIds: string[]
+  setMountedKbIds: (ids: string[]) => void
+  kbSources: KbSourceRef[]
+  setKbSources: (sources: KbSourceRef[]) => void
 
   // Sidebar
   sidebarOpen: boolean
@@ -463,7 +471,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: '',
       createdAt: new Date().toISOString(),
     }
-    set({ streamingMessage: assistantMsg })
+    set({ streamingMessage: assistantMsg, kbSources: [] })
 
     // 3. Set streaming state
     const controller = new AbortController()
@@ -504,7 +512,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }))
 
       for await (const event of streamChat(
-        { instanceId, agentId, message, sessionId, attachments: streamAttachments },
+        { instanceId, agentId, message, sessionId, attachments: streamAttachments, kbIds: get().mountedKbIds },
         controller.signal,
       )) {
         switch (event.type) {
@@ -539,6 +547,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'image':
             get().appendAssistantImage(event.imageUrl, event.mimeType, event.alt)
             break
+          case 'kb_sources':
+            set((s) => ({
+              kbSources: event.sources,
+              streamingMessage: s.streamingMessage
+                ? { ...s.streamingMessage, kbSources: event.sources }
+                : s.streamingMessage,
+            }))
+            break
           case 'error':
             get().setAssistantError(event.error)
             break
@@ -563,14 +579,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const finalStreaming = get().streamingMessage
+      const finalKbSources = finalStreaming?.kbSources ?? []
       if (historySynced) {
         // History has authoritative data — discard streamingMessage to prevent duplicates
-        set({
+        set((s) => ({
+          messages: attachKbSourcesToLatestAssistant(s.messages, finalKbSources),
           streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
           abortController: null,
-        })
+        }))
       } else if (finalStreaming) {
         // Sync failed — merge streamingMessage as best-effort fallback
         set((s) => ({
@@ -677,11 +695,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeSessionId: null,
       connectionStatus: 'ok',
       remoteStreaming: false,
+      mountedKbIds: [],
+      kbSources: [],
     })
   },
 
   connectionStatus: 'ok',
   setConnectionStatus: (v) => set({ connectionStatus: v }),
+
+  mountedKbIds: [],
+  setMountedKbIds: (ids) => set({ mountedKbIds: ids }),
+  kbSources: [],
+  setKbSources: (sources) => set({ kbSources: sources }),
 
   sidebarOpen: true,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),

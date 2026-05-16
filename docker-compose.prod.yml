@@ -69,6 +69,7 @@ services:
       # Set EXTERNAL_MEDIA_DIR to the OpenClaw installation's parent directory.
       - ${EXTERNAL_MEDIA_DIR:-/tmp/no-extra-mount}:${EXTERNAL_MEDIA_DIR:-/tmp/no-extra-mount}:ro
       - kb-data:/app/data/knowledge-bases
+      - rag-output:/app/ingestion_output
 
   rag:
     build:

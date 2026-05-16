@@ -1,27 +1,25 @@
-# 复杂文档 RAG — full runtime dependencies (from reference project + pgvector)
-
-llama-index
+# ── RAG (llama-index) ────────────
 llama-index-core
 llama-index-llms-openai
-llama-index-multi-modal-llms-openai
 llama-index-vector-stores-postgres
 llama-index-embeddings-openai
+llama-index-embeddings-huggingface
 llama-index-embeddings-dashscope
 
-# Database (pgvector)
+# ── Database ──────────────────────
 asyncpg
 psycopg2-binary
 
-# AI services
-dashscope
+# ── AI services ──────────────────
 openai
+dashscope
 
-# Web framework
+# ── Web framework ────────────────
 fastapi
 uvicorn[standard]
 python-multipart
 
-# Utilities
+# ── Utilities ────────────────────
 python-dotenv
 requests
 httpx

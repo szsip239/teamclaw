@@ -36,6 +36,9 @@ class RequestCredentials:
     ocr_model: str = "qwen3.5-plus"
     ocr_workers: int = 4
 
+    paddleocr_token: str = ""
+    paddleocr_model: str = "PaddleOCR-VL-1.5"
+
 
 def get_credentials_from_headers(headers: dict) -> RequestCredentials:
     """Extract model credentials from request headers."""
@@ -61,6 +64,8 @@ def get_credentials_from_headers(headers: dict) -> RequestCredentials:
         rerank_model=headers.get("x-rerank-model", ""),
         ocr_model=headers.get("x-ocr-model", "qwen3.5-plus"),
         ocr_workers=ocr_workers,
+        paddleocr_token=headers.get("x-paddleocr-token", ""),
+        paddleocr_model=headers.get("x-paddleocr-model", "PaddleOCR-VL-1.5"),
     )
 
 

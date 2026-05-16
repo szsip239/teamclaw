@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { ChatKbSelector } from './chat-kb-selector'
 
 const IMAGE_MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const FILE_MAX_SIZE = 5 * 1024 * 1024 // 5MB
@@ -70,7 +71,16 @@ export function ChatInput() {
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
-  }, [input, pendingFiles, selectedAgent, isStreaming, sendMessage, queueMessage, activeSessionId])
+  }, [
+    input,
+    pendingFiles,
+    selectedAgent,
+    isStreaming,
+    remoteStreaming,
+    sendMessage,
+    queueMessage,
+    activeSessionId,
+  ])
 
   function handleStop() {
     abortChat()
@@ -205,6 +215,9 @@ export function ChatInput() {
             multiple
             onChange={handleFileSelect}
           />
+          {/* KB mount button */}
+          <ChatKbSelector />
+
           <Button
             type="button"
             variant="ghost"

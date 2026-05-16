@@ -4,6 +4,7 @@ export const createKbSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().max(2000).optional(),
   scope: z.enum(['GLOBAL', 'DEPARTMENT', 'PERSONAL']).optional(),
+  category: z.enum(['INTERNAL', 'EXTERNAL', 'RULES']).optional(),
   departmentId: z.string().optional(),
 })
 

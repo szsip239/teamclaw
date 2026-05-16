@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Loader2, Puzzle, Cloud, Search, Globe, Building2, UserCircle, X, Check } from "lucide-react"
+import { Loader2, Puzzle, Cloud, Search, Globe, Building2, UserCircle, Check, FolderUp, FileText } from "lucide-react"
 import { toast } from "sonner"
 import { useCreateSkill, useClawHubSearch, useClawHubPull } from "@/hooks/use-skills"
 import { useDepartments } from "@/hooks/use-departments"
@@ -29,11 +29,107 @@ const EMOJI_PRESETS = [
   "📎", "✅", "🛠️", "📐", "🖥️", "🤖", "📑", "🔗",
 ]
 
+const MAX_IMPORT_FILES = 200
+const MAX_IMPORT_TOTAL_BYTES = 20 * 1024 * 1024
+
+type ImportedSkillFilePayload = {
+  path: string
+  contentBase64: string
+  size: number
+}
+
+type ImportedSkillMetadata = {
+  name?: string
+  description?: string
+  emoji?: string
+  tags?: string[]
+}
+
 const CATEGORY_OPTIONS: { value: SkillCategory; labelKey: string; icon: typeof Globe; descKey: string; roles: string[] }[] = [
   { value: "DEFAULT", labelKey: "agent.categoryDefault", icon: Globe, descKey: "agent.categoryDefaultDesc", roles: ["SYSTEM_ADMIN"] },
   { value: "DEPARTMENT", labelKey: "agent.categoryDepartment", icon: Building2, descKey: "agent.categoryDepartmentDesc", roles: ["SYSTEM_ADMIN", "DEPT_ADMIN"] },
   { value: "PERSONAL", labelKey: "agent.categoryPersonal", icon: UserCircle, descKey: "agent.categoryPersonalDesc", roles: ["SYSTEM_ADMIN", "DEPT_ADMIN", "USER"] },
 ]
+
+function getBrowserFilePath(file: File): string {
+  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+}
+
+function stripSelectedFolderRoot(paths: string[]): string[] {
+  if (paths.includes("SKILL.md")) return paths
+
+  const splitPaths = paths.map((path) => path.replace(/\\/g, "/").split("/").filter(Boolean))
+  const root = splitPaths[0]?.[0]
+  if (!root || !splitPaths.every((parts) => parts[0] === root && parts.length > 1)) {
+    return paths
+  }
+
+  return splitPaths.map((parts) => parts.slice(1).join("/"))
+}
+
+function slugifySkillName(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "imported-skill"
+}
+
+function titleFromSlug(slug: string): string {
+  const words = slug.split(/[-_]+/).filter(Boolean)
+  if (words.length === 0) return "Imported Skill"
+  return words.map((word) => word[0].toUpperCase() + word.slice(1)).join(" ")
+}
+
+function parseSkillMdMetadata(content: string): ImportedSkillMetadata {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!match) return {}
+
+  const metadata: ImportedSkillMetadata = {}
+  for (const line of match[1].split(/\r?\n/)) {
+    const colonIdx = line.indexOf(":")
+    if (colonIdx === -1) continue
+
+    const key = line.slice(0, colonIdx).trim()
+    let value = line.slice(colonIdx + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+
+    if (key === "name") metadata.name = value
+    if (key === "description") metadata.description = value
+    if (key === "emoji") metadata.emoji = value
+    if (key === "tags") {
+      const listSource =
+        value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value
+      const tags = listSource
+        .split(",")
+        .map((tag) => tag.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean)
+        .slice(0, 10)
+      if (tags.length > 0) metadata.tags = tags
+    }
+  }
+
+  return metadata
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  let binary = ""
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
+
+  return btoa(binary)
+}
 
 interface SkillCreateDialogProps {
   open: boolean
@@ -62,10 +158,14 @@ export function SkillCreateDialog({ open, onOpenChange }: SkillCreateDialogProps
         </DialogHeader>
 
         <Tabs defaultValue="local" className="mt-2">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="local" className="gap-1.5 text-[13px]">
               <Puzzle className="size-3.5" />
               {t('skill.localCreate')}
+            </TabsTrigger>
+            <TabsTrigger value="import" className="gap-1.5 text-[13px]">
+              <FolderUp className="size-3.5" />
+              {t('skill.localImport')}
             </TabsTrigger>
             <TabsTrigger value="clawhub" className="gap-1.5 text-[13px]">
               <Cloud className="size-3.5" />
@@ -75,6 +175,13 @@ export function SkillCreateDialog({ open, onOpenChange }: SkillCreateDialogProps
 
           <TabsContent value="local" className="mt-4">
             <LocalCreateForm
+              user={user}
+              onSuccess={() => onOpenChange(false)}
+            />
+          </TabsContent>
+
+          <TabsContent value="import" className="mt-4">
+            <LocalFolderImportForm
               user={user}
               onSuccess={() => onOpenChange(false)}
             />
@@ -336,6 +443,332 @@ function LocalCreateForm({
             <Loader2 className="mr-2 size-4 animate-spin" />
           )}
           {t('create')}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+}
+
+function LocalFolderImportForm({
+  user,
+  onSuccess,
+}: {
+  user: { role: string; departmentId: string | null } | null
+  onSuccess: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [slug, setSlug] = useState("")
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [emoji, setEmoji] = useState("")
+  const [tags, setTags] = useState<string[]>([])
+  const [folderName, setFolderName] = useState("")
+  const [fileCount, setFileCount] = useState(0)
+  const [totalBytes, setTotalBytes] = useState(0)
+  const [importFiles, setImportFiles] = useState<ImportedSkillFilePayload[]>([])
+  const [isReading, setIsReading] = useState(false)
+  const [category, setCategory] = useState<SkillCategory | "">("")
+  const [selectedDeptIds, setSelectedDeptIds] = useState<string[]>([])
+
+  const t = useT()
+  const createSkill = useCreateSkill()
+  const { data: deptsData } = useDepartments()
+  const departments = deptsData?.departments ?? []
+
+  const availableCategories = CATEGORY_OPTIONS.filter(
+    (opt) => user && opt.roles.includes(user.role),
+  )
+  const showDeptPicker = category === "DEPARTMENT" && user?.role === "SYSTEM_ADMIN"
+
+  function reset() {
+    setSlug("")
+    setName("")
+    setDescription("")
+    setEmoji("")
+    setTags([])
+    setFolderName("")
+    setFileCount(0)
+    setTotalBytes(0)
+    setImportFiles([])
+    setIsReading(false)
+    setCategory("")
+    setSelectedDeptIds([])
+  }
+
+  function toggleDept(id: string) {
+    setSelectedDeptIds((prev) =>
+      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id],
+    )
+  }
+
+  function attachDirectoryPicker(node: HTMLInputElement | null) {
+    inputRef.current = node
+    if (!node) return
+    node.setAttribute("webkitdirectory", "")
+    node.setAttribute("directory", "")
+  }
+
+  async function handleFolderChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(e.target.files ?? [])
+    e.target.value = ""
+    if (selectedFiles.length === 0) return
+
+    setIsReading(true)
+    try {
+      if (selectedFiles.length > MAX_IMPORT_FILES) {
+        throw new Error(t('skill.importTooManyFiles', { count: MAX_IMPORT_FILES }))
+      }
+
+      const browserPaths = selectedFiles.map(getBrowserFilePath)
+      const previewPaths = stripSelectedFolderRoot(browserPaths)
+      const skillMdIndex = previewPaths.findIndex((path) => path === "SKILL.md")
+      if (skillMdIndex === -1) {
+        throw new Error(t('skill.importMissingSkillMd'))
+      }
+
+      const bytes = selectedFiles.reduce((sum, file) => sum + file.size, 0)
+      if (bytes > MAX_IMPORT_TOTAL_BYTES) {
+        throw new Error(t('skill.importTooLarge'))
+      }
+
+      const payloads = await Promise.all(
+        selectedFiles.map(async (file) => ({
+          path: getBrowserFilePath(file),
+          contentBase64: arrayBufferToBase64(await file.arrayBuffer()),
+          size: file.size,
+        })),
+      )
+
+      const skillMdContent = await selectedFiles[skillMdIndex].text()
+      const metadata = parseSkillMdMetadata(skillMdContent)
+      const detectedFolderName =
+        browserPaths[0]?.replace(/\\/g, "/").split("/").filter(Boolean)[0] ||
+        "imported-skill"
+      const detectedSlug = slugifySkillName(detectedFolderName)
+
+      setFolderName(detectedFolderName)
+      setFileCount(selectedFiles.length)
+      setTotalBytes(bytes)
+      setImportFiles(payloads)
+      setSlug(detectedSlug)
+      setName(metadata.name || titleFromSlug(detectedSlug))
+      setDescription(metadata.description || "")
+      setEmoji(metadata.emoji || "")
+      setTags(metadata.tags ?? [])
+      toast.success(t('skill.importFolderReady', { name: detectedFolderName }))
+    } catch (err) {
+      setImportFiles([])
+      toast.error((err as Error).message || t('skill.importReadFailed'))
+    } finally {
+      setIsReading(false)
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      await createSkill.mutateAsync({
+        slug,
+        name,
+        description: description || undefined,
+        emoji: emoji || undefined,
+        category: category || undefined,
+        departmentIds: category === "DEPARTMENT"
+          ? (selectedDeptIds.length > 0 ? selectedDeptIds : undefined)
+          : undefined,
+        tags: tags.length > 0 ? tags : undefined,
+        importFiles,
+      })
+      toast.success(t('skill.importedMsg', { name }))
+      reset()
+      onSuccess()
+    } catch (err) {
+      const message =
+        (err as { data?: { error?: string } })?.data?.error || t('operationFailed')
+      toast.error(message)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <input
+        ref={attachDirectoryPicker}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFolderChange}
+      />
+
+      <div className="rounded-lg border border-dashed p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-muted">
+            <FolderUp className="size-5 text-muted-foreground" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium">
+              {folderName || t('skill.importFolder')}
+            </div>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              {importFiles.length > 0
+                ? t('skill.importFolderSummary', {
+                    count: fileCount,
+                    size: Math.ceil(totalBytes / 1024),
+                  })
+                : t('skill.importFolderHint')}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => inputRef.current?.click()}
+            disabled={isReading || createSkill.isPending}
+          >
+            {isReading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              t('skill.chooseFolder')
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {importFiles.length > 0 && (
+        <div className="rounded-lg border bg-muted/40 px-3 py-2">
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            <FileText className="size-3.5" />
+            <span className="font-mono">SKILL.md</span>
+            <span>{t('skill.importSkillMdFound')}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-[1fr_80px] gap-3">
+        <div className="space-y-2">
+          <Label className="text-[13px]">{t('skill.skillName')}</Label>
+          <Input
+            placeholder={t('skill.skillNamePlaceholder')}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="text-[13px]"
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[13px]">{t('skill.icon')}</Label>
+          <Input
+            value={emoji}
+            onChange={(e) => setEmoji(e.target.value)}
+            className="text-center text-sm"
+            placeholder="🧩"
+            maxLength={4}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-[13px]">Slug</Label>
+        <Input
+          placeholder="my-skill"
+          value={slug}
+          onChange={(e) => setSlug(e.target.value)}
+          className="font-mono text-[13px]"
+          required
+        />
+        <p className="text-[12px] text-muted-foreground">
+          {t('skill.slugHint')}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-[13px]">{t('skill.descriptionLabel')}</Label>
+        <Textarea
+          placeholder={t('skill.descriptionPlaceholder')}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="text-[13px] min-h-[72px]"
+          maxLength={2000}
+        />
+      </div>
+
+      {availableCategories.length > 1 && (
+        <div className="space-y-2">
+          <Label className="text-[13px]">{t('agent.visibilityScope')}</Label>
+          <div className="grid grid-cols-3 gap-2">
+            {availableCategories.map((opt) => {
+              const isSelected = category === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-all ${
+                    isSelected
+                      ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                      : "hover:border-muted-foreground/30 hover:bg-muted/50"
+                  }`}
+                  onClick={() => {
+                    setCategory(opt.value)
+                    if (opt.value !== "DEPARTMENT") setSelectedDeptIds([])
+                  }}
+                >
+                  <opt.icon className={`size-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                  <span className={`text-[12px] font-medium ${isSelected ? "text-primary" : ""}`}>
+                    {t(opt.labelKey as import("@/locales/zh-CN").TranslationKey)}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground leading-tight">
+                    {t(opt.descKey as import("@/locales/zh-CN").TranslationKey)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {showDeptPicker && departments.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-[13px]">{t('skill.selectDepartment')}</Label>
+          <div className="rounded-lg border p-2 space-y-1 max-h-[160px] overflow-y-auto">
+            {departments.map((dept) => {
+              const isSelected = selectedDeptIds.includes(dept.id)
+              return (
+                <button
+                  key={dept.id}
+                  type="button"
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
+                    isSelected ? "bg-primary/10 text-primary" : "hover:bg-accent"
+                  }`}
+                  onClick={() => toggleDept(dept.id)}
+                >
+                  <div
+                    className={`flex size-4 items-center justify-center rounded border transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-muted-foreground/30"
+                    }`}
+                  >
+                    {isSelected && <Check className="size-2.5" />}
+                  </div>
+                  {dept.name}
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {t('skill.noDeptAutoAssign')}
+          </p>
+        </div>
+      )}
+
+      <DialogFooter className="pt-2">
+        <Button
+          type="submit"
+          disabled={createSkill.isPending || importFiles.length === 0 || !slug || !name}
+        >
+          {createSkill.isPending && (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          )}
+          {t('skill.importButton')}
         </Button>
       </DialogFooter>
     </form>

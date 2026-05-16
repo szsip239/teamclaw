@@ -20,6 +20,8 @@ interface KbPageHeaderProps {
   knowledgeBases: KnowledgeBaseOverview[]
   scopeFilter: string
   onScopeFilterChange: (value: string) => void
+  categoryFilter: string
+  onCategoryFilterChange: (value: string) => void
   search: string
   onSearchChange: (value: string) => void
 }
@@ -30,6 +32,8 @@ export function KbPageHeader({
   knowledgeBases,
   scopeFilter,
   onScopeFilterChange,
+  categoryFilter,
+  onCategoryFilterChange,
   search,
   onSearchChange,
 }: KbPageHeaderProps) {
@@ -95,6 +99,17 @@ export function KbPageHeader({
             <SelectItem value="GLOBAL">{t('kb.scopeGlobal')}</SelectItem>
             <SelectItem value="DEPARTMENT">{t('kb.scopeDepartment')}</SelectItem>
             <SelectItem value="PERSONAL">{t('kb.scopePersonal')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={categoryFilter} onValueChange={onCategoryFilterChange}>
+          <SelectTrigger className="w-[140px] h-9 text-[13px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('kb.all')}</SelectItem>
+            <SelectItem value="INTERNAL">{t('kb.category.INTERNAL')}</SelectItem>
+            <SelectItem value="EXTERNAL">{t('kb.category.EXTERNAL')}</SelectItem>
+            <SelectItem value="RULES">{t('kb.category.RULES')}</SelectItem>
           </SelectContent>
         </Select>
       </motion.div>

@@ -14,6 +14,8 @@ interface RagCredentialHeaders {
   'x-rerank-model': string
   'x-ocr-model': string
   'x-ocr-workers': string
+  'x-paddleocr-token': string
+  'x-paddleocr-model': string
 }
 
 /**
@@ -62,5 +64,7 @@ export async function buildRagCredentialHeaders(): Promise<RagCredentialHeaders>
     'x-rerank-model': getString('rag.rerank.model'),
     'x-ocr-model': getString('rag.ocr.model'),
     'x-ocr-workers': String(configMap.get('rag.ocr.workers') ?? 4),
+    'x-paddleocr-token': getString('rag.paddleocr.token'),
+    'x-paddleocr-model': getString('rag.paddleocr.model'),
   }
 }

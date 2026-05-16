@@ -11,4 +11,6 @@ export interface RagConfig {
   'rag.rerank.model': string
   'rag.ocr.model': string
   'rag.ocr.workers': number
+  'rag.paddleocr.token': string
+  'rag.paddleocr.model': string
 }
