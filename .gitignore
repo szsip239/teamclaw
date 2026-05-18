@@ -76,6 +76,9 @@ next-env.d.ts
 # reference & study docs
 openclaw*.md
 
+# shared memory for Claude/Codex sessions
+docs/agents/
+
 # internal development docs (not for OSS)
 PRD.md
 DEVELOPMENT.md
