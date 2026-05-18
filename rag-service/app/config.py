@@ -57,6 +57,13 @@ def _normalize_openai_base_url(value: str) -> str:
 
 
 def get_credentials_from_headers(headers: dict) -> RequestCredentials:
+    """Extract per-request credentials from HTTP headers.
+
+    Credential resolution (SystemConfig → env → defaults) happens in
+    Next.js (src/lib/knowledge-base/credentials.ts). The Python side
+    trusts the resolved header values and does NOT re-read environment
+    variables, so there is a single source of truth for debugging.
+    """
     rerank_enabled_raw = headers.get("x-rerank-enabled", "false")
     rerank_enabled = rerank_enabled_raw.lower() not in {"0", "false", "no", ""}
 
@@ -67,31 +74,22 @@ def get_credentials_from_headers(headers: dict) -> RequestCredentials:
         ocr_workers = 4
 
     return RequestCredentials(
-        llm_api_key=headers.get("x-llm-api-key", "") or _env_first("LLM_API_KEY", "DASHSCOPE_API_KEY"),
-        llm_base_url=headers.get("x-llm-base-url", "") or _env_first(
-            "LLM_BASE_URL",
-            default="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        ),
-        llm_model=headers.get("x-llm-model", "") or _env_first("LLM_MODEL", default="qwen3.5-35b-a3b"),
-        embedding_api_key=headers.get("x-embedding-api-key", "") or _env_first("SILICONFLOW_API_KEY"),
+        llm_api_key=headers.get("x-llm-api-key", ""),
+        llm_base_url=headers.get("x-llm-base-url", ""),
+        llm_model=headers.get("x-llm-model", ""),
+        embedding_api_key=headers.get("x-embedding-api-key", ""),
         embedding_base_url=_normalize_openai_base_url(
-            headers.get("x-embedding-base-url", "") or _env_first(
-                "SILICONFLOW_EMBEDDING_URL",
-                default="https://api.siliconflow.cn/v1/embeddings",
-            ),
+            headers.get("x-embedding-base-url", ""),
         ),
-        embedding_model=headers.get("x-embedding-model", "") or _env_first(
-            "SILICONFLOW_EMBEDDING_MODEL",
-            default="BAAI/bge-m3",
-        ),
+        embedding_model=headers.get("x-embedding-model", ""),
         rerank_enabled=rerank_enabled,
         rerank_api_key=headers.get("x-rerank-api-key", ""),
         rerank_base_url=headers.get("x-rerank-base-url", ""),
         rerank_model=headers.get("x-rerank-model", ""),
         ocr_model=headers.get("x-ocr-model", ""),
         ocr_workers=ocr_workers,
-        paddleocr_token=headers.get("x-paddleocr-token", "") or _env_first("PADDLEOCR_TOKEN"),
-        paddleocr_model=headers.get("x-paddleocr-model", "") or _env_first("PADDLEOCR_MODEL", default="PP-OCRv5"),
+        paddleocr_token=headers.get("x-paddleocr-token", ""),
+        paddleocr_model=headers.get("x-paddleocr-model", "PP-OCRv5"),
     )
 
 
