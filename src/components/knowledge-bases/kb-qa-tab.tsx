@@ -747,7 +747,7 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
           )}
         </div>
 
-        <div className="border-t bg-background/90 px-2 py-1">
+        <div className="border-t bg-background/90 px-3 py-2.5 pb-5">
           <div className="mx-auto w-full max-w-5xl">
             <div className="rounded-lg border bg-card px-2 py-1 shadow-sm transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10">
               <div className="flex items-end gap-2">
