@@ -24,6 +24,9 @@
 # misc
 .DS_Store
 *.pem
+.idea/
+__pycache__/
+*.py[cod]
 
 # debug
 npm-debug.log*
@@ -98,4 +101,5 @@ chrome_user_data/
 log/
 drafts/
 config.toml
+.baked-package.json
 scripts/poc-ws-direct.ts

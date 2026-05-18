@@ -25,13 +25,13 @@ export function SkillCard({ skill, index, onClick }: SkillCardProps) {
       onClick={() => onClick(skill)}
     >
       {/* Header: Emoji + Name + Badges */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-muted to-muted/60 text-lg ring-1 ring-black/[0.04] dark:ring-white/[0.08]">
             {skill.emoji || "🧩"}
           </div>
           <div className="min-w-0">
-            <span className="truncate text-sm font-semibold leading-tight">
+            <span className="block truncate text-sm font-semibold leading-tight">
               {skill.name}
             </span>
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground font-mono">
@@ -40,7 +40,7 @@ export function SkillCard({ skill, index, onClick }: SkillCardProps) {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <SkillCategoryBadge category={skill.category} />
           <SkillSourceBadge source={skill.source} />
         </div>

@@ -39,10 +39,10 @@ export function KbDocumentsTab({ kbId, documents, canManage }: KbDocumentsTabPro
   async function handleRetry(docId: string) {
     setRetrying((s) => new Set(s).add(docId))
     try {
-      const res = await api.post<{ jobId: string; status: string }>(
+      await api.post<{ jobId: string; status: string }>(
         `/api/v1/knowledge-bases/${kbId}/documents/${docId}/retry`,
       )
-      toast.success('Re-indexing started')
+      toast.success(t('kb.rebuildStarted'))
       qc.invalidateQueries({ queryKey: kbKeys.detail(kbId) })
     } catch (err) {
       toast.error(

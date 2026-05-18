@@ -3,11 +3,23 @@ import type { KbCategory } from '@/types/knowledge-base'
 import type { KbSourceRef } from '@/types/chat'
 
 // Inline non-streaming RAG query — calls Python RAG service /api/query
+interface RagSource {
+  text: string
+  score: number
+  source_type?: 'text' | 'table'
+  metadata?: {
+    doc_id?: string
+    page_index?: number
+    title?: string
+    source_row?: number
+  }
+}
+
 async function querySingleKb(
   kbId: string,
   question: string,
   topK = 5,
-): Promise<{ sources: { text: string; score: number }[] } | null> {
+): Promise<{ sources: RagSource[] } | null> {
   try {
     const { buildRagCredentialHeaders } = await import('./credentials')
     const credHeaders = await buildRagCredentialHeaders()
@@ -37,6 +49,8 @@ async function querySingleKb(
       sources: (data.sources ?? []).map((s: Record<string, unknown>) => ({
         text: String(s.text ?? ''),
         score: Number(s.score ?? 0),
+        source_type: (s.source_type as 'text' | 'table') ?? 'text',
+        metadata: (s.metadata ?? {}) as RagSource['metadata'],
       })),
     }
   } catch {
@@ -50,7 +64,7 @@ interface QueryResult {
   kbId: string
   kbName: string
   category: KbCategory
-  chunks: { text: string; score: number }[]
+  chunks: RagSource[]
 }
 
 /**
@@ -106,16 +120,46 @@ export async function queryKBsForContext(
     }),
   )
 
-  // 5. Build sources for SSE emission
+  // 5. Resolve KnowledgeDocument metadata for any sources that carry a doc_id.
+  // RAG stores doc_id == KnowledgeDocument.docId, but the chat UI navigates
+  // by KnowledgeDocument.id (the row pk). Fetch the mapping in one query.
+  const ragDocIds = Array.from(
+    new Set(
+      results.flatMap((r) =>
+        r.chunks
+          .map((c) => c.metadata?.doc_id)
+          .filter((v): v is string => typeof v === 'string' && v.length > 0),
+      ),
+    ),
+  )
+  const docMap = new Map<string, { id: string; fileName: string }>()
+  if (ragDocIds.length > 0) {
+    const docRows = await prisma.knowledgeDocument.findMany({
+      where: { docId: { in: ragDocIds } },
+      select: { id: true, docId: true, fileName: true },
+    })
+    for (const d of docRows) docMap.set(d.docId, { id: d.id, fileName: d.fileName })
+  }
+
+  // 6. Build sources for SSE emission
   const allSources: KbSourceRef[] = []
   for (const r of results) {
     for (const c of r.chunks) {
+      const ragDocId = c.metadata?.doc_id
+      const docRow = ragDocId ? docMap.get(ragDocId) : undefined
       allSources.push({
         kbId: r.kbId,
         kbName: r.kbName,
         category: r.category,
         text: c.text.slice(0, 300),
         score: c.score,
+        sourceType: c.source_type ?? 'text',
+        docRowId: docRow?.id,
+        docName: docRow?.fileName,
+        pageIndex:
+          typeof c.metadata?.page_index === 'number'
+            ? c.metadata.page_index
+            : undefined,
       })
     }
   }

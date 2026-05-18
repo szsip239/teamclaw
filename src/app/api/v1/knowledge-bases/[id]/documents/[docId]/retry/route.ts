@@ -49,8 +49,13 @@ export const POST = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     return NextResponse.json({ error: 'Document not found' }, { status: 404 })
   }
 
-  if (doc.status !== 'FAILED') {
-    return NextResponse.json({ error: 'Document is not in failed state' }, { status: 400 })
+  if (doc.status === 'PROCESSING') {
+    return NextResponse.json({
+      id: doc.id,
+      docId: doc.docId,
+      jobId: doc.jobId,
+      status: 'processing',
+    })
   }
 
   const hostPath = resolveFilePath(kbId, doc.fileName)
@@ -72,6 +77,8 @@ export const POST = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
       kbId,
       docId: doc.docId,
       filePath: toContainerPath(hostPath),
+      fileName: doc.fileName,
+      displayName: doc.fileName,
     })
 
     await prisma.knowledgeDocument.update({

@@ -29,6 +29,7 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 ### 核心功能
 
 **AI 对话**
+
 - 多会话管理 — 每个 Agent 支持创建多个独立对话
 - 流式输出 — 逐 Token 实时显示回复内容
 - 思考过程 — 可折叠展示 LLM 的推理链路
@@ -36,35 +37,45 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 - 上下文管理 — 对话历史快照与上下文重置
 
 **Agent 管理**
+
 - 跨实例 Agent 浏览与创建，支持克隆到不同实例
 - 分类体系 — DEFAULT / DEPARTMENT / PERSONAL 三级分类
 - 文件管理 — 树形浏览与在线编辑 Agent 配置文件
 - 可视化配置编辑器 — Schema 驱动的表单，覆盖所有 OpenClaw 模块
 
 **Skills 市场**
+
 - ClawHub 集成 — 从公共市场搜索、安装和更新技能包
 - 技能开发 — IDE 风格的文件编辑器，本地开发后发布到 ClawHub
 - 版本管理 — 安装追踪、版本检查与一键升级
 - 作用域控制 — 支持 PERSONAL / DEPARTMENT / GLOBAL 三级作用域
 
 **知识库 (RAG)**
-- 文档上传 — 支持 PDF、DOCX、TXT、Markdown，自动 OCR 与分块
-- 语义检索 — 基于 pgvector 向量相似度搜索，支持流式问答
+
+- 文档上传 — 支持 PDF / DOCX / Excel（XLSX、XLS、XLSM），PaddleOCR 云端识别 + 按页/按行分块
+- 混合检索 — Postgres FTS（jieba 中文分词）+ pgvector 向量 + **RRF 融合**，比纯向量召回更稳
+- 多文档路由 — `rag.doc_profile` 摘要 + 关键词预筛候选文档，再在候选内做细检索
+- **PDF 来源预览** — 对话回答里每条 PDF 引用可点击页码 → 右侧抽屉打开原 PDF 并跳到对应页
+- 邻居扩展 — PDF 命中页自动带上下相邻页，Excel chunk 自动带相邻片段，避免上下文断裂
+- Excel 字段化检索 — 表头自动识别 + 字段映射，可按"级别 / 发文字号 / 类型"等结构化过滤
 - 作用域管理 — PERSONAL / DEPARTMENT / GLOBAL 三级知识库隔离
-- 智能复用 — 同一知识库内自动复用已有文档的 OCR 结果
+- 多租户存储 — 所有 RAG 数据存在 `rag` schema，每条 SQL 以 `kb_id` 为隔离轴
 
 **多实例管理**
+
 - Docker 一键创建 — 配置镜像、端口、绑定即可部署
 - 外部网关接入 — 通过 URL + Token 连接已有 OpenClaw 实例
 - 健康监控 — 60 秒周期检查，自动故障检测与实例恢复
 - 生命周期管理 — 启动、停止、重启，实时日志查看
 
 **组织与权限**
+
 - RBAC 角色体系 — SYSTEM_ADMIN / DEPT_ADMIN / USER 三级权限
 - 部门隔离 — 按部门分配实例和 Agent 访问权限
 - 审计日志 — 全量操作追踪，支持筛选与 CSV 导出
 
 **平台能力**
+
 - 完整国际化 — 中英文界面一键切换
 - 移动端适配 — 手机浏览器完整对话体验，侧边栏和文件面板以抽屉形式展开
 - PWA 支持 — 支持添加到主屏幕，独立窗口运行
@@ -84,6 +95,7 @@ bash setup.sh
 ```
 
 脚本会自动：
+
 1. 生成 JWT 密钥对和加密密钥
 2. 询问是否启用 Nginx HTTPS 反向代理（可选）
 3. 通过 Docker Compose 启动 PostgreSQL、Redis 和 TeamClaw
@@ -111,27 +123,138 @@ bash setup.sh
 
 ### 方式二：本地开发
 
+两种子模式可选——
+
+**A. 全 Docker 一体化（推荐，零本地依赖）**
+
 ```bash
-# 1. 克隆并安装依赖
-git clone https://github.com/anthropics/teamclaw.git
+git clone https://github.com/szsip239/teamclaw.git
+cd teamclaw
+cp .env.example .env
+node scripts/generate-keys.mjs            # 写入 JWT_*/ENCRYPTION_KEY 等
+
+docker compose --profile app up -d        # 起 postgres + redis + rag + app
+docker logs -f teamclaw-app               # 看 Next.js Turbopack 启动
+```
+
+访问 `http://localhost:3100`。改 `src/**` 自动热更新；改 `rag-service/app/**` 自动 reload。
+`--profile app` 是开关：默认 `docker compose up -d` 只起基础三件套（postgres/redis/rag），方便习惯 host hot-reload 的人用 B 模式。
+
+**B. 基础服务 Docker + Next.js 本地**
+
+```bash
+git clone https://github.com/szsip239/teamclaw.git
 cd teamclaw
 npm install
 
-# 2. 启动数据库服务
-docker compose up -d
+docker compose up -d                       # 起 postgres + redis + rag（不起 app）
 
-# 3. 配置环境变量
 cp .env.example .env
 node scripts/generate-keys.mjs
 
-# 4. 初始化数据库
 npx prisma generate
 npx prisma db push
 npx tsx prisma/seed.ts
 
-# 5. 启动开发服务器
+npm run dev                                # 本地跑 Next.js（端口 3100）
+```
+
+Host 上的 hot-reload 通常更快一点（< 0.5s），适合纯前端调试。两种模式 `data/knowledge-bases/` 是共享的，上传的文档不会因切换模式而丢失。
+
+## 配置指南
+
+复制 `.env.example` 为 `.env` 后，至少需要完成下面几类配置。`setup.sh` 会自动生成密钥；手动配置时请运行 `node scripts/generate-keys.mjs`。
+
+### 基础服务
+
+| 变量                                                  | 示例                                                                            | 说明                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `teamclaw` / `teamclaw_dev_2024` / `teamclaw`                                   | Docker Compose 创建 PostgreSQL 容器时使用                          |
+| `DATABASE_URL`                                        | `postgresql://teamclaw:teamclaw_dev_2024@localhost:5432/teamclaw?schema=public` | Next.js 直连数据库；本地 host 模式使用 `localhost`                 |
+| `REDIS_URL`                                           | `redis://localhost:6379`                                                        | Next.js 直连 Redis；Docker app 容器会自动改为 `redis://redis:6379` |
+| `APP_PORT`                                            | `3100`                                                                          | Docker app 暴露的 Web 端口                                         |
+| `NEXT_PUBLIC_APP_URL`                                 | 空或 `https://your-domain.com`                                                  | 留空会使用相对路径，反向代理和多域名访问更稳                       |
+
+### 认证与加密
+
+| 变量                                       | 生成方式                         | 说明                                             |
+| ------------------------------------------ | -------------------------------- | ------------------------------------------------ |
+| `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`       | `node scripts/generate-keys.mjs` | RS256 JWT 私钥/公钥，Base64 编码                 |
+| `ENCRYPTION_KEY`                           | `openssl rand -hex 32`           | AES-256-CBC 密钥，用来加密资源密钥和 RAG API Key |
+| `JWT_ACCESS_EXPIRY` / `JWT_REFRESH_EXPIRY` | `15m` / `7d`                     | 登录 Token 有效期                                |
+
+这些值首次上线后不要随意更换。更换 `ENCRYPTION_KEY` 会导致已保存的 API Key 无法解密。
+
+### RAG 服务连接
+
+| 变量                 | Docker app         | 本地 Next.js host 模式  | 说明                                                |
+| -------------------- | ------------------ | ----------------------- | --------------------------------------------------- |
+| `RAG_SERVICE_URL`    | `http://rag:8000`  | `http://localhost:8000` | Next.js 调用 Python RAG 服务的地址                  |
+| `RAG_SERVICE_SECRET` | 自定义强随机字符串 | 同左                    | Next.js 和 RAG 服务之间的内部鉴权密钥，两边必须一致 |
+
+Docker Compose 会在 `app` 容器内自动覆盖 `RAG_SERVICE_URL=http://rag:8000`。如果你用 `npm run dev` 在宿主机启动 Next.js，请在 `.env` 中保留 `RAG_SERVICE_URL=http://localhost:8000`。
+
+### RAG 模型、Embedding 与 OCR
+
+RAG 凭据有两种配置方式：
+
+1. 推荐：登录后台，进入 **知识库** 页面，点击右上角 **RAG 配置**，填写 LLM、Embedding、Rerank、PaddleOCR。
+2. 兜底：在 `.env` 中填写下面的变量。系统配置为空时会自动回退到环境变量。
+
+| 变量                                 | 默认值                                               | 说明                                            |
+| ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------- |
+| `LLM_API_KEY` 或 `DASHSCOPE_API_KEY` | 空                                                   | 文档摘要、章节摘要、最终回答使用的 LLM Key      |
+| `LLM_BASE_URL`                       | `https://dashscope.aliyuncs.com/compatible-mode/v1`  | OpenAI 兼容接口地址                             |
+| `LLM_MODEL`                          | `qwen3.5-35b-a3b`                                    | RAG 默认回答/摘要模型                           |
+| `SILICONFLOW_API_KEY`                | 空                                                   | Embedding 和可选 rerank 的 API Key              |
+| `SILICONFLOW_EMBEDDING_URL`          | `https://api.siliconflow.cn/v1/embeddings`           | Embedding endpoint；服务会自动归一化为 API root |
+| `SILICONFLOW_EMBEDDING_MODEL`        | `BAAI/bge-m3`                                        | 默认向量模型                                    |
+| `PGVECTOR_EMBED_DIM`                 | `1024`                                               | pgvector 维度，必须匹配 Embedding 输出维度      |
+| `PADDLEOCR_TOKEN`                    | 空                                                   | PaddleOCR 云端识别 Token，PDF 入库需要          |
+| `PADDLEOCR_MODEL`                    | `PP-OCRv5`                                           | OCR 模型                                        |
+| `PADDLEOCR_JOB_URL`                  | `https://paddleocr.aistudio-app.com/api/v2/ocr/jobs` | PaddleOCR job API                               |
+
+如果你更换 Embedding 模型且维度不是 1024，需要先清理或迁移 `rag` schema 中的向量表，再修改 `PGVECTOR_EMBED_DIM`，否则查询会出现维度不匹配。
+
+### PDF 入库与回答预算
+
+| 变量                                            | 默认值     | 说明                                 |
+| ----------------------------------------------- | ---------- | ------------------------------------ |
+| `INGEST_DEFAULT_WORKERS` / `INGEST_MAX_WORKERS` | `4` / `12` | OCR/入库并发上限                     |
+| `PADDLEOCR_JOB_TIMEOUT`                         | `1800`     | 单个 OCR job 最大等待秒数            |
+| `PADDLEOCR_CHUNK_PAGE_THRESHOLD`                | `48`       | 超过多少页时按块提交 OCR             |
+| `PADDLEOCR_CHUNK_SIZE`                          | `40`       | 大 PDF 每个 OCR 分块页数             |
+| `DOCUMENT_PROFILE_MAX_TOKENS`                   | `384`      | 文档路由摘要 token 预算              |
+| `DOCUMENT_CHAPTER_SUMMARY_MAX_TOKENS`           | `4096`     | 章节/页段摘要 token 预算             |
+| `UPLOAD_RENDER_DPI`                             | `110`      | PDF 入库时生成页面预览图的 DPI       |
+| `LLM_RENDER_MAX_PIXELS`                         | `640000`   | 回答时发给视觉模型的页面图像最大像素 |
+| `MULTI_DOC_TOTAL_PAGE_BUDGET`                   | `15`       | 多文档回答时总页面预算               |
+| `MULTI_DOC_PER_DOC_PAGE_LIMIT`                  | `6`        | 多文档回答时单文档页面上限           |
+| `MULTI_DOC_SINGLE_DOC_PAGE_LIMIT`               | `30`       | 单文档回答时页面上限                 |
+
+### Docker 与 OpenClaw 实例
+
+| 变量                     | macOS Docker Desktop     | Linux                               | 说明                                              |
+| ------------------------ | ------------------------ | ----------------------------------- | ------------------------------------------------- |
+| `DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`   | `/var/run/docker.sock`              | TeamClaw 管理 OpenClaw 容器需要访问 Docker socket |
+| `DOCKER_GID`             | `0`                      | `stat -c '%g' /var/run/docker.sock` | app 容器访问 Docker socket 的 group id            |
+| `TEAMCLAW_DATA_DIR`      | `~/.teamclaw/instances`  | 自定义绝对路径                      | OpenClaw 实例数据挂载目录                         |
+| `DEFAULT_OPENCLAW_IMAGE` | `alpine/openclaw:latest` | 同左                                | 新建实例默认镜像                                  |
+
+## 配置校验
+
+首次配置完成后建议按顺序执行：
+
+```bash
+npx prisma generate
+npx prisma db push
+npx tsx prisma/seed.ts
+docker compose up -d
+curl http://localhost:8000/api/health
 npm run dev
 ```
+
+如果知识库上传失败，优先检查 `RAG_SERVICE_SECRET` 是否一致、`RAG_SERVICE_URL` 是否能从 Next.js 所在环境访问、`PADDLEOCR_TOKEN` 是否有效，以及 `SILICONFLOW_EMBEDDING_MODEL` 和 `PGVECTOR_EMBED_DIM` 是否匹配。
 
 ## 首次使用指南
 
@@ -150,16 +273,16 @@ npm run dev
 
 进入 **资源管理** 页面，创建模型资源。我们支持 25 个内置 Provider，包括多区域 / 多计划 variants（例如 qwen 的"国内 Standard"、"国内 Coding Plan"、"国际 Standard"、"国际 Coding Plan"）：
 
-| 提供商 | API 协议 | 说明 |
-|--------|----------|------|
-| Anthropic | `anthropic-messages` | Claude 系列，默认提供商 |
-| OpenAI | `openai-completions` | GPT / o 系列 |
-| Google | `google-generative-ai` | Gemini 系列 |
-| DeepSeek | `openai-completions` | DeepSeek V3 / R1 |
-| Qwen（通义千问） | `openai-completions` | 含 Coding Plan 变体 |
-| MiniMax / Doubao / Moonshot | 多种 | 含多 region 变体 |
-| Groq / xAI / Mistral | `openai-completions` | OpenAI 兼容协议 |
-| Ollama / vLLM | `ollama` / `openai-completions` | 本地部署 |
+| 提供商                      | API 协议                        | 说明                    |
+| --------------------------- | ------------------------------- | ----------------------- |
+| Anthropic                   | `anthropic-messages`            | Claude 系列，默认提供商 |
+| OpenAI                      | `openai-completions`            | GPT / o 系列            |
+| Google                      | `google-generative-ai`          | Gemini 系列             |
+| DeepSeek                    | `openai-completions`            | DeepSeek V3 / R1        |
+| Qwen（通义千问）            | `openai-completions`            | 含 Coding Plan 变体     |
+| MiniMax / Doubao / Moonshot | 多种                            | 含多 region 变体        |
+| Groq / xAI / Mistral        | `openai-completions`            | OpenAI 兼容协议         |
+| Ollama / vLLM               | `ollama` / `openai-completions` | 本地部署                |
 
 > 完整支持 25 个 Provider（智谱 GLM、千帆、z.ai、Kimi Coding 等），详见资源管理页面。
 
@@ -203,14 +326,14 @@ npm run dev
 
 v0.4.0 预置了 15 个开箱即用的参考 Skills，涵盖浏览器自动化、内容创作、数据分析、多搜索引擎等场景：
 
-| 类别 | Skills |
-|---|---|
-| 浏览器自动化 | `agent-browser`、`browserwing`、`playwright-scraper-skill` |
-| 搜索 | `baidu-search`、`multi-search-engine`、`vane-search` |
-| 内容创作 | `anygen-skill`、`content-skills`（含包鱼 Markdown→公众号 / Markdown→HTML） |
-| 数据分析 | `data-analyst` |
-| 工作流辅助 | `agent-init`、`multi-agent-cn`、`self-improving`、`skill-creator`、`summarize` |
-| 商务 | `qcc-cli`（企查查） |
+| 类别         | Skills                                                                         |
+| ------------ | ------------------------------------------------------------------------------ |
+| 浏览器自动化 | `agent-browser`、`browserwing`、`playwright-scraper-skill`                     |
+| 搜索         | `baidu-search`、`multi-search-engine`、`vane-search`                           |
+| 内容创作     | `anygen-skill`、`content-skills`（含包鱼 Markdown→公众号 / Markdown→HTML）     |
+| 数据分析     | `data-analyst`                                                                 |
+| 工作流辅助   | `agent-init`、`multi-agent-cn`、`self-improving`、`skill-creator`、`summarize` |
+| 商务         | `qcc-cli`（企查查）                                                            |
 
 **安装方法**：进入 **Skills 管理** 页面 → 选择 skill → 点击"安装到实例" → 选目标实例 / agent / 安装路径（workspace 或 global）。
 
@@ -239,7 +362,7 @@ graph TB
         RD["Redis 7<br/>限流 + 健康计数"]
     end
 
-    RAG["RAG Service<br/>文档解析 + 向量检索"]
+    RAG["RAG Service<br/>FTS + Vector + RRF 混合检索<br/>PaddleOCR + jieba 中文分词"]
 
     subgraph Instances["OpenClaw 实例"]
         OC1["实例 1 (Docker)"]
@@ -274,32 +397,32 @@ graph TB
 
 ### 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 框架 | Next.js 16 (App Router, Turbopack) |
-| 前端 | React 19, Tailwind CSS 4, shadcn/ui |
-| 状态管理 | Zustand 5, TanStack Query v5 |
-| 数据库 | PostgreSQL 17 + Prisma 7 (Driver Adapter) + pgvector |
-| RAG | Python FastAPI + pgvector 向量检索 |
-| 缓存 | Redis 7 (ioredis) |
-| 认证 | RS256 JWT (jose) + bcryptjs |
-| 网关通信 | WebSocket (ws) + Docker API (dockerode) |
-| 数据验证 | Zod 4 |
+| 层级     | 技术                                                                                        |
+| -------- | ------------------------------------------------------------------------------------------- |
+| 框架     | Next.js 16 (App Router, Turbopack)                                                          |
+| 前端     | React 19, Tailwind CSS 4, shadcn/ui                                                         |
+| 状态管理 | Zustand 5, TanStack Query v5                                                                |
+| 数据库   | PostgreSQL 17 + Prisma 7 (Driver Adapter) + pgvector                                        |
+| RAG      | Python FastAPI + asyncpg + pgvector + tsvector + jieba（混合检索，无 LlamaIndex/LangChain） |
+| 缓存     | Redis 7 (ioredis)                                                                           |
+| 认证     | RS256 JWT (jose) + bcryptjs                                                                 |
+| 网关通信 | WebSocket (ws) + Docker API (dockerode)                                                     |
+| 数据验证 | Zod 4                                                                                       |
 
 ### 功能概览
 
-| 模块 | 路由数 | 核心能力 |
-|------|--------|---------|
-| 对话 | 8 | 多会话、流式输出、思考展示、图片附件 |
-| Agent | 6 | CRUD、克隆、分类、文件管理 |
-| Skills | 12 | ClawHub 市场、安装/发布、版本管理、IDE 编辑 |
-| 实例 | 13 | Docker 创建、外部接入、健康监控、配置编辑 |
-| 知识库 | 8 | 文档上传、OCR、语义检索、流式问答、作用域管理 |
-| 认证 | 5 | JWT 登录、Token 轮转、限流 |
-| 组织 | 5 | 用户/部门 CRUD、RBAC 权限 |
-| 审计 | 2 | 操作日志、CSV 导出 |
-| 仪表盘 | 1 | 实例/会话/用户/技能统计 |
-| 其他 | 5 | 资源密钥、实例访问 |
+| 模块   | 路由数 | 核心能力                                                                                  |
+| ------ | ------ | ----------------------------------------------------------------------------------------- |
+| 对话   | 8      | 多会话、流式输出、思考展示、图片附件                                                      |
+| Agent  | 6      | CRUD、克隆、分类、文件管理                                                                |
+| Skills | 12     | ClawHub 市场、安装/发布、版本管理、IDE 编辑                                               |
+| 实例   | 13     | Docker 创建、外部接入、健康监控、配置编辑                                                 |
+| 知识库 | 10     | PDF/DOCX/Excel 上传、PaddleOCR、FTS+向量+RRF 混合检索、PDF 页面预览、多文档路由、流式问答 |
+| 认证   | 5      | JWT 登录、Token 轮转、限流                                                                |
+| 组织   | 5      | 用户/部门 CRUD、RBAC 权限                                                                 |
+| 审计   | 2      | 操作日志、CSV 导出                                                                        |
+| 仪表盘 | 1      | 实例/会话/用户/技能统计                                                                   |
+| 其他   | 5      | 资源密钥、实例访问                                                                        |
 
 ## 界面截图
 
@@ -337,6 +460,7 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 ### Core Features
 
 **AI Chat**
+
 - Multi-conversation — create multiple independent sessions per agent
 - Streaming responses — real-time token-by-token display
 - Thinking process — collapsible LLM reasoning chain display
@@ -344,35 +468,45 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 - Context management — conversation snapshots and context reset
 
 **Agent Management**
+
 - Cross-instance agent browsing and creation, with cloning to other instances
 - Classification — DEFAULT / DEPARTMENT / PERSONAL categories
 - File management — tree view with online editing of agent config files
 - Visual config editor — schema-driven forms covering all OpenClaw modules
 
 **Skills Marketplace**
+
 - ClawHub integration — search, install, and update skill packages from public marketplace
 - Skill development — IDE-style file editor, develop locally and publish to ClawHub
 - Version management — installation tracking, version checks, and one-click upgrades
 - Scope control — PERSONAL / DEPARTMENT / GLOBAL skill scopes
 
 **Knowledge Base (RAG)**
-- Document upload — PDF, DOCX, TXT, Markdown with automatic OCR and chunking
-- Semantic search — pgvector-powered similarity search with streaming Q&A
+
+- Document upload — PDF / DOCX / Excel (XLSX, XLS, XLSM) with PaddleOCR cloud recognition and per-page / per-row chunking
+- Hybrid retrieval — Postgres FTS (jieba CJK tokenization) + pgvector + **RRF fusion**; more robust recall than vector-only
+- Multi-document routing — `rag.doc_profile` summaries + keywords pre-filter candidate docs, then fine-grained search runs within candidates
+- **PDF source preview** — every PDF citation in chat answers is a clickable page chip → right-side drawer opens the original PDF and jumps to that page
+- Neighbor expansion — PDF hits auto-include adjacent pages, Excel chunks auto-include neighbors, so context isn't cut mid-sentence
+- Excel field-aware retrieval — header auto-detection + field mapping, supports structured filters like "level / document number / category"
 - Scope management — PERSONAL / DEPARTMENT / GLOBAL knowledge base isolation
-- Smart reuse — automatically reuse OCR output from previous documents in the same KB
+- Multi-tenant storage — all RAG data lives under the `rag` schema, every SQL query takes `kb_id` as the isolation axis
 
 **Multi-Instance Management**
+
 - One-click Docker creation — configure image, ports, bind settings and deploy
 - External gateway — connect existing OpenClaw instances via URL + token
 - Health monitoring — 60-second periodic checks with automatic fault detection and recovery
 - Lifecycle control — start, stop, restart, with real-time log streaming
 
 **Organization & Permissions**
+
 - RBAC — SYSTEM_ADMIN / DEPT_ADMIN / USER three-tier roles
 - Department isolation — assign instance and agent access per department
 - Audit logs — comprehensive operation tracking with filtering and CSV export
 
 **Platform**
+
 - Full i18n — English and Chinese interface with one-click switching
 - Mobile-responsive — full chat experience on mobile browsers with sidebar and file panel as slide-in drawers
 - PWA support — add to home screen, runs in standalone mode
@@ -392,6 +526,7 @@ bash setup.sh
 ```
 
 This will:
+
 1. Generate JWT keys and encryption secrets
 2. Ask whether to enable Nginx HTTPS reverse proxy (optional)
 3. Start PostgreSQL, Redis, and TeamClaw via Docker Compose
@@ -419,27 +554,138 @@ Visit `https://your-domain.com`
 
 ### Option 2: Local Development
 
+Two sub-modes —
+
+**A. Full Docker stack (recommended, zero local deps)**
+
 ```bash
-# 1. Clone and install
-git clone https://github.com/anthropics/teamclaw.git
+git clone https://github.com/szsip239/teamclaw.git
+cd teamclaw
+cp .env.example .env
+node scripts/generate-keys.mjs            # writes JWT_*/ENCRYPTION_KEY etc.
+
+docker compose --profile app up -d        # starts postgres + redis + rag + app
+docker logs -f teamclaw-app               # watch Next.js Turbopack boot
+```
+
+Visit `http://localhost:3100`. Edits to `src/**` hot-reload; edits to `rag-service/app/**` trigger uvicorn `--reload`.
+`--profile app` is a switch: plain `docker compose up -d` only brings up the three infra services (postgres/redis/rag), letting host-mode users continue with B below.
+
+**B. Infra in Docker, Next.js on host**
+
+```bash
+git clone https://github.com/szsip239/teamclaw.git
 cd teamclaw
 npm install
 
-# 2. Start databases
-docker compose up -d
+docker compose up -d                       # postgres + redis + rag (no app)
 
-# 3. Configure environment
 cp .env.example .env
 node scripts/generate-keys.mjs
 
-# 4. Setup database
 npx prisma generate
 npx prisma db push
 npx tsx prisma/seed.ts
 
-# 5. Start dev server
+npm run dev                                # Next.js on host (port 3100)
+```
+
+Host-side hot-reload is usually a touch faster (< 0.5s) — handy for pure frontend tweaks. `data/knowledge-bases/` is shared between both modes, so uploaded docs survive a mode switch.
+
+## Configuration Guide
+
+Copy `.env.example` to `.env`, then fill in the required values. `setup.sh` generates secrets automatically; if you configure the project manually, run `node scripts/generate-keys.mjs`.
+
+### Core Services
+
+| Variable                                              | Example                                                                         | Notes                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `teamclaw` / `teamclaw_dev_2024` / `teamclaw`                                   | Used by Docker Compose when creating PostgreSQL                       |
+| `DATABASE_URL`                                        | `postgresql://teamclaw:teamclaw_dev_2024@localhost:5432/teamclaw?schema=public` | Database URL for host-mode Next.js                                    |
+| `REDIS_URL`                                           | `redis://localhost:6379`                                                        | Redis URL for host-mode Next.js; Docker app uses `redis://redis:6379` |
+| `APP_PORT`                                            | `3100`                                                                          | Web port exposed by the Docker app service                            |
+| `NEXT_PUBLIC_APP_URL`                                 | empty or `https://your-domain.com`                                              | Empty means relative URLs, which works better behind reverse proxies  |
+
+### Auth And Encryption
+
+| Variable                                   | How to generate                  | Notes                                                            |
+| ------------------------------------------ | -------------------------------- | ---------------------------------------------------------------- |
+| `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`       | `node scripts/generate-keys.mjs` | Base64-encoded RS256 private/public keys                         |
+| `ENCRYPTION_KEY`                           | `openssl rand -hex 32`           | AES-256-CBC key for stored provider credentials and RAG API keys |
+| `JWT_ACCESS_EXPIRY` / `JWT_REFRESH_EXPIRY` | `15m` / `7d`                     | Login token lifetimes                                            |
+
+Do not rotate these casually after first deployment. Rotating `ENCRYPTION_KEY` makes existing saved API keys unreadable.
+
+### RAG Service Connection
+
+| Variable             | Docker app           | Host-mode Next.js       | Notes                                                                    |
+| -------------------- | -------------------- | ----------------------- | ------------------------------------------------------------------------ |
+| `RAG_SERVICE_URL`    | `http://rag:8000`    | `http://localhost:8000` | Python RAG service endpoint used by Next.js                              |
+| `RAG_SERVICE_SECRET` | strong random string | same value              | Internal shared secret between Next.js and RAG; both services must match |
+
+Docker Compose overrides `RAG_SERVICE_URL=http://rag:8000` inside the `app` container. If you run Next.js with `npm run dev` on the host, keep `RAG_SERVICE_URL=http://localhost:8000` in `.env`.
+
+### RAG LLM, Embedding, And OCR
+
+RAG credentials can be configured in two ways:
+
+1. Recommended: sign in as an admin, open **Knowledge Bases**, click **RAG Config**, then fill in LLM, Embedding, Rerank, and PaddleOCR settings.
+2. Fallback: set the following `.env` variables. If UI settings are empty, TeamClaw falls back to env values.
+
+| Variable                             | Default                                              | Notes                                                                     |
+| ------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| `LLM_API_KEY` or `DASHSCOPE_API_KEY` | empty                                                | API key used for document summaries and final answers                     |
+| `LLM_BASE_URL`                       | `https://dashscope.aliyuncs.com/compatible-mode/v1`  | OpenAI-compatible API base URL                                            |
+| `LLM_MODEL`                          | `qwen3.5-35b-a3b`                                    | Default RAG answer/summary model                                          |
+| `SILICONFLOW_API_KEY`                | empty                                                | API key for embedding and optional rerank                                 |
+| `SILICONFLOW_EMBEDDING_URL`          | `https://api.siliconflow.cn/v1/embeddings`           | Embedding endpoint; the service normalizes it to the API root when needed |
+| `SILICONFLOW_EMBEDDING_MODEL`        | `BAAI/bge-m3`                                        | Default embedding model                                                   |
+| `PGVECTOR_EMBED_DIM`                 | `1024`                                               | pgvector dimension; must match embedding output                           |
+| `PADDLEOCR_TOKEN`                    | empty                                                | PaddleOCR cloud token, required for PDF ingestion                         |
+| `PADDLEOCR_MODEL`                    | `PP-OCRv5`                                           | OCR model                                                                 |
+| `PADDLEOCR_JOB_URL`                  | `https://paddleocr.aistudio-app.com/api/v2/ocr/jobs` | PaddleOCR job API                                                         |
+
+If you change the embedding model and its dimension is not 1024, clean or migrate the vector tables under the `rag` schema before changing `PGVECTOR_EMBED_DIM`.
+
+### PDF Ingestion And Answer Budgets
+
+| Variable                                        | Default    | Notes                                              |
+| ----------------------------------------------- | ---------- | -------------------------------------------------- |
+| `INGEST_DEFAULT_WORKERS` / `INGEST_MAX_WORKERS` | `4` / `12` | OCR/ingestion concurrency limits                   |
+| `PADDLEOCR_JOB_TIMEOUT`                         | `1800`     | Max seconds to wait for one OCR job                |
+| `PADDLEOCR_CHUNK_PAGE_THRESHOLD`                | `48`       | Split OCR jobs when a PDF is larger than this      |
+| `PADDLEOCR_CHUNK_SIZE`                          | `40`       | Pages per OCR chunk for large PDFs                 |
+| `DOCUMENT_PROFILE_MAX_TOKENS`                   | `384`      | Document-routing summary budget                    |
+| `DOCUMENT_CHAPTER_SUMMARY_MAX_TOKENS`           | `4096`     | Chapter/page-range summary budget                  |
+| `UPLOAD_RENDER_DPI`                             | `110`      | DPI used when rendering stored page previews       |
+| `LLM_RENDER_MAX_PIXELS`                         | `640000`   | Max pixels sent to the vision model per page image |
+| `MULTI_DOC_TOTAL_PAGE_BUDGET`                   | `15`       | Total page budget for multi-document answers       |
+| `MULTI_DOC_PER_DOC_PAGE_LIMIT`                  | `6`        | Per-document page cap for multi-document answers   |
+| `MULTI_DOC_SINGLE_DOC_PAGE_LIMIT`               | `30`       | Page cap for single-document answers               |
+
+### Docker And OpenClaw Instances
+
+| Variable                 | macOS Docker Desktop     | Linux                               | Notes                                                             |
+| ------------------------ | ------------------------ | ----------------------------------- | ----------------------------------------------------------------- |
+| `DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`   | `/var/run/docker.sock`              | TeamClaw needs Docker socket access to manage OpenClaw containers |
+| `DOCKER_GID`             | `0`                      | `stat -c '%g' /var/run/docker.sock` | Group id used by the app container for Docker socket access       |
+| `TEAMCLAW_DATA_DIR`      | `~/.teamclaw/instances`  | absolute host path                  | Host directory for OpenClaw instance data                         |
+| `DEFAULT_OPENCLAW_IMAGE` | `alpine/openclaw:latest` | same                                | Default image for new instances                                   |
+
+## Configuration Check
+
+After first-time setup, run:
+
+```bash
+npx prisma generate
+npx prisma db push
+npx tsx prisma/seed.ts
+docker compose up -d
+curl http://localhost:8000/api/health
 npm run dev
 ```
+
+If knowledge-base uploads fail, check that `RAG_SERVICE_SECRET` matches in both services, `RAG_SERVICE_URL` is reachable from the Next.js runtime, `PADDLEOCR_TOKEN` is valid, and `SILICONFLOW_EMBEDDING_MODEL` matches `PGVECTOR_EMBED_DIM`.
 
 ## Architecture
 
@@ -466,7 +712,7 @@ graph TB
         RD["Redis 7<br/>Rate Limit + Health Counter"]
     end
 
-    RAG["RAG Service<br/>Doc Parsing + Vector Search"]
+    RAG["RAG Service<br/>FTS + Vector + RRF Hybrid<br/>PaddleOCR + jieba CJK tokenization"]
 
     subgraph Instances["OpenClaw Instances"]
         OC1["Instance 1 (Docker)"]
@@ -501,32 +747,32 @@ graph TB
 
 ### Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 16 (App Router, Turbopack) |
-| Frontend | React 19, Tailwind CSS 4, shadcn/ui |
-| State | Zustand 5, TanStack Query v5 |
-| Database | PostgreSQL 17 + Prisma 7 (Driver Adapter) + pgvector |
-| RAG | Python FastAPI + pgvector vector search |
-| Cache | Redis 7 (ioredis) |
-| Auth | RS256 JWT (jose) + bcryptjs |
-| Gateway | WebSocket (ws) + Docker API (dockerode) |
-| Validation | Zod 4 |
+| Layer      | Technology                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| Framework  | Next.js 16 (App Router, Turbopack)                                                                 |
+| Frontend   | React 19, Tailwind CSS 4, shadcn/ui                                                                |
+| State      | Zustand 5, TanStack Query v5                                                                       |
+| Database   | PostgreSQL 17 + Prisma 7 (Driver Adapter) + pgvector                                               |
+| RAG        | Python FastAPI + asyncpg + pgvector + tsvector + jieba (hybrid retrieval, no LlamaIndex/LangChain) |
+| Cache      | Redis 7 (ioredis)                                                                                  |
+| Auth       | RS256 JWT (jose) + bcryptjs                                                                        |
+| Gateway    | WebSocket (ws) + Docker API (dockerode)                                                            |
+| Validation | Zod 4                                                                                              |
 
 ### Feature Overview
 
-| Module | Routes | Key Capabilities |
-|--------|--------|-----------------|
-| Chat | 8 | Multi-conversation, streaming, thinking display, image attachments |
-| Agents | 6 | CRUD, clone, classify, file management |
-| Skills | 12 | ClawHub marketplace, install/publish, version management, IDE editor |
-| Instances | 13 | Docker create, external gateway, health monitoring, config editor |
-| Knowledge Base | 8 | Document upload, OCR, semantic search, streaming Q&A, scope management |
-| Auth | 5 | JWT login, token rotation, rate limiting |
-| Org | 5 | User/department CRUD, RBAC |
-| Audit | 2 | Operation logs, CSV export |
-| Dashboard | 1 | Instance/session/user/skill metrics |
-| Other | 5 | Resource keys, instance access |
+| Module         | Routes | Key Capabilities                                                                                                      |
+| -------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| Chat           | 8      | Multi-conversation, streaming, thinking display, image attachments                                                    |
+| Agents         | 6      | CRUD, clone, classify, file management                                                                                |
+| Skills         | 12     | ClawHub marketplace, install/publish, version management, IDE editor                                                  |
+| Instances      | 13     | Docker create, external gateway, health monitoring, config editor                                                     |
+| Knowledge Base | 10     | PDF/DOCX/Excel upload, PaddleOCR, FTS+vector+RRF hybrid retrieval, PDF page preview, multi-doc routing, streaming Q&A |
+| Auth           | 5      | JWT login, token rotation, rate limiting                                                                              |
+| Org            | 5      | User/department CRUD, RBAC                                                                                            |
+| Audit          | 2      | Operation logs, CSV export                                                                                            |
+| Dashboard      | 1      | Instance/session/user/skill metrics                                                                                   |
+| Other          | 5      | Resource keys, instance access                                                                                        |
 
 ## Getting Started Guide
 
@@ -545,16 +791,16 @@ Visit `http://localhost:3100` and sign in with the default admin account:
 
 Go to the **Resources** page to create model resources. 25 built-in providers are supported, including region/plan variants (e.g. qwen's "CN Standard", "CN Coding Plan", "Intl Standard", "Intl Coding Plan"):
 
-| Provider | API Protocol | Notes |
-|----------|-------------|-------|
-| Anthropic | `anthropic-messages` | Claude models, default provider |
-| OpenAI | `openai-completions` | GPT / o series |
-| Google | `google-generative-ai` | Gemini series |
-| DeepSeek | `openai-completions` | DeepSeek V3 / R1 |
-| Qwen | `openai-completions` | Includes Coding Plan variants |
-| MiniMax / Doubao / Moonshot | mixed | Multiple region variants |
-| Groq / xAI / Mistral | `openai-completions` | OpenAI-compatible |
-| Ollama / vLLM | `ollama` / `openai-completions` | Local deployment |
+| Provider                    | API Protocol                    | Notes                           |
+| --------------------------- | ------------------------------- | ------------------------------- |
+| Anthropic                   | `anthropic-messages`            | Claude models, default provider |
+| OpenAI                      | `openai-completions`            | GPT / o series                  |
+| Google                      | `google-generative-ai`          | Gemini series                   |
+| DeepSeek                    | `openai-completions`            | DeepSeek V3 / R1                |
+| Qwen                        | `openai-completions`            | Includes Coding Plan variants   |
+| MiniMax / Doubao / Moonshot | mixed                           | Multiple region variants        |
+| Groq / xAI / Mistral        | `openai-completions`            | OpenAI-compatible               |
+| Ollama / vLLM               | `ollama` / `openai-completions` | Local deployment                |
 
 > 25 providers supported (GLM, Qianfan, z.ai, Kimi Coding, etc.). See the Resources page for the full list.
 
@@ -598,14 +844,14 @@ Navigate to the **Chat** page — once the instance is online, default agents ap
 
 v0.4.0 ships with 15 ready-to-use reference skills covering browser automation, content creation, data analysis, multi-search, and more:
 
-| Category | Skills |
-|---|---|
-| Browser automation | `agent-browser`, `browserwing`, `playwright-scraper-skill` |
-| Search | `baidu-search`, `multi-search-engine`, `vane-search` |
-| Content creation | `anygen-skill`, `content-skills` (incl. baoyu markdown → WeChat / markdown → HTML) |
-| Data analysis | `data-analyst` |
-| Workflow helpers | `agent-init`, `multi-agent-cn`, `self-improving`, `skill-creator`, `summarize` |
-| Business | `qcc-cli` (QCC enterprise lookup) |
+| Category           | Skills                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| Browser automation | `agent-browser`, `browserwing`, `playwright-scraper-skill`                         |
+| Search             | `baidu-search`, `multi-search-engine`, `vane-search`                               |
+| Content creation   | `anygen-skill`, `content-skills` (incl. baoyu markdown → WeChat / markdown → HTML) |
+| Data analysis      | `data-analyst`                                                                     |
+| Workflow helpers   | `agent-init`, `multi-agent-cn`, `self-improving`, `skill-creator`, `summarize`     |
+| Business           | `qcc-cli` (QCC enterprise lookup)                                                  |
 
 **How to install**: Open **Skills** → pick a skill → click "Install to Instance" → choose target instance / agent / install path (workspace or global).
 

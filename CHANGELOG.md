@@ -4,6 +4,85 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.5.0 (2026-05-18)
+
+### 🎯 Highlights
+
+- **RAG 引擎完全重写**: 弃用 LlamaIndex，改为 **Postgres-native 混合检索**（FTS via tsvector + dense via pgvector + RRF 融合）。算法栈源自 [llm-rag](https://github.com/biyiyizuilihai/llm-rag) 的工程实践，适配 TeamClaw 的多租户 / RBAC / 凭据透传体系。
+- **PDF 来源页面预览**: 对话回答里 PDF 引用旁出现可点击的「第 N 页」chip，点击右侧抽屉打开原始 PDF 并自动跳转到对应页（浏览器原生 PDF 查看器，`#page=N` 锚点跳转）。
+- **Excel 字段化检索（后端就绪）**: 新增 `/api/excel/preview` + `/api/excel/config` 两个端点，自动识别表头并按"标题 / 正文 / 过滤字段 / 来源字段"做字段化分块。前端 UI 下一期接入。
+- **Docker 全栈一体化**: `docker compose --profile app up -d` 一键起 postgres + redis + rag + Next.js 四个容器，host 端不需要 `npm run dev`。原 host 模式（基础设施 docker + Next.js 本地）保留为可选。
+- **RAG 镜像瘦身 82%**: 从 6.31GB → 1.12GB（去掉 llama-index-* / dashscope / psycopg2 等约 1.2GB 依赖）。
+
+---
+
+### ✨ New Features
+
+**RAG 算法栈**
+
+- **混合检索** (`rag-service/app/retrieval.py`): FTS + 向量并行查询 → RRF (Reciprocal Rank Fusion) 合并 → 邻居扩展 → 组 context
+- **多文档路由**: 新增 `rag.doc_profile` 表（每文档 60-120 字 LLM 摘要 + 关键词），retrieval 先按 KB 维度路由出 top-N 候选文档，再在候选内做细粒度页 / 行检索
+- **中文 FTS**: Python 端 jieba 分词 → 写入 `*_tokens` 列 → Postgres 生成 `tsvector('simple', tokens)` 列，查询时 jieba 切句再拼 tsquery。无需 zhparser / pg_jieba 扩展
+- **PDF 页级索引** (`rag-service/app/pdf_pipeline.py`): PaddleOCR JSONL 按页解析（不再 `\n\n` 拼大字符串），每页独立 chunk 携带 `display_page` metadata；长页二次切分用 `page_index*1000+i` 编码子索引
+- **Excel 政策化分块** (`rag-service/app/excel_pipeline.py`): 表头自动检测、`row_as_document` 模式、按字段聚合 metadata、固定重叠切分，与 [llm-rag](https://github.com/biyiyizuilihai/llm-rag) 行为对齐
+- **HNSW 向量索引 + GIN FTS 索引**: 自动在 schema bootstrap 时创建，开箱即用
+
+**PDF 来源预览**
+
+- 新增组件 `src/components/chat/pdf-preview-drawer.tsx`：右侧抽屉用 `<iframe>` 装浏览器原生 PDF 查看器，`#page=N&view=FitH` 跳页 + 全宽自适应
+- 新增端点 `/api/v1/knowledge-bases/[id]/documents/[docId]/file`：代理 RAG service 的 `source.pdf` artifact，权限走 KB 可见性校验，`Content-Type: application/pdf` + inline
+- `KbSourceRef` 扩字段：`docRowId / docName / pageIndex / sourceType`
+- `rag-query-context.ts` 把 RAG 返回的 `metadata.doc_id / page_index` 透传，并查 Prisma `KnowledgeDocument` 拿文件名（RAG 的 `doc_id` ↔ Prisma 的 `docId` 映射）
+- chat-store 新增 `pdfPreview` 状态 + `openPdfPreview` / `closePdfPreview` actions
+- chat 消息底部"来源"区里 PDF chunks 多了 `📄 文件名` 和可点击 `第 N 页` chip
+
+**Excel 字段化 API（后端）**
+
+- `POST /api/excel/preview` → 返回 columns + sample_rows + `guessed_config`（自动猜 title/content/filter/source 字段）
+- `POST /api/excel/config` → 校验配置后触发 ingestion，写 `rag.excel_config` / `rag.excel_policy` / `rag.excel_policy_chunk`
+- 支持 `.xlsx / .xls / .xlsm`，xlrd + openpyxl 双引擎
+- 默认 ingest 通过 `/api/ingest` 按文件后缀自动分流（PDF / DOCX / Excel），向后兼容
+
+**Docker 一体化**
+
+- 新增 `Dockerfile.dev`: 基于 node:20-alpine，启动时按需 `npm install` + `prisma generate` + `next dev --turbopack`
+- `docker-compose.yml` 加 `app` 服务（`profiles: ["app"]` 控制，默认不启）
+- volume mount 设计：源码 bind mount + `node_modules` / `.next` / `prisma-gen` 用 named volume 隔离，避免 host/container 平台差异
+- 启动顺序：postgres healthy → redis healthy → rag started → app start
+- `host` 模式（`npm run dev`）保留，两种模式 `data/knowledge-bases/` 数据共享
+
+---
+
+### 🔧 Internal Changes
+
+**Storage 层**
+
+- 新 `rag` schema 下 5 张表：`page_ocr / doc_profile / excel_policy / excel_policy_chunk / excel_config`
+- 所有 SQL 第一参数 `kb_id`，多租户硬隔离
+- 级联删支持 KB 级和 doc 级两种粒度
+- 老 LlamaIndex 留下的 3 张 `data_*` 表保留（不再使用，可手动 drop）
+
+**依赖变更**
+
+- `rag-service/requirements.txt`:
+  - 移除：`llama-index-*`（6 个包）、`dashscope`、`psycopg2-binary`、`python-docx`
+  - 新增：`jieba`、`openpyxl`、`xlrd`、`numpy`
+  - 保留：`asyncpg`、`openai`、`PyMuPDF`、`Pillow`、`requests`、`httpx`
+- `rag-service/Dockerfile`:
+  - 移除 `libpq-dev`（asyncpg 自带协议）、`poppler-utils`（PyMuPDF 不依赖）
+  - 保留 `build-essential`、`libreoffice-writer-nogui`（DOCX→PDF 转换）
+  - apt 源切到 `mirrors.aliyun.com`，规避 deb.debian.org 在 CN 网络下的不稳定
+
+**代码删除**
+
+`rag-service/app/` 下移除 18 个 LlamaIndex 时期的模块：`step0`–`step4*.py`、`vector_store_management.py`、`reranker.py`、`table_normalizer.py`、`table_summary.py`、`postprocess.py`、`batch_ocr.py`、`document_ingestion.py`、`model_provider_utils.py`、`pipeline_utils.py`、`query_utils.py`、`web_helpers.py`、`data_models.py`
+
+**测试**
+
+新增 22 个单测（FTS 7 + Excel 9 + Retrieval 6），全部通过；不依赖数据库，可在 CI 中独立运行。
+
+---
+
 ## v0.4.0 (2026-04-20)
 
 ### 🎯 Highlights

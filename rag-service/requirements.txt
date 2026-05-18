@@ -1,28 +1,25 @@
-# ── RAG (llama-index) ────────────
-llama-index-core
-llama-index-llms-openai
-llama-index-vector-stores-postgres
-llama-index-embeddings-openai
-llama-index-embeddings-huggingface
-llama-index-embeddings-dashscope
-
-# ── Database ──────────────────────
-asyncpg
-psycopg2-binary
-
-# ── AI services ──────────────────
-openai
-dashscope
-
-# ── Web framework ────────────────
+# ── Web ──────────────────────────
 fastapi
 uvicorn[standard]
 python-multipart
+
+# ── DB ───────────────────────────
+asyncpg
+
+# ── AI services (OpenAI-compatible HTTP) ──
+openai
+
+# ── Document parsing ─────────────
+PyMuPDF
+Pillow
+openpyxl
+xlrd
+
+# ── Chinese tokenization (for FTS write/query symmetry) ──
+jieba
 
 # ── Utilities ────────────────────
 python-dotenv
 requests
 httpx
-Pillow
-PyMuPDF
-python-docx
+numpy

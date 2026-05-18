@@ -6,6 +6,7 @@ import { useT } from '@/stores/language-store'
 import { ChatSidebar } from './chat-sidebar'
 import { ChatMain } from './chat-main'
 import { ChatFilePanel } from './file-panel/chat-file-panel'
+import { PdfPreviewDrawer } from './pdf-preview-drawer'
 import {
   Sheet,
   SheetContent,
@@ -25,6 +26,8 @@ export function ChatLayout() {
   const setMobileSidebarOpen = useChatStore((s) => s.setMobileSidebarOpen)
   const mobileFilePanelOpen = useChatStore((s) => s.mobileFilePanelOpen)
   const setMobileFilePanelOpen = useChatStore((s) => s.setMobileFilePanelOpen)
+  const pdfPreview = useChatStore((s) => s.pdfPreview)
+  const closePdfPreview = useChatStore((s) => s.closePdfPreview)
 
   const showFilePanel = activeSessionId && selectedAgent?.hasContainer !== false
 
@@ -62,6 +65,7 @@ export function ChatLayout() {
             </SheetContent>
           </Sheet>
         )}
+        <PdfPreviewDrawer preview={pdfPreview} onClose={closePdfPreview} />
       </div>
     )
   }
@@ -72,6 +76,7 @@ export function ChatLayout() {
       {sidebarOpen && <ChatSidebar className="border-r w-60 shrink-0" />}
       <ChatMain />
       {showFilePanel && <ChatFilePanel className="border-l w-96 shrink-0" />}
+      <PdfPreviewDrawer preview={pdfPreview} onClose={closePdfPreview} />
     </div>
   )
 }

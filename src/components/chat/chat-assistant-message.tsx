@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, ChevronDown } from 'lucide-react'
+import { Bot, ChevronDown, FileText } from 'lucide-react'
 import type { ChatMessage, KbSourceRef } from '@/types/chat'
 import { ChatProcessGroup } from './chat-process-group'
 import { ChatThinkingBlock } from './chat-thinking-block'
@@ -23,6 +23,7 @@ interface ChatAssistantMessageProps {
 function KbSourceSection({ sources }: { sources: KbSourceRef[] }) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
+  const openPdfPreview = useChatStore((s) => s.openPdfPreview)
 
   if (sources.length === 0) return null
 
@@ -67,22 +68,56 @@ function KbSourceSection({ sources }: { sources: KbSourceRef[] }) {
                   {categoryLabels[cat]}
                 </p>
                 <div className="space-y-1">
-                  {items.map((s, i) => (
-                    <div
-                      key={i}
-                      className={`border-l-2 rounded-r-md px-2 py-1 text-[11px] ${categoryColors[cat]}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground/80 truncate">{s.kbName}</p>
-                          <p className="text-muted-foreground line-clamp-2 mt-0.5">{s.text}</p>
+                  {items.map((s, i) => {
+                    const pageIndex = typeof s.pageIndex === 'number' ? s.pageIndex : null
+                    const canPreview =
+                      s.sourceType !== 'table' &&
+                      typeof s.docRowId === 'string' &&
+                      pageIndex !== null
+                    return (
+                      <div
+                        key={i}
+                        className={`border-l-2 rounded-r-md px-2 py-1 text-[11px] ${categoryColors[cat]}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground/80 truncate">{s.kbName}</p>
+                            <p className="text-muted-foreground line-clamp-2 mt-0.5">{s.text}</p>
+                            {(s.docName || canPreview) && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                {s.docName && (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                                    <FileText className="size-2.5" />
+                                    {s.docName}
+                                  </span>
+                                )}
+                                {canPreview && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openPdfPreview({
+                                        kbId: s.kbId,
+                                        docRowId: s.docRowId!,
+                                        docName: s.docName,
+                                        pageIndex,
+                                      })
+                                    }
+                                    className="inline-flex items-center gap-0.5 rounded border border-foreground/15 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-foreground/80 hover:bg-foreground/10 transition-colors"
+                                    title={t('chat.pdfPreview.openHint')}
+                                  >
+                                    {t('chat.pdfPreview.page', { n: pageIndex })}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                            {(s.score * 100).toFixed(0)}%
+                          </span>
                         </div>
-                        <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-                          {(s.score * 100).toFixed(0)}%
-                        </span>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )

@@ -98,6 +98,16 @@ interface ChatState {
   kbSources: KbSourceRef[]
   setKbSources: (sources: KbSourceRef[]) => void
 
+  // PDF source preview — opened from KB source chips in assistant messages
+  pdfPreview: {
+    kbId: string
+    docRowId: string
+    docName?: string
+    pageIndex?: number
+  } | null
+  openPdfPreview: (preview: NonNullable<ChatState['pdfPreview']>) => void
+  closePdfPreview: () => void
+
   // Sidebar
   sidebarOpen: boolean
   setSidebarOpen: (v: boolean) => void
@@ -707,6 +717,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setMountedKbIds: (ids) => set({ mountedKbIds: ids }),
   kbSources: [],
   setKbSources: (sources) => set({ kbSources: sources }),
+
+  pdfPreview: null,
+  openPdfPreview: (preview) => set({ pdfPreview: preview }),
+  closePdfPreview: () => set({ pdfPreview: null }),
 
   sidebarOpen: true,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
