@@ -17,7 +17,7 @@ import { useUpdateResource, useProviders } from "@/hooks/use-resources"
 import { api } from "@/lib/api-client"
 import { useT } from "@/stores/language-store"
 import { toast } from "sonner"
-import type { ResourceDetail, ResourceConfig, ModelDefinition, ProviderInfo } from "@/types/resource"
+import type { ResourceDetail, ResourceConfig, ModelDefinition, ProviderInfo, ProviderVariant } from "@/types/resource"
 
 interface ResourceModelPanelProps {
   resource: ResourceDetail
@@ -28,6 +28,31 @@ interface ModelsDevResponse {
   modelsDevId: string
   count: number
   models: ModelDefinition[]
+}
+
+function resolveOpenClawProviderId(
+  provider: string,
+  config: ResourceConfig | null,
+  matchingVariant?: ProviderVariant,
+): string {
+  if (provider === "doubao") {
+    const baseUrl = config?.baseUrl ?? ""
+    if (baseUrl.includes("/api/plan")) {
+      return "volcengine-agent-plan"
+    }
+    if (baseUrl.includes("/api/coding")) {
+      return "volcengine-plan"
+    }
+    if (baseUrl.includes("ark.cn-beijing.volces.com/api/v3")) {
+      return "volcengine"
+    }
+  }
+  if (config?.openClawProviderId) return config.openClawProviderId
+  if (matchingVariant?.openClawProviderId) return matchingVariant.openClawProviderId
+  if (provider === "doubao") {
+    return "volcengine"
+  }
+  return provider
 }
 
 export function ResourceModelPanel({ resource }: ResourceModelPanelProps) {
@@ -44,6 +69,7 @@ export function ResourceModelPanel({ resource }: ResourceModelPanelProps) {
   const matchingVariant = providerDef?.variants?.find((v) => v.baseUrl === effectiveBaseUrl)
   const effectiveModelsDevId = matchingVariant?.modelsDevId ?? providerDef?.modelsDevId
   const hasModelsDevMapping = Boolean(effectiveModelsDevId)
+  const effectiveProviderId = resolveOpenClawProviderId(resource.provider, config, matchingVariant)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelDefinition | null>(null)
@@ -270,7 +296,7 @@ export function ResourceModelPanel({ resource }: ResourceModelPanelProps) {
         open={pushDialogOpen}
         onOpenChange={setPushDialogOpen}
         resourceId={resource.id}
-        resourceProvider={resource.provider}
+        resourceProvider={effectiveProviderId}
         model={pushingModel}
       />
     </>

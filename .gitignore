@@ -27,6 +27,8 @@
 .idea/
 __pycache__/
 *.py[cod]
+AGENTS.md
+.skill-invocations.log
 
 # debug
 npm-debug.log*
@@ -76,6 +78,9 @@ next-env.d.ts
 
 # reference & study docs
 openclaw*.md
+
+# shared memory for Claude/Codex sessions
+docs/agents/
 
 # internal development docs (not for OSS)
 PRD.md

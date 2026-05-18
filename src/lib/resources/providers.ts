@@ -47,6 +47,148 @@ function anthropicAuth(key: string): Record<string, string> {
   }
 }
 
+const volcengineStandardModels = [
+  {
+    id: 'doubao-seed-1-8-251228',
+    name: 'Doubao Seed 1.8',
+    input: ['text', 'image'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'doubao-seed-code-preview-251028',
+    name: 'Doubao Seed Code Preview',
+    input: ['text', 'image'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'kimi-k2-5-260127',
+    name: 'Kimi K2.5',
+    input: ['text', 'image'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'glm-4-7-251222',
+    name: 'GLM 4.7',
+    input: ['text', 'image'],
+    contextWindow: 200000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'deepseek-v3-2-251201',
+    name: 'DeepSeek V3.2',
+    input: ['text', 'image'],
+    contextWindow: 128000,
+    maxTokens: 8192,
+  },
+]
+
+const volcengineCodingModels = [
+  {
+    id: 'ark-code-latest',
+    name: 'Ark Coding Plan',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'doubao-seed-code',
+    name: 'Doubao Seed Code',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'glm-4.7',
+    name: 'GLM 4.7 Coding',
+    input: ['text'],
+    contextWindow: 200000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'kimi-k2-thinking',
+    name: 'Kimi K2 Thinking',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'kimi-k2.5',
+    name: 'Kimi K2.5 Coding',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'doubao-seed-code-preview-251028',
+    name: 'Doubao Seed Code Preview',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+]
+
+const volcengineAgentPlanModels = [
+  {
+    id: 'doubao-seed-2.0-code',
+    name: 'Doubao Seed 2.0 Code',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'doubao-seed-2.0-pro',
+    name: 'Doubao Seed 2.0 Pro',
+    input: ['text', 'image'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'doubao-seed-2.0-lite',
+    name: 'Doubao Seed 2.0 Lite',
+    input: ['text', 'image'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'doubao-seed-2.0-mini',
+    name: 'Doubao Seed 2.0 Mini',
+    input: ['text', 'image'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'deepseek-v3.2',
+    name: 'DeepSeek V3.2',
+    input: ['text'],
+    contextWindow: 128000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'minimax-m2.7',
+    name: 'MiniMax M2.7',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'glm-5.1',
+    name: 'GLM 5.1',
+    input: ['text'],
+    contextWindow: 200000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'kimi-k2.6',
+    name: 'Kimi K2.6',
+    input: ['text'],
+    contextWindow: 256000,
+    maxTokens: 8192,
+  },
+]
+
 // ─── Model Providers ─────────────────────────────────────────────────
 
 const modelProviders: ProviderDef[] = [
@@ -418,22 +560,47 @@ const modelProviders: ProviderDef[] = [
     name: '火山方舟 (Volcengine ARK)',
     type: 'MODEL',
     authMethod: 'API_KEY',
-    envVarName: 'ARK_API_KEY',
+    envVarName: 'VOLCANO_ENGINE_API_KEY',
     apiType: 'openai-completions',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     icon: 'doubao',
-    description: '字节跳动火山方舟（普通/Coding 两种端点，Doubao / DeepSeek / GLM / Kimi 等）',
+    description: '字节跳动火山方舟（普通 / Coding Plan / Agent Plan 端点，Doubao / DeepSeek / GLM / Kimi 等）',
     // No modelsDevId on any variant: models.dev has no volcengine entry.
+    defaultModels: volcengineStandardModels,
     variants: [
-      { id: 'regular', label: '普通', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', envVarName: 'ARK_API_KEY', apiType: 'openai-completions' },
-      { id: 'coding', label: 'Coding Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3', envVarName: 'ARK_CODING_API_KEY', apiType: 'anthropic-messages' },
+      {
+        id: 'regular',
+        label: '普通',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+        envVarName: 'VOLCANO_ENGINE_API_KEY',
+        apiType: 'openai-completions',
+        openClawProviderId: 'volcengine',
+        defaultModels: volcengineStandardModels,
+      },
+      {
+        id: 'coding',
+        label: 'Coding Plan',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+        envVarName: 'VOLCANO_ENGINE_API_KEY',
+        apiType: 'openai-completions',
+        openClawProviderId: 'volcengine-plan',
+        defaultModels: volcengineCodingModels,
+      },
+      {
+        id: 'agent-plan',
+        label: 'Agent Plan',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+        envVarName: 'ARK_AGENT_PLAN_API_KEY',
+        apiType: 'openai-completions',
+        openClawProviderId: 'volcengine-agent-plan',
+        defaultModels: volcengineAgentPlanModels,
+      },
     ],
     configFields: [
       { key: 'baseUrl', label: 'API 地址', placeholder: 'https://ark.cn-beijing.volces.com/api/v3', required: false },
     ],
-    // For the regular endpoint we hit /models (GET); the coding endpoint
-    // follows the Anthropic messages pattern. Variant-aware behavior is
-    // handled in the test handler based on apiType.
+    // The regular endpoint can list models. Coding Plan uses a chat-completions
+    // smoke request because its plan gateway may not expose /models reliably.
     testEndpoint: {
       url: (baseUrl: string) => `${baseUrl}/models`,
       method: 'GET',

@@ -3,7 +3,11 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { auditLog } from '@/lib/audit'
-import { buildProviderEntries, sanitizeProviderPatch } from '@/lib/config-editor/provider-sync'
+import {
+  buildProviderEntryFromResource,
+  resolveOpenClawProviderId,
+  sanitizeProviderPatch,
+} from '@/lib/config-editor/provider-sync'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import type { ResourceConfig, ModelDefinition } from '@/types/resource'
 
@@ -95,15 +99,19 @@ export const POST = withAuth(
         )
       }
 
-      const modelRef = `${resource.provider}/${body.modelId}`
-      const providerEntries = await buildProviderEntries([resource.provider])
-      const providerEntry = providerEntries[resource.provider]
-      if (!providerEntry) {
+      const openClawProviderId = resolveOpenClawProviderId(
+        resource.provider,
+        config as Record<string, unknown> | null,
+      )
+      const modelRef = `${openClawProviderId}/${body.modelId}`
+      const builtProvider = buildProviderEntryFromResource(resource)
+      if (!builtProvider || builtProvider.providerId !== openClawProviderId) {
         return NextResponse.json(
           { error: `Could not build provider entry for "${resource.provider}" — ensure the resource has a baseUrl, apiKey, and at least one model` },
           { status: 400 },
         )
       }
+      const providerEntry = builtProvider.entry
 
       await ensureRegistryInitialized()
       const connected = new Set(registry.getConnectedIds())
@@ -124,7 +132,7 @@ export const POST = withAuth(
               currentConfig: cur.config,
             })
             const patch = {
-              models: { providers: { [resource.provider]: providerEntry } },
+              models: { providers: { [openClawProviderId]: providerEntry } },
               ...rolePatch,
             }
             const sanitized = sanitizeProviderPatch(patch)
