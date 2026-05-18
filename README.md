@@ -214,6 +214,28 @@ RAG 凭据有两种配置方式：
 | `PADDLEOCR_MODEL`                    | `PP-OCRv5`                                           | OCR 模型                                        |
 | `PADDLEOCR_JOB_URL`                  | `https://paddleocr.aistudio-app.com/api/v2/ocr/jobs` | PaddleOCR job API                               |
 
+当前项目默认模型栈：
+
+| 用途                     | 当前默认模型/服务         | 配置位置                                              | 说明                                                                     |
+| ------------------------ | ------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| RAG 回答、文档摘要       | `qwen3.5-35b-a3b`         | `rag.llm.model` / `LLM_MODEL`                         | 当前默认 LLM，默认通过 DashScope OpenAI 兼容接口调用                     |
+| 查询改写、文档相关性判断 | 跟随 `rag.llm.model`      | `rag.llm.model` / `LLM_MODEL`                         | 正常由 Next.js 传入同一个 LLM；直连 RAG 服务且未传模型时回退 `qwen-plus` |
+| PDF 页面图像回答         | 跟随 `rag.llm.model`      | `rag.llm.model` / `LLM_MODEL`                         | 如果你的 PDF 问答依赖页面截图，模型必须支持 `image_url` 多模态输入       |
+| 向量检索                 | `BAAI/bge-m3`             | `rag.embedding.model` / `SILICONFLOW_EMBEDDING_MODEL` | 当前默认 Embedding，输出 1024 维向量                                     |
+| 可选重排                 | `BAAI/bge-reranker-v2-m3` | `rag.rerank.model`                                    | 默认配置了模型名，但 `rag.rerank.enabled=false`，需要在后台手动开启      |
+| OCR 入库                 | `PP-OCRv5`                | `rag.paddleocr.model` / `PADDLEOCR_MODEL`             | 当前 PDF 入库 OCR 模型；建议保持该模型                                   |
+
+模型选择建议：
+
+| 场景                       | 推荐配置                                                                  | 说明                                                                    |
+| -------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 默认生产配置               | `qwen3.5-35b-a3b` + `BAAI/bge-m3` + `PP-OCRv5`                            | 保持当前默认，配置少、行为稳定，适合先上线验证                          |
+| PDF 扫描件、截图型资料较多 | 使用支持视觉输入的 DashScope/OpenAI-compatible LLM，例如 `qwen-vl-max`    | RAG 会把命中 PDF 页面图像发给模型，纯文本模型可能无法回答               |
+| 长文档或多文档召回噪声较高 | 开启 rerank，并使用 `BAAI/bge-reranker-v2-m3`                             | 先召回再重排，通常能减少无关片段进入最终回答                            |
+| 成本优先、主要是文本/Excel | 可评估更轻量的 OpenAI-compatible 文本模型，但保留 `BAAI/bge-m3`           | 更换 LLM 不影响向量库；更换 Embedding 会影响向量维度和历史索引          |
+| OCR 模型选择               | 固定使用 `PP-OCRv5`                                                       | 换成其他 OCR 模型可能改变文本切分、页码定位和表格识别，进而降低检索效果 |
+| 更换 Embedding             | 新模型维度必须同步 `PGVECTOR_EMBED_DIM`，并重建或迁移 `rag` schema 向量表 | 当前 `BAAI/bge-m3` 是 1024 维，直接换维度会导致查询报错                 |
+
 如果你更换 Embedding 模型且维度不是 1024，需要先清理或迁移 `rag` schema 中的向量表，再修改 `PGVECTOR_EMBED_DIM`，否则查询会出现维度不匹配。
 
 ### PDF 入库与回答预算
@@ -644,6 +666,28 @@ RAG credentials can be configured in two ways:
 | `PADDLEOCR_TOKEN`                    | empty                                                | PaddleOCR cloud token, required for PDF ingestion                         |
 | `PADDLEOCR_MODEL`                    | `PP-OCRv5`                                           | OCR model                                                                 |
 | `PADDLEOCR_JOB_URL`                  | `https://paddleocr.aistudio-app.com/api/v2/ocr/jobs` | PaddleOCR job API                                                         |
+
+Current default model stack:
+
+| Purpose                              | Current default model/service | Config key                                            | Notes                                                                                             |
+| ------------------------------------ | ----------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| RAG answers and document summaries   | `qwen3.5-35b-a3b`             | `rag.llm.model` / `LLM_MODEL`                         | Current default LLM, called through DashScope's OpenAI-compatible endpoint                        |
+| Query rewrite and document filtering | Follows `rag.llm.model`       | `rag.llm.model` / `LLM_MODEL`                         | Next.js normally passes the same LLM; direct RAG calls without a model fall back to `qwen-plus`   |
+| PDF page-image answering             | Follows `rag.llm.model`       | `rag.llm.model` / `LLM_MODEL`                         | If PDF Q&A depends on rendered page images, the model must support multimodal `image_url` input   |
+| Vector retrieval                     | `BAAI/bge-m3`                 | `rag.embedding.model` / `SILICONFLOW_EMBEDDING_MODEL` | Current default embedding model; outputs 1024-dimensional vectors                                 |
+| Optional reranking                   | `BAAI/bge-reranker-v2-m3`     | `rag.rerank.model`                                    | The default model name is seeded, but `rag.rerank.enabled=false`; enable it in the admin UI first |
+| OCR ingestion                        | `PP-OCRv5`                    | `rag.paddleocr.model` / `PADDLEOCR_MODEL`             | Current PDF ingestion OCR model; recommended to keep unchanged                                    |
+
+Model recommendations:
+
+| Scenario                             | Recommended setup                                                            | Notes                                                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Default production setup             | `qwen3.5-35b-a3b` + `BAAI/bge-m3` + `PP-OCRv5`                               | Keep the current defaults for the first deployment; it has the fewest moving parts                                 |
+| Many scanned PDFs or screenshot docs | Use a vision-capable DashScope/OpenAI-compatible LLM, such as `qwen-vl-max`  | RAG sends matched PDF page images to the model; text-only models may not answer correctly                          |
+| Noisy long-document retrieval        | Enable rerank and use `BAAI/bge-reranker-v2-m3`                              | Recall first, rerank second, then send cleaner context to the final answer model                                   |
+| Cost-first text/Excel workloads      | Evaluate a lighter OpenAI-compatible text model, while keeping `BAAI/bge-m3` | Changing the LLM does not invalidate vectors; changing embedding models invalidates existing vector indexes        |
+| OCR model choice                     | Keep `PP-OCRv5`                                                              | Other OCR models may change text segmentation, page positioning, and table recognition, reducing retrieval quality |
+| Replacing embedding                  | Match `PGVECTOR_EMBED_DIM` and rebuild or migrate vector tables under `rag`  | Current `BAAI/bge-m3` vectors are 1024-dimensional                                                                 |
 
 If you change the embedding model and its dimension is not 1024, clean or migrate the vector tables under the `rag` schema before changing `PGVECTOR_EMBED_DIM`.
 
