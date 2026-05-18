@@ -46,6 +46,8 @@ export interface ResourceConfig {
   baseUrl?: string
   apiType?: string           // "anthropic-messages" | "openai-completions" | "openai-responses" | "google-generative-ai"
   envVarName?: string
+  /** Provider id expected by OpenClaw runtime, when it differs from TeamClaw's UI provider id */
+  openClawProviderId?: string
   authHeader?: boolean       // custom auth header handling
   headers?: Record<string, string>  // custom HTTP headers
   models?: ModelDefinition[] // available models from this provider
@@ -97,7 +99,9 @@ export interface ProviderVariant {
   baseUrl: string
   envVarName?: string
   apiType?: string
+  openClawProviderId?: string
   modelsDevId?: string
+  defaultModels?: ModelDefinition[]
   /** Optional short description shown under the variant option */
   description?: string
 }

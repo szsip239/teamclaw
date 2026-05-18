@@ -4,6 +4,8 @@ import { isKnownMultimodal } from './model-capabilities'
 import type { TestConnectionResult, ResourceConfig, DetectedModelInfo } from '@/types/resource'
 
 const TEST_TIMEOUT_MS = 10_000
+const VOLCENGINE_CODING_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
+const VOLCENGINE_AGENT_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3'
 
 /**
  * Test connectivity for a resource by calling its provider's test endpoint.
@@ -35,7 +37,10 @@ async function executeTest(
   config?: ResourceConfig | null,
 ): Promise<TestConnectionResult> {
   const { testEndpoint } = providerDef
-  const baseUrl = config?.baseUrl || providerDef.baseUrl || ''
+  const baseUrl = normalizeProviderBaseUrl(
+    providerDef.id,
+    config?.baseUrl || providerDef.baseUrl || '',
+  )
 
   // Resolve URL
   let url: string
@@ -44,8 +49,8 @@ async function executeTest(
       return { ok: false, latencyMs: 0, error: '需要提供 API 地址 (baseUrl)' }
     }
     url = testEndpoint.url(baseUrl)
-  } else if (config?.baseUrl && providerDef.baseUrl && config.baseUrl !== providerDef.baseUrl) {
-    url = testEndpoint.url.replace(providerDef.baseUrl, config.baseUrl)
+  } else if (config?.baseUrl && providerDef.baseUrl && baseUrl !== providerDef.baseUrl) {
+    url = testEndpoint.url.replace(providerDef.baseUrl, baseUrl)
   } else {
     url = testEndpoint.url
   }
@@ -56,8 +61,24 @@ async function executeTest(
     url = `${url}${sep}key=${encodeURIComponent(apiKey)}`
   }
 
-  const headers = testEndpoint.headers(apiKey)
-  const body = testEndpoint.body ? JSON.stringify(testEndpoint.body(apiKey, baseUrl)) : undefined
+  let method = testEndpoint.method
+  let headers = testEndpoint.headers(apiKey)
+  let body = testEndpoint.body ? JSON.stringify(testEndpoint.body(apiKey, baseUrl)) : undefined
+
+  if (isVolcenginePlanChatEndpoint(providerDef.id, baseUrl)) {
+    const normalized = normalizeBaseUrl(baseUrl)
+    const modelId = normalizeModelId(
+      config?.defaultModelId || config?.models?.[0]?.id || getDefaultVolcenginePlanModel(baseUrl),
+    )
+    url = `${normalized}/chat/completions`
+    method = 'POST'
+    headers = bearerHeaders(apiKey)
+    body = JSON.stringify({
+      model: modelId,
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+  }
 
   if (body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
@@ -70,7 +91,7 @@ async function executeTest(
 
   try {
     const response = await fetch(url, {
-      method: testEndpoint.method,
+      method,
       headers,
       body,
       signal: controller.signal,
@@ -118,6 +139,44 @@ async function executeTest(
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '')
+}
+
+function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
+  if (providerId !== 'doubao') return baseUrl
+
+  const normalized = normalizeBaseUrl(baseUrl)
+  if (normalized === 'https://ark.cn-beijing.volces.com/api/coding') {
+    return VOLCENGINE_CODING_BASE_URL
+  }
+  if (normalized === 'https://ark.cn-beijing.volces.com/api/plan') {
+    return VOLCENGINE_AGENT_PLAN_BASE_URL
+  }
+
+  return baseUrl
+}
+
+function bearerHeaders(key: string): Record<string, string> {
+  return { Authorization: `Bearer ${key}` }
+}
+
+function normalizeModelId(modelId: string): string {
+  return modelId.includes('/') ? modelId.split('/').pop() || modelId : modelId
+}
+
+function isVolcenginePlanChatEndpoint(providerId: string, baseUrl: string): boolean {
+  if (providerId !== 'doubao') return false
+  const normalized = normalizeBaseUrl(baseUrl)
+  return normalized === VOLCENGINE_CODING_BASE_URL || normalized.includes('/api/plan')
+}
+
+function getDefaultVolcenginePlanModel(baseUrl: string): string {
+  return normalizeBaseUrl(baseUrl) === VOLCENGINE_CODING_BASE_URL
+    ? 'ark-code-latest'
+    : 'doubao-seed-2.0-code'
 }
 
 /**

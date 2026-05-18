@@ -13,7 +13,10 @@ import {
   cleanupInstanceFiles,
 } from '@/lib/docker/config-generator'
 import type { ModelProviderConfig } from '@/lib/docker/config-generator'
-import { buildProviderEntries } from '@/lib/config-editor/provider-sync'
+import {
+  buildProviderEntries,
+  resolveOpenClawProviderId,
+} from '@/lib/config-editor/provider-sync'
 import { auditLog } from '@/lib/audit'
 import type { InstanceStatus, Prisma } from '@/generated/prisma'
 
@@ -279,7 +282,11 @@ async function createDockerInstance(
           })
           if (primarySeed) {
             const cfg = primarySeed.config as { defaultModelId?: string }
-            defaultModelRef = `${primarySeed.provider}/${cfg.defaultModelId}`
+            const providerRef = resolveOpenClawProviderId(
+              primarySeed.provider,
+              primarySeed.config as Record<string, unknown> | null,
+            )
+            defaultModelRef = `${providerRef}/${cfg.defaultModelId}`
           }
         }
       }
