@@ -10,7 +10,6 @@ import {
   ResourceEmptyState,
 } from '@/components/resources/resource-card-grid'
 import { ResourceCreateDialog } from '@/components/resources/resource-create-dialog'
-import { RagConfigPanel } from '@/components/settings/rag-config-panel'
 import { useResources } from '@/hooks/use-resources'
 import { useAuthStore } from '@/stores/auth-store'
 import type { ResourceOverview } from '@/types/resource'
@@ -44,30 +43,23 @@ export default function ResourcesPage() {
       className="flex flex-1 flex-col gap-6 p-6"
     >
       <ResourcePageHeader
-        canCreate={canCreate && typeFilter !== 'RAG'}
+        canCreate={canCreate}
         onCreateClick={() => setCreateOpen(true)}
         typeFilter={typeFilter}
         onTypeFilterChange={setTypeFilter}
         search={search}
         onSearchChange={setSearch}
         total={data?.total}
-        hideSearch={typeFilter === 'RAG'}
       />
 
-      {typeFilter === 'RAG' ? (
-        <RagConfigPanel />
+      {isLoading ? (
+        <ResourceCardSkeleton />
+      ) : resources.length === 0 ? (
+        <ResourceEmptyState />
       ) : (
-        <>
-          {isLoading ? (
-            <ResourceCardSkeleton />
-          ) : resources.length === 0 ? (
-            <ResourceEmptyState />
-          ) : (
-            <ResourceCardGrid resources={resources} onSelect={handleSelectResource} />
-          )}
-          <ResourceCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
-        </>
+        <ResourceCardGrid resources={resources} onSelect={handleSelectResource} />
       )}
+      <ResourceCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
     </motion.div>
   )
 }

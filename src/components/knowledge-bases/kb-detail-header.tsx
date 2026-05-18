@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Pencil, Trash2, Shield, FileText, Link } from "lucide-react"
+import { ArrowLeft, Shield, FileText, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { KbScopeBadge } from "./kb-scope-badge"
@@ -16,18 +16,17 @@ const CATEGORY_CONFIG: Record<KbCategory, { labelKey: string; icon: typeof FileT
 
 interface KbDetailHeaderProps {
   kb: KnowledgeBaseDetail
-  canManage: boolean
-  onDelete: () => void
+  children?: React.ReactNode
 }
 
-export function KbDetailHeader({ kb, canManage, onDelete }: KbDetailHeaderProps) {
+export function KbDetailHeader({ kb, children }: KbDetailHeaderProps) {
   const router = useRouter()
   const t = useT()
   const catCfg = CATEGORY_CONFIG[kb.category]
 
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="ghost"
           size="sm"
@@ -45,20 +44,13 @@ export function KbDetailHeader({ kb, canManage, onDelete }: KbDetailHeaderProps)
           </Badge>
           <KbScopeBadge scope={kb.scope} />
         </div>
+        {children && (
+          <div className="ml-2 flex items-center gap-2">
+            <div className="h-5 w-px bg-border" />
+            {children}
+          </div>
+        )}
       </div>
-      {canManage && (
-        <div className="flex items-center gap-2">
-          <Button
-            variant="destructive"
-            size="sm"
-            className="gap-1.5"
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3.5" />
-            {t('delete')}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }

@@ -8,13 +8,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamclaw_dev_2024}
       POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - data-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teamclaw}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-teamclaw}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,13 +24,13 @@ services:
     container_name: teamclaw-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     networks:
       - data-net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,31 +42,151 @@ services:
     container_name: teamclaw-rag
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - '8000:8000'
     environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}"
-      RAG_SERVICE_SECRET: "${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}"
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      LLM_API_KEY: '${LLM_API_KEY:-}'
+      DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
+      LLM_BASE_URL: '${LLM_BASE_URL:-}'
+      LLM_MODEL: '${LLM_MODEL:-}'
+      SILICONFLOW_API_KEY: '${SILICONFLOW_API_KEY:-}'
+      SILICONFLOW_EMBEDDING_URL: '${SILICONFLOW_EMBEDDING_URL:-}'
+      SILICONFLOW_EMBEDDING_MODEL: '${SILICONFLOW_EMBEDDING_MODEL:-}'
+      SILICONFLOW_EMBEDDING_BATCH_SIZE: '${SILICONFLOW_EMBEDDING_BATCH_SIZE:-10}'
+      PADDLEOCR_TOKEN: '${PADDLEOCR_TOKEN:-}'
+      PADDLEOCR_MODEL: '${PADDLEOCR_MODEL:-}'
+      PADDLEOCR_JOB_URL: '${PADDLEOCR_JOB_URL:-}'
+      PADDLEOCR_RETRY_ATTEMPTS: '${PADDLEOCR_RETRY_ATTEMPTS:-3}'
+      PADDLEOCR_RETRY_BACKOFF: '${PADDLEOCR_RETRY_BACKOFF:-5}'
+      PADDLEOCR_STALL_TIMEOUT: '${PADDLEOCR_STALL_TIMEOUT:-180}'
+      PADDLEOCR_SYNC_TIMEOUT: '${PADDLEOCR_SYNC_TIMEOUT:-}'
+      PADDLEOCR_JOB_TIMEOUT: '${PADDLEOCR_JOB_TIMEOUT:-1800}'
+      PADDLEOCR_CHUNK_PAGE_THRESHOLD: '${PADDLEOCR_CHUNK_PAGE_THRESHOLD:-48}'
+      PADDLEOCR_SYNC_PDF_MAX_PAGES: '${PADDLEOCR_SYNC_PDF_MAX_PAGES:-}'
+      PADDLEOCR_CHUNK_SIZE: '${PADDLEOCR_CHUNK_SIZE:-40}'
+      DOCUMENT_CHAPTER_SUMMARY_CHUNK_SIZE: '${DOCUMENT_CHAPTER_SUMMARY_CHUNK_SIZE:-40}'
+      DOCUMENT_PROFILE_MAX_TOKENS: '${DOCUMENT_PROFILE_MAX_TOKENS:-384}'
+      DOCUMENT_CHAPTER_SUMMARY_MAX_TOKENS: '${DOCUMENT_CHAPTER_SUMMARY_MAX_TOKENS:-4096}'
+      PGVECTOR_EMBED_DIM: '${PGVECTOR_EMBED_DIM:-1024}'
+      INGEST_DEFAULT_WORKERS: '${INGEST_DEFAULT_WORKERS:-4}'
+      INGEST_MAX_WORKERS: '${INGEST_MAX_WORKERS:-12}'
+      PADDLEOCR_POLL_INTERVAL: '${PADDLEOCR_POLL_INTERVAL:-5}'
+      UPLOAD_RENDER_DPI: '${UPLOAD_RENDER_DPI:-110}'
+      UPLOAD_RENDER_MAX_PIXELS: '${UPLOAD_RENDER_MAX_PIXELS:-900000}'
+      UPLOAD_RENDER_JPEG_QUALITY: '${UPLOAD_RENDER_JPEG_QUALITY:-72}'
+      LLM_RENDER_MAX_PIXELS: '${LLM_RENDER_MAX_PIXELS:-640000}'
+      LLM_RENDER_JPEG_QUALITY: '${LLM_RENDER_JPEG_QUALITY:-60}'
+      MULTI_DOC_TOTAL_PAGE_BUDGET: '${MULTI_DOC_TOTAL_PAGE_BUDGET:-15}'
+      MULTI_DOC_PER_DOC_PAGE_LIMIT: '${MULTI_DOC_PER_DOC_PAGE_LIMIT:-6}'
+      MULTI_DOC_SINGLE_DOC_PAGE_LIMIT: '${MULTI_DOC_SINGLE_DOC_PAGE_LIMIT:-30}'
     volumes:
       - ./data/knowledge-bases:/app/data/knowledge-bases
       - ./data/rag-output:/app/ingestion_output
       - ./rag-service/app:/app/app
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+      - ./rag-service/migrations:/app/migrations
+    command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload']
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - data-net
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Next.js dev server. Hot-reloads source via bind mount. node_modules
+  # and .next are kept inside named volumes so the container's installed
+  # deps aren't shadowed by the host's (which may be linux/macOS variant).
+  # Optional service — start with `docker compose --profile app up`.
+  # Keeping default-off lets you still `npm run dev` on the host if you
+  # prefer faster reloads.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: teamclaw-app
+    restart: unless-stopped
+    profiles: ['app']
+    ports:
+      - '${APP_PORT:-3100}:3100'
+    environment:
+      # Override URLs to use docker-internal DNS instead of host:port from .env
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
+      REDIS_URL: 'redis://redis:6379'
+      RAG_SERVICE_URL: 'http://rag:8000'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      LLM_API_KEY: '${LLM_API_KEY:-}'
+      DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
+      LLM_BASE_URL: '${LLM_BASE_URL:-}'
+      LLM_MODEL: '${LLM_MODEL:-}'
+      SILICONFLOW_API_KEY: '${SILICONFLOW_API_KEY:-}'
+      SILICONFLOW_EMBEDDING_URL: '${SILICONFLOW_EMBEDDING_URL:-}'
+      SILICONFLOW_EMBEDDING_MODEL: '${SILICONFLOW_EMBEDDING_MODEL:-}'
+      PADDLEOCR_TOKEN: '${PADDLEOCR_TOKEN:-}'
+      PADDLEOCR_MODEL: '${PADDLEOCR_MODEL:-}'
+      NEXT_PUBLIC_APP_URL: '${NEXT_PUBLIC_APP_URL:-http://localhost:3100}'
+      # Inherit auth / encryption secrets from host .env (must be set)
+      JWT_PRIVATE_KEY: '${JWT_PRIVATE_KEY}'
+      JWT_PUBLIC_KEY: '${JWT_PUBLIC_KEY}'
+      JWT_ACCESS_EXPIRY: '${JWT_ACCESS_EXPIRY:-180m}'
+      JWT_REFRESH_EXPIRY: '${JWT_REFRESH_EXPIRY:-7d}'
+      JWT_ISSUER: '${JWT_ISSUER:-teamclaw}'
+      ENCRYPTION_KEY: '${ENCRYPTION_KEY}'
+      DEFAULT_MODEL_PROVIDER: '${DEFAULT_MODEL_PROVIDER:-}'
+      DEFAULT_MODEL_API_KEY: '${DEFAULT_MODEL_API_KEY:-}'
+      DEFAULT_MODEL_BASE_URL: '${DEFAULT_MODEL_BASE_URL:-}'
+      DEFAULT_MODEL_API_TYPE: '${DEFAULT_MODEL_API_TYPE:-}'
+      NODE_ENV: development
+      WATCHPACK_POLLING: 'true' # macOS docker file-event reliability
+      # Tells registry.resolveGatewayUrl() to rewrite 127.0.0.1/localhost in
+      # stored instance URLs to host.docker.internal, so the app container can
+      # reach OpenClaw processes running on the host loopback.
+      DOCKER_NETWORK: 'data-net'
+    extra_hosts:
+      # Linux needs this explicitly; Docker Desktop (Mac/Win) sets it by default.
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      # Bind-mount source for hot reload. node_modules / .next / generated
+      # Prisma stay container-side so platform-specific binaries don't clash.
+      - ./:/app
+      - app-node-modules:/app/node_modules
+      - app-next-cache:/app/.next
+      - app-prisma-gen:/app/src/generated
+      # KB uploads live on host so the rag container can read them via its bind mount
+      - ./data/knowledge-bases:/app/data/knowledge-bases
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rag:
+        condition: service_started
+    networks:
+      - data-net
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3100/api/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
   postgres-data:
   redis-data:
   kb-data:
   rag-output:
+  app-node-modules:
+  app-next-cache:
+  app-prisma-gen:
 
 networks:
   data-net:

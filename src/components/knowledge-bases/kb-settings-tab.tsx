@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Loader2 } from "lucide-react"
+import { Loader2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { KbScopeBadge } from "./kb-scope-badge"
 import { useUpdateKb } from "@/hooks/use-knowledge-bases"
@@ -15,9 +15,10 @@ import type { KnowledgeBaseDetail } from "@/types/knowledge-base"
 interface KbSettingsTabProps {
   kb: KnowledgeBaseDetail
   canManage: boolean
+  onDelete: () => void
 }
 
-export function KbSettingsTab({ kb, canManage }: KbSettingsTabProps) {
+export function KbSettingsTab({ kb, canManage, onDelete }: KbSettingsTabProps) {
   const t = useT()
   const [name, setName] = useState(kb.name)
   const [description, setDescription] = useState(kb.description ?? "")
@@ -87,6 +88,24 @@ export function KbSettingsTab({ kb, canManage }: KbSettingsTabProps) {
           {updateKb.isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
           {t('save')}
         </Button>
+      )}
+
+      {canManage && (
+        <div className="mt-8 border-t pt-6">
+          <h3 className="mb-2 text-sm font-semibold text-destructive">{t('kb.dangerZone')}</h3>
+          <p className="mb-3 text-[12px] text-muted-foreground">
+            {t('kb.deleteWarning')}
+          </p>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            onClick={onDelete}
+          >
+            <Trash2 className="size-3.5" />
+            {t('kb.deleteKb')}
+          </Button>
+        </div>
       )}
     </div>
   )

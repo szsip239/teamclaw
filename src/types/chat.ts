@@ -8,6 +8,13 @@ export interface KbSourceRef {
   category: KbCategory
   text: string
   score: number
+  /** Backing document (RAG service kb_id+doc_id pair, mapped to KnowledgeDocument.id here) */
+  docRowId?: string
+  docName?: string
+  /** 1-based page number for PDF sources; absent for Excel/other */
+  pageIndex?: number
+  /** "text" (PDF) | "table" (Excel) — controls preview affordance */
+  sourceType?: 'text' | 'table'
 }
 
 export interface ChatAgentInfo {

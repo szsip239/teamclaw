@@ -14,7 +14,6 @@ export const pageTitleKeys: Record<string, TranslationKey> = {
   '/models': 'page.models',
   '/approvals': 'page.approvals',
   '/logs': 'page.logs',
-  '/settings': 'page.settings',
 }
 
 export function resolveDashboardTitleKey(pathname: string): TranslationKey | null {

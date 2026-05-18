@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import DATABASE_URL, INGESTION_OUTPUT_ROOT, RAG_SERVICE_SECRET
+from app.db import close_pool, init_pool, run_migrations
 from app.routes import router
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,15 @@ async def on_startup():
         secret_configured,
         INGESTION_OUTPUT_ROOT,
     )
+    if db_configured:
+        await init_pool()
+        await run_migrations()
+        logger.info("rag schema migrations applied")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await close_pool()
 
 
 @app.get("/api/health")

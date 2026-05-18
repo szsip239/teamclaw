@@ -6,7 +6,7 @@ services:
       target: init
     container_name: teamclaw-init
     environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
     depends_on:
       postgres:
         condition: service_healthy
@@ -16,7 +16,7 @@ services:
       # Read-only mount so seed.ts can scan SKILL.md frontmatter and
       # populate the Skill table. Matches the app service mount.
       - ./data/skills:/app/data/skills:ro
-    restart: "no"
+    restart: 'no'
 
   app:
     build:
@@ -25,29 +25,38 @@ services:
     container_name: teamclaw-app
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-3100}:3100"
+      - '${APP_PORT:-3100}:3100'
     environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public"
-      REDIS_URL: "redis://redis:6379"
-      JWT_PRIVATE_KEY: "${JWT_PRIVATE_KEY}"
-      JWT_PUBLIC_KEY: "${JWT_PUBLIC_KEY}"
-      JWT_ACCESS_EXPIRY: "${JWT_ACCESS_EXPIRY:-15m}"
-      JWT_REFRESH_EXPIRY: "${JWT_REFRESH_EXPIRY:-7d}"
-      JWT_ISSUER: "${JWT_ISSUER:-teamclaw}"
-      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
-      NEXT_PUBLIC_APP_URL: ""
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
+      REDIS_URL: 'redis://redis:6379'
+      JWT_PRIVATE_KEY: '${JWT_PRIVATE_KEY}'
+      JWT_PUBLIC_KEY: '${JWT_PUBLIC_KEY}'
+      JWT_ACCESS_EXPIRY: '${JWT_ACCESS_EXPIRY:-15m}'
+      JWT_REFRESH_EXPIRY: '${JWT_REFRESH_EXPIRY:-7d}'
+      JWT_ISSUER: '${JWT_ISSUER:-teamclaw}'
+      ENCRYPTION_KEY: '${ENCRYPTION_KEY}'
+      NEXT_PUBLIC_APP_URL: ''
       NODE_ENV: production
-      DEFAULT_MODEL_PROVIDER: "${DEFAULT_MODEL_PROVIDER:-anthropic}"
-      DEFAULT_MODEL_API_KEY: "${DEFAULT_MODEL_API_KEY:-}"
-      DEFAULT_MODEL_BASE_URL: "${DEFAULT_MODEL_BASE_URL:-https://api.anthropic.com}"
-      DEFAULT_MODEL_API_TYPE: "${DEFAULT_MODEL_API_TYPE:-anthropic-messages}"
-      TEAMCLAW_DATA_DIR: "${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}"
-      DEFAULT_OPENCLAW_IMAGE: "${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}"
-      DOCKER_NETWORK: "teamclaw-net"
-      RAG_SERVICE_URL: "http://rag:8000"
-      RAG_SERVICE_SECRET: "${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}"
+      DEFAULT_MODEL_PROVIDER: '${DEFAULT_MODEL_PROVIDER:-anthropic}'
+      DEFAULT_MODEL_API_KEY: '${DEFAULT_MODEL_API_KEY:-}'
+      DEFAULT_MODEL_BASE_URL: '${DEFAULT_MODEL_BASE_URL:-https://api.anthropic.com}'
+      DEFAULT_MODEL_API_TYPE: '${DEFAULT_MODEL_API_TYPE:-anthropic-messages}'
+      TEAMCLAW_DATA_DIR: '${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}'
+      DEFAULT_OPENCLAW_IMAGE: '${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:latest}'
+      DOCKER_NETWORK: 'teamclaw-net'
+      RAG_SERVICE_URL: 'http://rag:8000'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      LLM_API_KEY: '${LLM_API_KEY:-}'
+      DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
+      LLM_BASE_URL: '${LLM_BASE_URL:-}'
+      LLM_MODEL: '${LLM_MODEL:-}'
+      SILICONFLOW_API_KEY: '${SILICONFLOW_API_KEY:-}'
+      SILICONFLOW_EMBEDDING_URL: '${SILICONFLOW_EMBEDDING_URL:-}'
+      SILICONFLOW_EMBEDDING_MODEL: '${SILICONFLOW_EMBEDDING_MODEL:-}'
+      PADDLEOCR_TOKEN: '${PADDLEOCR_TOKEN:-}'
+      PADDLEOCR_MODEL: '${PADDLEOCR_MODEL:-}'
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     depends_on:
       init:
         condition: service_completed_successfully
@@ -58,7 +67,7 @@ services:
     networks:
       - data-net
     group_add:
-      - "${DOCKER_GID:-0}"   # GID of docker.sock owner inside container (0=root on macOS)
+      - '${DOCKER_GID:-0}' # GID of docker.sock owner inside container (0=root on macOS)
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
@@ -78,8 +87,40 @@ services:
     container_name: teamclaw-rag
     restart: unless-stopped
     environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}"
-      RAG_SERVICE_SECRET: "${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}"
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      LLM_API_KEY: '${LLM_API_KEY:-}'
+      DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
+      LLM_BASE_URL: '${LLM_BASE_URL:-}'
+      LLM_MODEL: '${LLM_MODEL:-}'
+      SILICONFLOW_API_KEY: '${SILICONFLOW_API_KEY:-}'
+      SILICONFLOW_EMBEDDING_URL: '${SILICONFLOW_EMBEDDING_URL:-}'
+      SILICONFLOW_EMBEDDING_MODEL: '${SILICONFLOW_EMBEDDING_MODEL:-}'
+      SILICONFLOW_EMBEDDING_BATCH_SIZE: '${SILICONFLOW_EMBEDDING_BATCH_SIZE:-10}'
+      PADDLEOCR_TOKEN: '${PADDLEOCR_TOKEN:-}'
+      PADDLEOCR_MODEL: '${PADDLEOCR_MODEL:-}'
+      PADDLEOCR_JOB_URL: '${PADDLEOCR_JOB_URL:-}'
+      PADDLEOCR_RETRY_ATTEMPTS: '${PADDLEOCR_RETRY_ATTEMPTS:-3}'
+      PADDLEOCR_RETRY_BACKOFF: '${PADDLEOCR_RETRY_BACKOFF:-5}'
+      PADDLEOCR_POLL_INTERVAL: '${PADDLEOCR_POLL_INTERVAL:-5}'
+      PADDLEOCR_STALL_TIMEOUT: '${PADDLEOCR_STALL_TIMEOUT:-180}'
+      PADDLEOCR_JOB_TIMEOUT: '${PADDLEOCR_JOB_TIMEOUT:-1800}'
+      PADDLEOCR_CHUNK_PAGE_THRESHOLD: '${PADDLEOCR_CHUNK_PAGE_THRESHOLD:-48}'
+      PADDLEOCR_CHUNK_SIZE: '${PADDLEOCR_CHUNK_SIZE:-40}'
+      DOCUMENT_CHAPTER_SUMMARY_CHUNK_SIZE: '${DOCUMENT_CHAPTER_SUMMARY_CHUNK_SIZE:-40}'
+      DOCUMENT_PROFILE_MAX_TOKENS: '${DOCUMENT_PROFILE_MAX_TOKENS:-384}'
+      DOCUMENT_CHAPTER_SUMMARY_MAX_TOKENS: '${DOCUMENT_CHAPTER_SUMMARY_MAX_TOKENS:-4096}'
+      PGVECTOR_EMBED_DIM: '${PGVECTOR_EMBED_DIM:-1024}'
+      INGEST_DEFAULT_WORKERS: '${INGEST_DEFAULT_WORKERS:-4}'
+      INGEST_MAX_WORKERS: '${INGEST_MAX_WORKERS:-12}'
+      UPLOAD_RENDER_DPI: '${UPLOAD_RENDER_DPI:-110}'
+      UPLOAD_RENDER_MAX_PIXELS: '${UPLOAD_RENDER_MAX_PIXELS:-900000}'
+      UPLOAD_RENDER_JPEG_QUALITY: '${UPLOAD_RENDER_JPEG_QUALITY:-72}'
+      LLM_RENDER_MAX_PIXELS: '${LLM_RENDER_MAX_PIXELS:-640000}'
+      LLM_RENDER_JPEG_QUALITY: '${LLM_RENDER_JPEG_QUALITY:-60}'
+      MULTI_DOC_TOTAL_PAGE_BUDGET: '${MULTI_DOC_TOTAL_PAGE_BUDGET:-15}'
+      MULTI_DOC_PER_DOC_PAGE_LIMIT: '${MULTI_DOC_PER_DOC_PAGE_LIMIT:-6}'
+      MULTI_DOC_SINGLE_DOC_PAGE_LIMIT: '${MULTI_DOC_SINGLE_DOC_PAGE_LIMIT:-30}'
     volumes:
       - kb-data:/app/data/knowledge-bases
       - rag-output:/app/ingestion_output
@@ -89,7 +130,13 @@ services:
     networks:
       - data-net
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -103,14 +150,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamclaw_dev_2024}
       POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
       - data-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teamclaw}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-teamclaw}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -120,13 +167,13 @@ services:
     container_name: teamclaw-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     networks:
       - data-net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -137,8 +184,8 @@ services:
     restart: unless-stopped
     profiles: [nginx]
     ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
+      - '${NGINX_HTTP_PORT:-80}:80'
+      - '${NGINX_HTTPS_PORT:-443}:443'
     environment:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
       NGINX_SSL_CERT: ${NGINX_SSL_CERT:-server.crt}
@@ -160,4 +207,4 @@ volumes:
 networks:
   data-net:
     driver: bridge
-    name: teamclaw-net   # Fixed name — immune to project-prefix differences across platforms
+    name: teamclaw-net # Fixed name — immune to project-prefix differences across platforms

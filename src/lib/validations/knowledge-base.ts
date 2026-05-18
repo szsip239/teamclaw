@@ -20,6 +20,7 @@ export type UpdateKbInput = z.infer<typeof updateKbSchema>
 export const querySchema = z.object({
   question: z.string().min(1, 'Question is required').max(10000),
   generateAnswer: z.boolean().optional().default(true),
+  enableThinking: z.boolean().optional().default(true),
   topK: z.number().int().min(1).max(20).optional().default(5),
 })
 

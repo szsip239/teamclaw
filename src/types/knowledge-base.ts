@@ -31,8 +31,24 @@ export interface KnowledgeDocumentInfo {
   jobId: string | null
   errorMessage: string | null
   hasOcrContent?: boolean
+  indexInfo?: KnowledgeDocumentIndexInfo | null
   createdAt: string
   updatedAt: string
+}
+
+export interface KnowledgeDocumentIndexInfo {
+  profileStatus: string
+  profileDetail: string
+  summary: string
+  docType: string
+  keywords: string[]
+  titleAliases: string[]
+  chapterSummary: string
+  pageCount: number | null
+  indexedPageCount: number
+  indexRowCount: number
+  embeddedRowCount: number
+  updatedAt: string | null
 }
 
 export interface KnowledgeBaseListResponse {
@@ -50,7 +66,7 @@ export interface IngestionJobStatus {
 }
 
 export interface QueryStreamEvent {
-  type: 'retrieval' | 'reasoning' | 'chunk' | 'error' | 'done'
+  type: 'progress' | 'retrieval' | 'reasoning' | 'chunk' | 'error' | 'done'
   data: Record<string, unknown>
 }
 

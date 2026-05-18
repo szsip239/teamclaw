@@ -4,6 +4,11 @@ import { withAuth, param, type AuthContext } from '@/lib/middleware/auth'
 import { canManageKb } from '@/lib/knowledge-base/permissions'
 import { saveUploadedFile, toContainerPath } from '@/lib/knowledge-base/file-storage'
 import { submitIngestionJob } from '@/lib/knowledge-base/rag-client'
+import {
+  parseMultipartFile,
+  validatePdfUpload,
+  type ParsedUploadFile,
+} from '@/lib/knowledge-base/upload-parser'
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
 
@@ -20,29 +25,52 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     return NextResponse.json({ error: 'No permission to upload to this KB' }, { status: 403 })
   }
 
-  const formData = await req.formData()
-  const file = formData.get('file') as File | null
+  let file: ParsedUploadFile
+  try {
+    const contentType = req.headers.get('content-type') || ''
+    const boundary = contentType.includes('boundary=')
+      ? contentType.split('boundary=')[1]?.split(';')[0]?.trim()
+      : ''
+    if (!boundary) {
+      return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 })
+    }
+
+    if (!req.body) {
+      return NextResponse.json({ error: 'No request body provided' }, { status: 400 })
+    }
+
+    const raw = await readFullStream(req.body!)
+    file = parseMultipartFile(Buffer.from(raw), boundary)
+  } catch (err) {
+    console.error('[upload] body parse failed', err)
+    const error = err instanceof Error ? err.message : 'Failed to read uploaded file'
+    return NextResponse.json({ error }, { status: 400 })
+  }
 
   if (!file) {
     return NextResponse.json({ error: 'No file provided' }, { status: 400 })
   }
 
-  if (file.size > MAX_FILE_SIZE) {
+  if (file.buffer.byteLength > MAX_FILE_SIZE) {
     return NextResponse.json({ error: 'File too large (max 100MB)' }, { status: 400 })
   }
 
-  // Validate filename
-  const fileName = file.name
+  const fileName = file.fileName
   if (fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
     return NextResponse.json({ error: 'Invalid filename' }, { status: 400 })
   }
 
-  // Only accept PDF
   if (!fileName.toLowerCase().endsWith('.pdf')) {
     return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 })
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer())
+  const buffer = file.buffer
+  const pdfValidation = validatePdfUpload(buffer)
+  if (!pdfValidation.ok) {
+    return NextResponse.json({ error: pdfValidation.error }, { status: 400 })
+  }
+
+  const fileSize = buffer.byteLength
   const filePath = await saveUploadedFile(kbId, fileName, buffer)
 
   // Create document record
@@ -50,7 +78,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     data: {
       knowledgeBaseId: kbId,
       fileName,
-      fileSize: file.size,
+      fileSize,
       status: 'PENDING',
     },
   })
@@ -61,15 +89,15 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       kbId,
       docId: doc.docId,
       filePath: toContainerPath(filePath),
+      fileName,
+      displayName: fileName,
     })
 
-    // Update document with job ID and status
     await prisma.knowledgeDocument.update({
       where: { id: doc.id },
       data: { jobId: job.job_id, status: 'PROCESSING' },
     })
 
-    // Increment document count
     await prisma.knowledgeBase.update({
       where: { id: kbId },
       data: { documentCount: { increment: 1 } },
@@ -81,7 +109,6 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       jobId: job.job_id,
     }, { status: 201 })
   } catch (err) {
-    // Mark as failed if RAG service is unreachable
     await prisma.knowledgeDocument.update({
       where: { id: doc.id },
       data: {
@@ -97,3 +124,24 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     }, { status: 502 })
   }
 })
+
+// ── helpers ──────────────────────────────────────────────────────────────
+
+async function readFullStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    total += value.byteLength
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}

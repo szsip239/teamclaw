@@ -29,7 +29,7 @@ export function RagConfigPanel() {
   const [ocrModel, setOcrModel] = useState("")
   const [ocrWorkers, setOcrWorkers] = useState(4)
   const [paddleocrToken, setPaddleocrToken] = useState("")
-  const [paddleocrModel, setPaddleocrModel] = useState("PaddleOCR-VL-1.5")
+  const [paddleocrModel, setPaddleocrModel] = useState("PP-OCRv5")
 
   // Visibility toggles for API keys
   const [showLlmKey, setShowLlmKey] = useState(false)
@@ -55,7 +55,7 @@ export function RagConfigPanel() {
       setOcrModel(String(config['rag.ocr.model'] ?? ''))
       setOcrWorkers(Number(config['rag.ocr.workers']) || 4)
       setPaddleocrToken(String(config['rag.paddleocr.token'] ?? ''))
-      setPaddleocrModel(String(config['rag.paddleocr.model'] || 'PaddleOCR-VL-1.5'))
+      setPaddleocrModel(String(config['rag.paddleocr.model'] || 'PP-OCRv5'))
     }
   }, [config])
 

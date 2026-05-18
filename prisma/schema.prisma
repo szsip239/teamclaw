@@ -89,6 +89,7 @@ model User {
   installedSkills  SkillInstallation[] @relation("SkillInstaller")
   createdResources Resource[]          @relation("ResourceCreator")
   knowledgeBases   KnowledgeBase[]     @relation("KbCreator")
+  kbConversations  KbConversation[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 }
@@ -365,6 +366,7 @@ model KnowledgeBase {
   createdBy       User                @relation("KbCreator", fields: [createdById], references: [id])
   documentCount   Int                 @default(0)
   documents       KnowledgeDocument[]
+  conversations   KbConversation[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
@@ -372,6 +374,44 @@ model KnowledgeBase {
   @@index([departmentId])
   @@index([createdById])
   @@index([category])
+}
+
+// Per-user, per-KB chat session — ChatGPT-style multi-conversation history.
+// Title is auto-derived from the first user message; user can rename.
+model KbConversation {
+  id              String          @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase   @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String          @default("新对话")
+  messages        KbMessage[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([knowledgeBaseId, userId, updatedAt])
+}
+
+// Immutable record of one chat turn (user question OR assistant answer).
+// Streaming-derived data (reasoning, source citations, retrieval groups,
+// answer-asset thumbnails) is persisted as JSON so we can rehydrate the
+// full UI state when the user reopens a conversation later.
+model KbMessage {
+  id                  String         @id @default(cuid())
+  conversationId      String
+  conversation        KbConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role                String         // "user" | "assistant"
+  content             String         @db.Text
+  reasoning           String?        @db.Text
+  answerSourcesJson   Json?
+  answerAssetsJson    Json?
+  retrievalGroupsJson Json?
+  stage               String?
+  error               Boolean        @default(false)
+  stopped             Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 model KnowledgeDocument {

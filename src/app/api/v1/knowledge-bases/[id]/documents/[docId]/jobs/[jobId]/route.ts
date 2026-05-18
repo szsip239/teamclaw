@@ -4,7 +4,7 @@ import { withAuth, withPermission, param, type AuthContext } from '@/lib/middlew
 import { isKbVisible } from '@/lib/knowledge-base/permissions'
 import { getJobStatus } from '@/lib/knowledge-base/rag-client'
 
-const PROCESSING_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
+const JOB_LOST_ERROR = 'Processing job was lost, likely because the RAG service restarted. Please retry.'
 
 // GET /api/v1/knowledge-bases/[id]/documents/[docId]/jobs/[jobId]
 export const GET = withAuth(
@@ -29,27 +29,21 @@ export const GET = withAuth(
     const jobStatus = await getJobStatus(jobId)
 
     if (!jobStatus) {
-      // Job not found in Python service — check for timeout
-      if (
-        doc.status === 'PROCESSING' &&
-        Date.now() - doc.updatedAt.getTime() > PROCESSING_TIMEOUT_MS
-      ) {
-        // Auto-mark as FAILED due to timeout
+      if (doc.status === 'PROCESSING' || doc.status === 'PENDING') {
         await prisma.knowledgeDocument.update({
           where: { id: docId },
-          data: { status: 'FAILED', errorMessage: 'Processing timeout — job lost. Please retry.' },
-        })
-        return NextResponse.json({
-          job_id: jobId,
-          status: 'failed',
-          progress: 0,
-          logs: [],
-          error: 'Processing timeout — job lost. Please retry.',
-          page_count: null,
+          data: { status: 'FAILED', errorMessage: JOB_LOST_ERROR },
         })
       }
 
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+      return NextResponse.json({
+        job_id: jobId,
+        status: doc.status === 'SUCCEEDED' ? 'completed' : 'failed',
+        progress: doc.status === 'SUCCEEDED' ? 100 : 0,
+        logs: [],
+        error: doc.status === 'SUCCEEDED' ? null : (doc.errorMessage || JOB_LOST_ERROR),
+        page_count: doc.pageCount,
+      })
     }
 
     // Sync status back to DB

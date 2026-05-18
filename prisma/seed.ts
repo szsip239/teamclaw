@@ -133,10 +133,10 @@ async function main() {
       description: 'LLM API base URL for RAG answer generation',
     },
     { key: 'rag.llm.apiKey', value: '', description: 'LLM API key (encrypted at rest)' },
-    { key: 'rag.llm.model', value: 'qwen-plus', description: 'LLM model name for RAG answers' },
+    { key: 'rag.llm.model', value: 'qwen3.5-35b-a3b', description: 'LLM model name for RAG answers' },
     {
       key: 'rag.embedding.baseUrl',
-      value: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      value: 'https://api.siliconflow.cn/v1',
       description: 'Embedding API base URL',
     },
     {
@@ -144,7 +144,7 @@ async function main() {
       value: '',
       description: 'Embedding API key (encrypted at rest)',
     },
-    { key: 'rag.embedding.model', value: 'text-embedding-v3', description: 'Embedding model name' },
+    { key: 'rag.embedding.model', value: 'BAAI/bge-m3', description: 'Embedding model name' },
     { key: 'rag.rerank.enabled', value: false, description: 'Enable reranking for RAG queries' },
     {
       key: 'rag.rerank.baseUrl',
@@ -159,10 +159,12 @@ async function main() {
     },
     {
       key: 'rag.ocr.model',
-      value: 'qwen-vl-max',
+      value: 'PP-OCRv5',
       description: 'Default OCR model for document processing',
     },
     { key: 'rag.ocr.workers', value: 4, description: 'Number of parallel OCR workers' },
+    { key: 'rag.paddleocr.token', value: '', description: 'PaddleOCR API token' },
+    { key: 'rag.paddleocr.model', value: 'PP-OCRv5', description: 'PaddleOCR model name' },
     { key: 'rag.serviceUrl', value: 'http://rag:8000', description: 'Internal RAG service URL' },
   ]
 
