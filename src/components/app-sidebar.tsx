@@ -4,17 +4,6 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { LOGO_SRC } from '@/lib/logo'
 import {
-  LayoutDashboard,
-  MessageSquare,
-  Server,
-  Bot,
-  Puzzle,
-  BookOpen,
-  Clock,
-  Users,
-  Building2,
-  KeyRound,
-  ScrollText,
   LogOut,
   UserCircle,
   ChevronsUpDown,
@@ -40,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { buildSidebarNavGroups } from '@/lib/navigation'
 import { useAuthStore } from '@/stores/auth-store'
 import { useT } from '@/stores/language-store'
 import { toast } from 'sonner'
@@ -53,72 +43,7 @@ export function AppSidebar() {
 
   const role = user?.role
 
-  const allNavGroups = [
-    {
-      label: t('nav.workspace'),
-      items: [
-        { title: t('nav.dashboard'), icon: LayoutDashboard, href: '/' },
-        { title: t('nav.chat'), icon: MessageSquare, href: '/chat' },
-      ],
-    },
-    {
-      label: t('nav.management'),
-      items: [
-        {
-          title: t('nav.instances'),
-          icon: Server,
-          href: '/instances',
-          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
-        },
-        { title: t('nav.agents'), icon: Bot, href: '/agents' },
-        { title: t('nav.skills'), icon: Puzzle, href: '/skills' },
-        { title: t('nav.knowledgeBases'), icon: BookOpen, href: '/knowledge-bases' },
-        { title: t('nav.cron'), icon: Clock, href: '/cron' },
-      ],
-    },
-    {
-      label: t('nav.organization'),
-      roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
-      items: [
-        {
-          title: t('nav.users'),
-          icon: Users,
-          href: '/users',
-          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
-        },
-        {
-          title: t('nav.departments'),
-          icon: Building2,
-          href: '/departments',
-          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
-        },
-      ],
-    },
-    {
-      label: t('nav.system'),
-      roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
-      items: [
-        { title: t('nav.resources'), icon: KeyRound, href: '/resources', roles: ['SYSTEM_ADMIN'] },
-        {
-          title: t('nav.logs'),
-          icon: ScrollText,
-          href: '/logs',
-          roles: ['SYSTEM_ADMIN', 'DEPT_ADMIN'],
-        },
-      ],
-    },
-  ]
-
-  // Filter groups and items by role
-  const navGroups = allNavGroups
-    .filter((group) => !group.roles || (role && group.roles.includes(role)))
-    .map((group) => ({
-      ...group,
-      items: group.items.filter(
-        (item) => !('roles' in item) || (role && item.roles?.includes(role)),
-      ),
-    }))
-    .filter((group) => group.items.length > 0)
+  const navGroups = buildSidebarNavGroups(t, role)
 
   const initials = user?.name
     ? user.name

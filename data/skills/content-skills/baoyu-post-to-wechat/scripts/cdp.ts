@@ -230,7 +230,7 @@ export async function launchChrome(url: string, profileDir?: string): Promise<{ 
 
 export async function getPageSession(cdp: CdpConnection, urlPattern: string): Promise<ChromeSession> {
   const targets = await cdp.send<{ targetInfos: Array<{ targetId: string; url: string; type: string }> }>('Target.getTargets');
-  let pageTarget = targets.targetInfos.find((t) => t.type === 'page' && t.url.includes(urlPattern));
+  const pageTarget = targets.targetInfos.find((t) => t.type === 'page' && t.url.includes(urlPattern));
 
   if (!pageTarget) throw new Error(`Page not found: ${urlPattern}`);
 

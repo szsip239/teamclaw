@@ -6,38 +6,15 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { LanguageToggle } from "@/components/language-toggle"
+import { resolveDashboardTitleKey } from "@/lib/dashboard-title"
 import { useT } from "@/stores/language-store"
-import type { TranslationKey } from "@/locales/zh-CN"
 
 const GITHUB_URL = "https://github.com/szsip239/teamclaw"
-
-const pageTitleKeys: Record<string, TranslationKey> = {
-  "/": "page.dashboard",
-  "/chat": "page.chat",
-  "/instances": "page.instances",
-  "/agents": "page.agents",
-  "/skills": "page.skills",
-  "/cron": "page.cron",
-  "/users": "page.users",
-  "/departments": "page.departments",
-  "/resources": "page.resources",
-  "/models": "page.models",
-  "/approvals": "page.approvals",
-  "/logs": "page.logs",
-  "/settings": "page.settings",
-}
-
-function resolveTitleKey(pathname: string): TranslationKey | null {
-  if (pageTitleKeys[pathname]) return pageTitleKeys[pathname]
-  if (/^\/instances\/[^/]+\/config$/.test(pathname)) return "page.advancedConfig"
-  if (/^\/skills\/[^/]+$/.test(pathname)) return "page.skillDetail"
-  return null
-}
 
 export function DashboardHeader() {
   const pathname = usePathname()
   const t = useT()
-  const titleKey = resolveTitleKey(pathname)
+  const titleKey = resolveDashboardTitleKey(pathname)
   const title = titleKey ? t(titleKey) : "TeamClaw"
 
   return (

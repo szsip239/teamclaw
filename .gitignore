@@ -24,6 +24,9 @@
 # misc
 .DS_Store
 *.pem
+.idea/
+__pycache__/
+*.py[cod]
 AGENTS.md
 .skill-invocations.log
 
@@ -76,6 +79,9 @@ next-env.d.ts
 # reference & study docs
 openclaw*.md
 
+# shared memory for Claude/Codex sessions
+docs/agents/
+
 # internal development docs (not for OSS)
 PRD.md
 DEVELOPMENT.md
@@ -100,4 +106,5 @@ chrome_user_data/
 log/
 drafts/
 config.toml
+.baked-package.json
 scripts/poc-ws-direct.ts

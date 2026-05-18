@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, type AuthContext } from '@/lib/middleware/auth'
 import { createKbSchema } from '@/lib/validations/knowledge-base'
-import { kbListWhereClause } from '@/lib/knowledge-base/permissions'
+import { kbListWhereClause, canCreateKbCategory } from '@/lib/knowledge-base/permissions'
 import { hasPermission } from '@/lib/auth/permissions'
 
 // GET /api/v1/knowledge-bases — list knowledge bases
@@ -10,6 +10,7 @@ export const GET = withAuth(
   withPermission('knowledge:view', async (req: NextRequest, ctx: AuthContext) => {
     const url = new URL(req.url)
     const scope = url.searchParams.get('scope')
+    const category = url.searchParams.get('category')
     const search = url.searchParams.get('search')
 
     const where: Record<string, unknown> = {
@@ -18,6 +19,10 @@ export const GET = withAuth(
 
     if (scope && scope !== 'all') {
       where.scope = scope
+    }
+
+    if (category && category !== 'all') {
+      where.category = category
     }
 
     if (search) {
@@ -45,6 +50,7 @@ export const GET = withAuth(
         name: kb.name,
         description: kb.description,
         scope: kb.scope,
+        category: kb.category,
         departmentId: kb.departmentId,
         departmentName: kb.department?.name ?? null,
         createdById: kb.createdById,
@@ -75,8 +81,9 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     )
   }
 
-  const { name, description, scope: rawScope, departmentId } = parsed.data
+  const { name, description, scope: rawScope, category: rawCategory, departmentId } = parsed.data
   const scope = rawScope ?? 'PERSONAL'
+  const category = rawCategory ?? 'INTERNAL'
 
   // Permission check based on scope
   if (scope === 'GLOBAL' && !hasPermission(ctx.user.role, 'knowledge:manage_global')) {
@@ -84,6 +91,11 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   }
   if (scope === 'DEPARTMENT' && !hasPermission(ctx.user.role, 'knowledge:manage_dept')) {
     return NextResponse.json({ error: 'No permission to create DEPARTMENT KB' }, { status: 403 })
+  }
+
+  // Permission check based on category
+  if (!canCreateKbCategory(ctx.user, category)) {
+    return NextResponse.json({ error: `No permission to create ${category} KB` }, { status: 403 })
   }
 
   const effectiveDeptId = scope === 'DEPARTMENT'
@@ -99,6 +111,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       name,
       description: description ?? null,
       scope,
+      category,
       departmentId: effectiveDeptId,
       createdById: ctx.user.id,
     },

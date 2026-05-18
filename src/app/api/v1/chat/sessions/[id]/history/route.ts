@@ -13,6 +13,7 @@ import {
   mergeToolInputs,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
+import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
@@ -51,7 +52,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
       result.push({
         id: `current-${orderIndex++}`,
         role: 'user',
-        content: stripUserMetadata(extractText(msg.content)),
+        content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
         createdAt: new Date().toISOString(),
       })
@@ -179,7 +180,7 @@ export const GET = withAuth(
     // 3. If session is active, load current messages from OpenClaw
     let currentMessages: ChatMessage[] = []
     let connectionStatus: 'ok' | 'unreachable' | 'session-lost' = 'ok'
-    let sessionIsActive = session.isActive
+    const sessionIsActive = session.isActive
 
     if (session.isActive) {
       try {

@@ -14,11 +14,30 @@ interface RagCredentialHeaders {
   'x-rerank-model': string
   'x-ocr-model': string
   'x-ocr-workers': string
+  'x-paddleocr-token': string
+  'x-paddleocr-model': string
+}
+
+function envFirst(...names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim()
+    if (value) return value
+  }
+  return ''
+}
+
+function normalizeEmbeddingBaseUrl(value: string): string {
+  const clean = value.replace(/\/+$/, '')
+  return clean.endsWith('/embeddings')
+    ? clean.slice(0, -'/embeddings'.length)
+    : clean
 }
 
 /**
  * Load RAG credentials from SystemConfig and build headers for the Python RAG service.
  * API keys stored as encrypted JSON; non-sensitive values stored as plain strings.
+ * Falls back to the standalone llm-rag .env naming convention so deployments
+ * can be migrated without first filling SystemConfig through the UI.
  */
 export async function buildRagCredentialHeaders(): Promise<RagCredentialHeaders> {
   const configs = await prisma.systemConfig.findMany({
@@ -50,17 +69,23 @@ export async function buildRagCredentialHeaders(): Promise<RagCredentialHeaders>
   }
 
   return {
-    'x-llm-api-key': getApiKey('rag.llm.apiKey'),
-    'x-llm-base-url': getString('rag.llm.baseUrl'),
-    'x-llm-model': getString('rag.llm.model'),
-    'x-embedding-api-key': getApiKey('rag.embedding.apiKey'),
-    'x-embedding-base-url': getString('rag.embedding.baseUrl'),
-    'x-embedding-model': getString('rag.embedding.model'),
+    'x-llm-api-key': getApiKey('rag.llm.apiKey') || envFirst('LLM_API_KEY', 'DASHSCOPE_API_KEY'),
+    'x-llm-base-url': getString('rag.llm.baseUrl') || envFirst('LLM_BASE_URL') || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    'x-llm-model': getString('rag.llm.model') || envFirst('LLM_MODEL') || 'qwen3.5-35b-a3b',
+    'x-embedding-api-key': getApiKey('rag.embedding.apiKey') || envFirst('SILICONFLOW_API_KEY'),
+    'x-embedding-base-url': normalizeEmbeddingBaseUrl(
+      getString('rag.embedding.baseUrl') ||
+      envFirst('SILICONFLOW_EMBEDDING_URL') ||
+      'https://api.siliconflow.cn/v1/embeddings',
+    ),
+    'x-embedding-model': getString('rag.embedding.model') || envFirst('SILICONFLOW_EMBEDDING_MODEL') || 'BAAI/bge-m3',
     'x-rerank-enabled': String(configMap.get('rag.rerank.enabled') ?? false),
-    'x-rerank-api-key': getApiKey('rag.rerank.apiKey'),
-    'x-rerank-base-url': getString('rag.rerank.baseUrl'),
+    'x-rerank-api-key': getApiKey('rag.rerank.apiKey') || envFirst('SILICONFLOW_API_KEY'),
+    'x-rerank-base-url': getString('rag.rerank.baseUrl') || 'https://api.siliconflow.cn/v1',
     'x-rerank-model': getString('rag.rerank.model'),
     'x-ocr-model': getString('rag.ocr.model'),
     'x-ocr-workers': String(configMap.get('rag.ocr.workers') ?? 4),
+    'x-paddleocr-token': getString('rag.paddleocr.token') || envFirst('PADDLEOCR_TOKEN'),
+    'x-paddleocr-model': getString('rag.paddleocr.model') || envFirst('PADDLEOCR_MODEL') || 'PP-OCRv5',
   }
 }

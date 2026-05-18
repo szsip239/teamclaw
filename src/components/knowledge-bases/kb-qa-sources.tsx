@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronRight, FileText, Image, Table2 } from "lucide-react"
+import { ChevronDown, ChevronRight, FileText, Image, PanelRightOpen, Table2 } from "lucide-react"
 import { useT } from "@/stores/language-store"
 import { markdownTableToHtml, normalizeHtmlTable } from "@/lib/knowledge-base/markdown-table"
 import type { ScoredNode } from "@/types/knowledge-base"
@@ -17,6 +17,7 @@ interface KbQaSourcesProps {
     table_results: ScoredNode[]
   }
   onImageClick: (url: string, title: string) => void
+  onSourceOpen?: (node: ScoredNode) => void
 }
 
 function resolveImageUrl(kbId: string, node: ScoredNode): string {
@@ -27,8 +28,40 @@ function resolveImageUrl(kbId: string, node: ScoredNode): string {
   return ""
 }
 
-// ── Answer Source Pill ────────────────────────────────
-function SourcePill({ node }: { node: ScoredNode }) {
+function formatScore(score: number | undefined) {
+  return Number.isFinite(score) ? score!.toFixed(3) : "—"
+}
+
+function SourcePageButton({
+  node,
+  onSourceOpen,
+}: {
+  node: ScoredNode
+  onSourceOpen?: (node: ScoredNode) => void
+}) {
+  const t = useT()
+  if (!onSourceOpen || !node.page_no) return null
+
+  return (
+    <button
+      type="button"
+      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border bg-background px-1.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/5"
+      onClick={() => onSourceOpen(node)}
+      title={t("kb.qaOpenSourcePage", { n: node.page_no })}
+    >
+      <PanelRightOpen className="size-3" />
+      {t("kb.qaSourcePage", { n: node.page_no })}
+    </button>
+  )
+}
+
+function SourcePill({
+  node,
+  onSourceOpen,
+}: {
+  node: ScoredNode
+  onSourceOpen?: (node: ScoredNode) => void
+}) {
   const detail =
     node.kind === "image"
       ? node.summary || node.image_id || ""
@@ -47,18 +80,27 @@ function SourcePill({ node }: { node: ScoredNode }) {
           doc: {(node.doc_id || "-").slice(0, 12)} / p.{node.page_no ?? "-"}
         </p>
       </div>
+      <SourcePageButton node={node} onSourceOpen={onSourceOpen} />
     </div>
   )
 }
 
-// ── Text Result Card ─────────────────────────────────
-function TextCard({ node }: { node: ScoredNode }) {
+function TextCard({
+  node,
+  onSourceOpen,
+}: {
+  node: ScoredNode
+  onSourceOpen?: (node: ScoredNode) => void
+}) {
   return (
     <div className="rounded-md border bg-muted/30 p-2.5 text-[11px]">
-      <div className="flex items-center gap-2 mb-1">
-        <FileText className="size-3 text-muted-foreground shrink-0" />
-        <span className="text-muted-foreground">Score: {node.score.toFixed(3)}</span>
+      <div className="mb-1 flex items-center gap-2">
+        <FileText className="size-3 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">Score: {formatScore(node.score)}</span>
         <span className="text-muted-foreground">p.{node.page_no ?? "-"} / {node.page_label || "-"}</span>
+        <div className="ml-auto">
+          <SourcePageButton node={node} onSourceOpen={onSourceOpen} />
+        </div>
       </div>
       <p className="line-clamp-4 whitespace-pre-wrap leading-relaxed">{node.snippet || node.text || ""}</p>
       <p className="text-[9px] text-muted-foreground mt-1">doc: {node.doc_id || "-"}</p>
@@ -67,16 +109,29 @@ function TextCard({ node }: { node: ScoredNode }) {
 }
 
 // ── Image Result Card ────────────────────────────────
-function ImageCard({ node, kbId, onImageClick }: { node: ScoredNode; kbId: string; onImageClick: (url: string, title: string) => void }) {
+function ImageCard({
+  node,
+  kbId,
+  onImageClick,
+  onSourceOpen,
+}: {
+  node: ScoredNode
+  kbId: string
+  onImageClick: (url: string, title: string) => void
+  onSourceOpen?: (node: ScoredNode) => void
+}) {
   const url = resolveImageUrl(kbId, node)
   return (
     <div className="rounded-md border bg-muted/30 p-2.5 text-[11px]">
       <div className="flex items-center gap-2 mb-1">
         <Image className="size-3 text-muted-foreground shrink-0" />
         <span className="font-medium">{node.summary || node.image_id || "Image"}</span>
-        <span className="text-muted-foreground ml-auto">Score: {node.score.toFixed(3)}</span>
+        <span className="ml-auto text-muted-foreground">Score: {formatScore(node.score)}</span>
       </div>
-      <p className="text-[9px] text-muted-foreground mb-1.5">doc: {node.doc_id || "-"} / p.{node.page_no ?? "-"}</p>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="text-[9px] text-muted-foreground">doc: {node.doc_id || "-"} / p.{node.page_no ?? "-"}</p>
+        <SourcePageButton node={node} onSourceOpen={onSourceOpen} />
+      </div>
       {url ? (
         <button
           className="rounded overflow-hidden hover:ring-2 hover:ring-primary/30 transition-all"
@@ -94,7 +149,15 @@ function ImageCard({ node, kbId, onImageClick }: { node: ScoredNode; kbId: strin
 }
 
 // ── Table Result Card ────────────────────────────────
-function TableCard({ node, kbId }: { node: ScoredNode; kbId: string }) {
+function TableCard({
+  node,
+  kbId,
+  onSourceOpen,
+}: {
+  node: ScoredNode
+  kbId: string
+  onSourceOpen?: (node: ScoredNode) => void
+}) {
   const semanticSummary = node.semantic_summary || node.summary || ""
   const tableHtml = node.raw_table
     ? node.raw_format === "html"
@@ -107,9 +170,12 @@ function TableCard({ node, kbId }: { node: ScoredNode; kbId: string }) {
       <div className="flex items-center gap-2 mb-1">
         <Table2 className="size-3 text-muted-foreground shrink-0" />
         <span className="font-medium">{node.caption || node.summary || node.table_id || "Table"}</span>
-        <span className="text-muted-foreground ml-auto">Score: {node.score.toFixed(3)}</span>
+        <span className="ml-auto text-muted-foreground">Score: {formatScore(node.score)}</span>
       </div>
-      <p className="text-[9px] text-muted-foreground mb-1">doc: {node.doc_id || "-"} / p.{node.page_no ?? "-"}</p>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-[9px] text-muted-foreground">doc: {node.doc_id || "-"} / p.{node.page_no ?? "-"}</p>
+        <SourcePageButton node={node} onSourceOpen={onSourceOpen} />
+      </div>
       {semanticSummary && <p className="text-[10px] text-muted-foreground mb-1.5 italic">{semanticSummary}</p>}
       {tableHtml ? (
         <div
@@ -126,7 +192,13 @@ function TableCard({ node, kbId }: { node: ScoredNode; kbId: string }) {
 }
 
 // ── Main Sources Component ───────────────────────────
-export function KbQaSources({ kbId, answerSources, retrievalGroups, onImageClick }: KbQaSourcesProps) {
+export function KbQaSources({
+  kbId,
+  answerSources,
+  retrievalGroups,
+  onImageClick,
+  onSourceOpen,
+}: KbQaSourcesProps) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
 
@@ -169,7 +241,7 @@ export function KbQaSources({ kbId, answerSources, retrievalGroups, onImageClick
               </h4>
               <div className="space-y-1.5">
                 {answerSources.map((node, i) => (
-                  <SourcePill key={i} node={node} />
+                  <SourcePill key={i} node={node} onSourceOpen={onSourceOpen} />
                 ))}
               </div>
             </div>
@@ -179,18 +251,18 @@ export function KbQaSources({ kbId, answerSources, retrievalGroups, onImageClick
           {hasRetrieval && (
             <div className="space-y-3">
               <h4 className="text-[11px] font-semibold text-muted-foreground border-t pt-2">
-                Retrieval Results
+                {t("kb.qaRetrievalResults")}
               </h4>
 
               {/* Text results */}
               {retrievalGroups!.text_results.length > 0 && (
                 <div>
                   <h5 className="text-[10px] font-medium text-muted-foreground mb-1">
-                    Text ({retrievalGroups!.text_results.length})
+                    {t("kb.qaTextResults")} ({retrievalGroups!.text_results.length})
                   </h5>
                   <div className="space-y-1.5">
                     {retrievalGroups!.text_results.map((node, i) => (
-                      <TextCard key={i} node={node} />
+                      <TextCard key={i} node={node} onSourceOpen={onSourceOpen} />
                     ))}
                   </div>
                 </div>
@@ -200,11 +272,17 @@ export function KbQaSources({ kbId, answerSources, retrievalGroups, onImageClick
               {retrievalGroups!.image_results.length > 0 && (
                 <div>
                   <h5 className="text-[10px] font-medium text-muted-foreground mb-1">
-                    Images ({retrievalGroups!.image_results.length})
+                    {t("kb.qaImageResults")} ({retrievalGroups!.image_results.length})
                   </h5>
                   <div className="grid grid-cols-2 gap-1.5">
                     {retrievalGroups!.image_results.map((node, i) => (
-                      <ImageCard key={i} node={node} kbId={kbId} onImageClick={onImageClick} />
+                      <ImageCard
+                        key={i}
+                        node={node}
+                        kbId={kbId}
+                        onImageClick={onImageClick}
+                        onSourceOpen={onSourceOpen}
+                      />
                     ))}
                   </div>
                 </div>
@@ -214,11 +292,16 @@ export function KbQaSources({ kbId, answerSources, retrievalGroups, onImageClick
               {retrievalGroups!.table_results.length > 0 && (
                 <div>
                   <h5 className="text-[10px] font-medium text-muted-foreground mb-1">
-                    Tables ({retrievalGroups!.table_results.length})
+                    {t("kb.qaTableResults")} ({retrievalGroups!.table_results.length})
                   </h5>
                   <div className="space-y-1.5">
                     {retrievalGroups!.table_results.map((node, i) => (
-                      <TableCard key={i} node={node} kbId={kbId} />
+                      <TableCard
+                        key={i}
+                        node={node}
+                        kbId={kbId}
+                        onSourceOpen={onSourceOpen}
+                      />
                     ))}
                   </div>
                 </div>

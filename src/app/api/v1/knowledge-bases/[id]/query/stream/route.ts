@@ -35,6 +35,7 @@ export const POST = withAuth(
         kbId,
         question: parsed.data.question,
         generateAnswer: parsed.data.generateAnswer,
+        enableThinking: parsed.data.enableThinking,
         topK: parsed.data.topK,
       })
 

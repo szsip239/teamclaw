@@ -1,107 +1,674 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
-import { Send, StopCircle, MessageCircle, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Bot,
+  FileSearch,
+  Loader2,
+  RefreshCw,
+  Send,
+  Sparkles,
+  StopCircle,
+  Trash2,
+  User,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
 import { ChatTextBlock } from '@/components/chat/chat-text-block'
 import { KbQaSources } from './kb-qa-sources'
 import { KbAnswerAssets } from './kb-answer-assets'
 import { KbImageLightbox } from './kb-image-lightbox'
+import { KbDocumentOriginalSheet } from './kb-document-original-sheet'
+import { KbConversationSidebar } from './kb-conversation-sidebar'
 import { streamKbQuery } from '@/lib/knowledge-base/query-stream'
+import {
+  appendMessage,
+  createConversation,
+  deleteConversation,
+  deleteMessage,
+  listConversations,
+  loadConversation,
+  renameConversation,
+  type ConversationSummary,
+  type PersistedMessage,
+} from '@/lib/knowledge-base/conversations-client'
+import {
+  linkifyPageCitations,
+  parsePageCitationHref,
+  resolveCitationDoc,
+} from '@/lib/knowledge-base/page-citations'
+import { cn } from '@/lib/utils'
 import { useT } from '@/stores/language-store'
-import type { ScoredNode } from '@/types/knowledge-base'
+import type { KnowledgeDocumentInfo, ScoredNode } from '@/types/knowledge-base'
 
 interface KbQaTabProps {
   kbId: string
   kbName: string
+  documents: KnowledgeDocumentInfo[]
 }
 
-export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
+interface RetrievalGroups {
+  text_results: ScoredNode[]
+  image_results: ScoredNode[]
+  table_results: ScoredNode[]
+}
+
+interface QaMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+  pending?: boolean
+  error?: boolean
+  stopped?: boolean
+  stage?: string
+  progressDetail?: string
+  reasoning?: string
+  answerAssets?: ScoredNode[]
+  answerSources?: ScoredNode[]
+  retrievalGroups?: RetrievalGroups
+}
+
+interface SourcePreviewState {
+  doc: KnowledgeDocumentInfo
+  page: number
+}
+
+const THINKING_TOGGLE_KEY = 'teamclaw:kb-qa-show-thinking'
+const AUTOSCROLL_PIXEL_THRESHOLD = 80
+
+function rehydrateMessage(persisted: PersistedMessage): QaMessage {
+  const groups = persisted.retrievalGroups as RetrievalGroups | null
+  return {
+    id: persisted.id,
+    role: persisted.role,
+    content: persisted.content,
+    reasoning: persisted.reasoning ?? '',
+    createdAt: persisted.createdAt,
+    pending: false,
+    error: persisted.error,
+    stopped: persisted.stopped,
+    stage: persisted.stage ?? undefined,
+    answerSources: (persisted.answerSources as ScoredNode[]) ?? [],
+    answerAssets: (persisted.answerAssets as ScoredNode[]) ?? [],
+    retrievalGroups: groups ?? undefined,
+  }
+}
+
+/**
+ * Normalize a source from the RAG service SSE shape (text/score/
+ * source_type/metadata) into the ScoredNode shape the UI expects
+ * (kind/doc_id/page_no flat at the top). Without this both the inline
+ * page-citation linker and the bottom sources panel fail to resolve a
+ * doc_id and silently render plain text instead of clickable chips.
+ */
+function normalizeSource(raw: unknown): ScoredNode {
+  const r = (raw ?? {}) as Record<string, unknown>
+  const metadata = (r.metadata as Record<string, unknown> | undefined) ?? {}
+  const docId = (r.doc_id as string) ?? (metadata.doc_id as string) ?? ''
+  const pageIndex = (r.page_no as number | undefined) ?? (metadata.page_index as number | undefined)
+  const sourceType =
+    (r.kind as string) ??
+    (r.source_type === 'table' ? 'table' : (r.source_type as string)) ??
+    'text'
+  return {
+    kind: sourceType,
+    score: Number(r.score) || 0,
+    doc_id: docId,
+    page_no: pageIndex && pageIndex > 0 ? pageIndex : null,
+    page_label: (metadata.page_label as string) ?? '',
+    source_path: (metadata.source_path as string) ?? '',
+    summary: (r.summary as string) ?? '',
+    text: (r.text as string) ?? '',
+    snippet: (r.snippet as string) ?? '',
+    block_id: (metadata.block_id as string) ?? undefined,
+    image_id: (metadata.image_id as string) ?? undefined,
+    image_path: (metadata.image_path as string) ?? undefined,
+    image_url: (metadata.image_url as string) ?? undefined,
+    table_id: (metadata.table_id as string) ?? undefined,
+    caption: (metadata.caption as string) ?? undefined,
+  } as ScoredNode
+}
+
+function normalizeSources(raw: unknown): ScoredNode[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map(normalizeSource)
+}
+
+export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
   const t = useT()
   const [question, setQuestion] = useState('')
-  const [askedQuestion, setAskedQuestion] = useState('')
+  const [messages, setMessages] = useState<QaMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [answer, setAnswer] = useState('')
-  const [reasoning, setReasoning] = useState('')
-  const [answerAssets, setAnswerAssets] = useState<ScoredNode[]>([])
-  const [answerSources, setAnswerSources] = useState<ScoredNode[]>([])
-  const [retrievalGroups, setRetrievalGroups] = useState<
-    | {
-        text_results: ScoredNode[]
-        image_results: ScoredNode[]
-        table_results: ScoredNode[]
-      }
-    | undefined
-  >(undefined)
-  const [generateAnswer, setGenerateAnswer] = useState(true)
+  const [showThinking, setShowThinking] = useState(() => {
+    if (typeof window === 'undefined') return true
+    const stored = window.localStorage.getItem(THINKING_TOGGLE_KEY)
+    return stored === null ? true : stored === '1'
+  })
   const [lightboxImage, setLightboxImage] = useState<string | null>(null)
   const [lightboxTitle, setLightboxTitle] = useState('')
+  const [sourcePreview, setSourcePreview] = useState<SourcePreviewState | null>(null)
+  // Per-message thinking-panel open state, so users can collapse a panel
+  // and have it stay collapsed even as more messages stream in below.
+  const [thinkingOpen, setThinkingOpen] = useState<Record<string, boolean>>({})
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [activeConvId, setActiveConvId] = useState<string | null>(null)
+  const [convLoading, setConvLoading] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  // Tracks whether the user is reading from the bottom (so we keep
+  // auto-scrolling) or has scrolled up to look at something (so we
+  // stop hijacking their scroll position).
+  const stickToBottomRef = useRef(true)
+  const readyDocuments = useMemo(
+    () => documents.filter((doc) => doc.status === 'SUCCEEDED'),
+    [documents],
+  )
+  const canAsk = readyDocuments.length > 0
+  const hasMessages = messages.length > 0
+  const pendingAssistant = useMemo(
+    () =>
+      [...messages].reverse().find((message) => message.role === 'assistant' && message.pending),
+    [messages],
+  )
 
-  const hasResult = askedQuestion !== ''
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(THINKING_TOGGLE_KEY, showThinking ? '1' : '0')
+  }, [showThinking])
+
+  // Initial conversation load: fetch the user's existing conversations
+  // for this KB; pick the most recent or create a new empty one.
+  useEffect(() => {
+    let cancelled = false
+    setConvLoading(true)
+    listConversations(kbId)
+      .then(async (list) => {
+        if (cancelled) return
+        setConversations(list)
+        if (list.length === 0) {
+          // Lazy-create on first message instead — no point in spawning an
+          // empty conversation before the user actually asks anything.
+          setActiveConvId(null)
+          setMessages([])
+        } else {
+          const first = list[0]
+          setActiveConvId(first.id)
+          const detail = await loadConversation(kbId, first.id)
+          if (cancelled) return
+          setMessages(detail.messages.map(rehydrateMessage))
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setConversations([])
+        setActiveConvId(null)
+      })
+      .finally(() => {
+        if (!cancelled) setConvLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [kbId])
+
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const handleScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+      stickToBottomRef.current = distance < AUTOSCROLL_PIXEL_THRESHOLD
+    }
+    el.addEventListener('scroll', handleScroll, { passive: true })
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Only auto-scroll while the user is parked at the bottom. If they've
+  // scrolled up to read, we leave their position alone.
+  useEffect(() => {
+    if (!stickToBottomRef.current) return
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [messages])
+
+  const updateAssistant = useCallback((id: string, updater: (message: QaMessage) => QaMessage) => {
+    setMessages((prev) => prev.map((message) => (message.id === id ? updater(message) : message)))
+  }, [])
+
+  const findDocumentForSource = useCallback(
+    (node: ScoredNode) =>
+      documents.find((doc) => doc.docId === node.doc_id || doc.id === node.doc_id) ?? null,
+    [documents],
+  )
+
+  const openSource = useCallback(
+    (node: ScoredNode) => {
+      const doc = findDocumentForSource(node)
+      if (!doc) return
+      setSourcePreview({ doc, page: node.page_no && node.page_no > 0 ? node.page_no : 1 })
+    },
+    [findDocumentForSource],
+  )
+
+  // Triggered when a page chip inside an assistant answer is clicked.
+  // docId comes from the linkifier; we look up the matching document the
+  // same way openSource does.
+  const handlePageCitation = useCallback(
+    (docId: string, page: number) => {
+      const doc = documents.find((d) => d.docId === docId || d.id === docId)
+      if (!doc) return
+      setSourcePreview({ doc, page: page > 0 ? page : 1 })
+    },
+    [documents],
+  )
+
+  // Shared streaming engine for both new questions and regenerations.
+  // Caller is responsible for:
+  //  - putting the placeholder pending assistant message into state
+  //  - making sure `convId` is set (and the user message is persisted)
+  // This function just drives the SSE loop, mutates the placeholder via
+  // updateAssistant, and after the stream finishes persists the assistant
+  // turn to the backend and bumps the sidebar entry.
+  const runAssistantStream = useCallback(
+    async (params: {
+      question: string
+      assistantId: string
+      convId: string
+      sidebarBump: number // +2 for new round, +1 for regenerate (delete+create)
+    }) => {
+      const { question: q, assistantId, convId, sidebarBump } = params
+      const controller = new AbortController()
+      abortRef.current = controller
+      setIsStreaming(true)
+
+      try {
+        for await (const event of streamKbQuery(
+          kbId,
+          q,
+          true,
+          8,
+          showThinking,
+          controller.signal,
+        )) {
+          if (event.type === 'progress') {
+            updateAssistant(assistantId, (message) => ({
+              ...message,
+              stage: (event.data.stage as string) || message.stage,
+              progressDetail: (event.data.detail as string) || message.progressDetail,
+            }))
+            continue
+          }
+
+          if (event.type === 'retrieval') {
+            const assets = normalizeSources(event.data.answer_assets)
+            const sources = normalizeSources(event.data.answer_sources)
+            const allSources = normalizeSources(event.data.sources)
+            updateAssistant(assistantId, (message) => ({
+              ...message,
+              stage: t('kb.qaStatusContext'),
+              progressDetail: t('kb.qaProgressContext', { n: allSources.length }),
+              answerAssets: assets,
+              answerSources: sources,
+              retrievalGroups: {
+                text_results: allSources.filter((source) => source.kind === 'text'),
+                image_results: allSources.filter((source) => source.kind === 'image'),
+                table_results: allSources.filter((source) => source.kind === 'table'),
+              },
+            }))
+            continue
+          }
+
+          if (event.type === 'reasoning') {
+            updateAssistant(assistantId, (message) => ({
+              ...message,
+              stage: t('kb.qaStatusThinking'),
+              progressDetail: t('kb.qaProgressThinking'),
+              reasoning: `${message.reasoning ?? ''}${(event.data.delta as string) ?? ''}`,
+            }))
+            continue
+          }
+
+          if (event.type === 'chunk') {
+            updateAssistant(assistantId, (message) => ({
+              ...message,
+              stage: t('kb.qaStatusGenerating'),
+              progressDetail: t('kb.qaProgressGenerating'),
+              content: `${message.content}${(event.data.text as string) ?? ''}`,
+            }))
+            continue
+          }
+
+          if (event.type === 'error') {
+            updateAssistant(assistantId, (message) => ({
+              ...message,
+              pending: false,
+              error: true,
+              stage: t('kb.qaStatusFailed'),
+              content: (event.data.message as string) || t('operationFailed'),
+            }))
+            break
+          }
+
+          if (event.type === 'done') {
+            const doneAssets = normalizeSources(event.data.answer_assets)
+            const doneSources = normalizeSources(event.data.answer_sources)
+            updateAssistant(assistantId, (message) => ({
+              ...message,
+              pending: false,
+              stage: t('kb.qaStatusCompleted'),
+              reasoning: ((event.data.reasoning as string) || message.reasoning || '').trim(),
+              answerAssets: doneAssets.length > 0 ? doneAssets : message.answerAssets,
+              answerSources: doneSources.length > 0 ? doneSources : message.answerSources,
+            }))
+            break
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          updateAssistant(assistantId, (message) => ({
+            ...message,
+            pending: false,
+            stopped: true,
+            stage: t('kb.qaStatusStopped'),
+            progressDetail: t('kb.qaStopped'),
+            content: message.content || t('kb.qaStopped'),
+          }))
+        } else {
+          updateAssistant(assistantId, (message) => ({
+            ...message,
+            pending: false,
+            error: true,
+            stage: t('kb.qaStatusFailed'),
+            content: (err as Error).message || t('operationFailed'),
+          }))
+        }
+      } finally {
+        setIsStreaming(false)
+        abortRef.current = null
+
+        // Read the finalized message via a *pure* snapshot so React
+        // Strict Mode (dev) won't double-fire the side effect.
+        // Side effects inside a setState updater are an anti-pattern
+        // because Strict Mode intentionally invokes updaters twice.
+        let snap: QaMessage | undefined
+        setMessages((prev) => {
+          snap = prev.find((m) => m.id === assistantId)
+          return prev
+        })
+        const finalized = snap && !snap.pending ? snap : undefined
+
+        if (finalized) {
+          appendMessage(kbId, convId, {
+            role: 'assistant',
+            content: finalized.content,
+            reasoning: finalized.reasoning || null,
+            stage: finalized.stage ?? null,
+            error: finalized.error,
+            stopped: finalized.stopped,
+            answerSources: finalized.answerSources ?? [],
+            answerAssets: finalized.answerAssets ?? [],
+            retrievalGroups: finalized.retrievalGroups ?? null,
+          }).catch(() => {
+            /* swallow */
+          })
+
+          setConversations((prevList) => {
+            const idx = prevList.findIndex((c) => c.id === convId)
+            if (idx < 0) return prevList
+            const updated = {
+              ...prevList[idx],
+              updatedAt: new Date().toISOString(),
+              messageCount: prevList[idx].messageCount + sidebarBump,
+            }
+            return [updated, ...prevList.slice(0, idx), ...prevList.slice(idx + 1)]
+          })
+        }
+      }
+    },
+    [kbId, showThinking, t, updateAssistant],
+  )
 
   const handleSubmit = useCallback(async () => {
     const q = question.trim()
-    if (!q || isStreaming) return
+    if (!q || isStreaming || !canAsk) return
 
-    setAskedQuestion(q)
-    setAnswer('')
-    setReasoning('')
-    setAnswerAssets([])
-    setAnswerSources([])
-    setRetrievalGroups(undefined)
-    setIsStreaming(true)
+    // Lazy-create a conversation on the first message so empty
+    // sessions don't pollute the sidebar. The auto-title flag below
+    // lets the backend derive a title from this very first question.
+    let convId = activeConvId
+    let isFirstMessageInConv = false
+    if (!convId) {
+      try {
+        const conv = await createConversation(kbId)
+        convId = conv.id
+        setActiveConvId(conv.id)
+        setConversations((prev) => [conv, ...prev])
+        isFirstMessageInConv = true
+      } catch {
+        return
+      }
+    } else {
+      isFirstMessageInConv = messages.length === 0
+    }
+
+    const now = new Date().toISOString()
+    const userMessage: QaMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: q,
+      createdAt: now,
+    }
+    const assistantId = `assistant-${Date.now()}`
+    const assistantMessage: QaMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      reasoning: '',
+      createdAt: now,
+      pending: true,
+      stage: t('kb.qaStatusRetrieving'),
+      progressDetail: t('kb.qaProgressRetrieving'),
+      answerAssets: [],
+      answerSources: [],
+    }
+
+    setMessages((prev) => [...prev, userMessage, assistantMessage])
     setQuestion('')
 
-    const controller = new AbortController()
-    abortRef.current = controller
+    appendMessage(kbId, convId, {
+      role: 'user',
+      content: q,
+      autoTitle: isFirstMessageInConv,
+    }).catch(() => {
+      /* swallow */
+    })
 
-    try {
-      for await (const event of streamKbQuery(kbId, q, generateAnswer, 5, controller.signal)) {
-        if (event.type === 'retrieval') {
-          const assets = (event.data.answer_assets as ScoredNode[]) ?? []
-          const sources = (event.data.answer_sources as ScoredNode[]) ?? []
-          setAnswerAssets(assets)
-          setAnswerSources(sources)
-          // Preserve grouped retrieval results for evidence panel
-          const allSources = (event.data.sources as ScoredNode[]) ?? []
-          setRetrievalGroups({
-            text_results: allSources.filter((s) => s.kind === 'text'),
-            image_results: allSources.filter((s) => s.kind === 'image'),
-            table_results: allSources.filter((s) => s.kind === 'table'),
-          })
-        } else if (event.type === 'chunk') {
-          setAnswer((prev) => prev + ((event.data.text as string) ?? ''))
-        } else if (event.type === 'reasoning') {
-          setReasoning((prev) => prev + ((event.data.delta as string) ?? ''))
-        } else if (event.type === 'error') {
-          setAnswer(`Error: ${event.data.message as string}`)
-        } else if (event.type === 'done') {
-          // Update with final assets/sources from done event
-          const doneAssets = (event.data.answer_assets as ScoredNode[]) ?? []
-          const doneSources = (event.data.answer_sources as ScoredNode[]) ?? []
-          if (doneAssets.length > 0) setAnswerAssets(doneAssets)
-          if (doneSources.length > 0) setAnswerSources(doneSources)
-          break
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        setAnswer(`Error: ${(err as Error).message}`)
-      }
-    } finally {
-      setIsStreaming(false)
-      abortRef.current = null
-    }
-  }, [question, isStreaming, kbId, generateAnswer])
+    await runAssistantStream({
+      question: q,
+      assistantId,
+      convId,
+      sidebarBump: 2,
+    })
+  }, [activeConvId, canAsk, isStreaming, kbId, messages.length, question, runAssistantStream, t])
 
   function handleAbort() {
     abortRef.current?.abort()
   }
 
+  async function handleSelectConversation(id: string) {
+    if (id === activeConvId || isStreaming) return
+    setActiveConvId(id)
+    setMessages([])
+    setThinkingOpen({})
+    try {
+      const detail = await loadConversation(kbId, id)
+      setMessages(detail.messages.map(rehydrateMessage))
+    } catch {
+      /* If load fails, leave empty — user can retry by reselecting. */
+    }
+  }
+
+  async function handleCreateConversation() {
+    if (isStreaming) return
+    try {
+      const conv = await createConversation(kbId)
+      setConversations((prev) => [conv, ...prev])
+      setActiveConvId(conv.id)
+      setMessages([])
+      setThinkingOpen({})
+    } catch {
+      /* swallow — user can retry */
+    }
+  }
+
+  async function handleRenameConversation(id: string, currentTitle: string) {
+    const next = window.prompt(t('kb.qaRenamePrompt'), currentTitle)
+    if (next === null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === currentTitle) return
+    try {
+      await renameConversation(kbId, id, trimmed)
+      setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: trimmed } : c)))
+    } catch {
+      /* swallow */
+    }
+  }
+
+  async function handleDeleteConversation(id: string) {
+    if (!window.confirm(t('kb.qaConfirmDelete'))) return
+    try {
+      await deleteConversation(kbId, id)
+      setConversations((prev) => prev.filter((c) => c.id !== id))
+      if (id === activeConvId) {
+        setActiveConvId(null)
+        setMessages([])
+        setThinkingOpen({})
+      }
+    } catch {
+      /* swallow */
+    }
+  }
+
+  function toggleThinking(messageId: string, nextOpen: boolean) {
+    setThinkingOpen((prev) => ({ ...prev, [messageId]: nextOpen }))
+  }
+
+  // Remove the assistant answer AND its preceding user question from
+  // both the UI and the backend. "Delete this round" means delete the
+  // whole exchange — what you asked + what the assistant replied.
+  async function handleDeleteRound(messageId: string) {
+    if (isStreaming || !activeConvId) return
+    const idx = messages.findIndex((m) => m.id === messageId)
+    if (idx < 0) return
+    const target = messages[idx]
+    if (target.role !== 'assistant') return
+
+    let pairIdx = -1
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        pairIdx = i
+        break
+      }
+    }
+    const toRemove = pairIdx >= 0 ? [messageId, messages[pairIdx].id] : [messageId]
+
+    if (!window.confirm(t('kb.qaConfirmDeleteRound'))) return
+
+    setMessages((prev) => prev.filter((m) => !toRemove.includes(m.id)))
+    setThinkingOpen((prev) => {
+      const next = { ...prev }
+      for (const id of toRemove) delete next[id]
+      return next
+    })
+
+    for (const id of toRemove) {
+      if (id.startsWith('user-') || id.startsWith('assistant-')) continue
+      try {
+        await deleteMessage(kbId, activeConvId, id)
+      } catch {
+        /* swallow */
+      }
+    }
+
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === activeConvId
+          ? { ...c, messageCount: Math.max(0, c.messageCount - toRemove.length) }
+          : c,
+      ),
+    )
+  }
+
+  // Re-run a question. Finds the preceding user message, removes the old
+  // assistant answer (UI + DB), inserts a fresh pending placeholder in the
+  // same position, and re-streams.
+  async function handleRegenerate(assistantMessageId: string) {
+    if (isStreaming || !activeConvId) return
+    const idx = messages.findIndex((m) => m.id === assistantMessageId)
+    if (idx < 0) return
+    const target = messages[idx]
+    if (target.role !== 'assistant') return
+    let userIdx = -1
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userIdx = i
+        break
+      }
+    }
+    if (userIdx < 0) return
+    const userMessage = messages[userIdx]
+
+    // Drop the old assistant message server-side first so we don't keep a
+    // stale row around if streaming fails partway.
+    if (!target.id.startsWith('assistant-')) {
+      try {
+        await deleteMessage(kbId, activeConvId, target.id)
+      } catch {
+        /* keep going — UI replace still useful */
+      }
+    }
+
+    const replacementId = `assistant-${Date.now()}`
+    const placeholder: QaMessage = {
+      id: replacementId,
+      role: 'assistant',
+      content: '',
+      reasoning: '',
+      createdAt: new Date().toISOString(),
+      pending: true,
+      stage: t('kb.qaStatusRetrieving'),
+      progressDetail: t('kb.qaProgressRetrieving'),
+      answerAssets: [],
+      answerSources: [],
+    }
+    setMessages((prev) => {
+      const next = [...prev]
+      next.splice(idx, 1, placeholder)
+      return next
+    })
+    setThinkingOpen((prev) => {
+      const next = { ...prev }
+      delete next[assistantMessageId]
+      return next
+    })
+
+    await runAssistantStream({
+      question: userMessage.content,
+      assistantId: replacementId,
+      convId: activeConvId,
+      // Regenerate: one delete (-1) + one append (+1) = net 0 change to
+      // messageCount, but the conversation still moves to the top of
+      // the sidebar because we bump updatedAt inside runAssistantStream.
+      sidebarBump: 0,
+    })
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
+    // Ignore Enter during IME composition (中文输入法选字阶段).
+    if (e.nativeEvent.isComposing) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
@@ -114,127 +681,364 @@ export function KbQaTab({ kbId, kbName }: KbQaTabProps) {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-280px)]">
-      {/* Content area */}
-      <div className="flex-1 overflow-y-auto">
-        {!hasResult ? (
-          /* Welcome state */
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-black/[0.04] dark:ring-white/[0.08]">
-              <MessageCircle className="size-6 text-primary/60" />
-            </div>
-            <h3 className="mt-4 text-sm font-semibold">{t('kb.qaWelcome')}</h3>
-            <p className="mt-1 text-[12px] text-muted-foreground max-w-[280px]">{kbName}</p>
-          </div>
-        ) : (
-          /* Q&A display */
-          <div className="space-y-4 pb-4">
-            {/* User question */}
-            <div className="flex justify-end">
-              <div className="max-w-[80%] rounded-xl bg-primary text-primary-foreground px-4 py-2.5 text-[13px]">
-                {askedQuestion}
-              </div>
-            </div>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+      <KbConversationSidebar
+        kbName={kbName}
+        conversations={conversations}
+        activeId={activeConvId}
+        isLoading={convLoading}
+        onSelect={handleSelectConversation}
+        onCreate={handleCreateConversation}
+        onRename={handleRenameConversation}
+        onDelete={handleDeleteConversation}
+      />
 
-            {/* AI answer */}
-            <div className="space-y-2">
-              {/* Reasoning (collapsible) */}
-              {reasoning && (
-                <details className="rounded-lg bg-muted/30 border">
-                  <summary className="px-3 py-2 text-[12px] font-medium text-muted-foreground cursor-pointer hover:text-foreground">
-                    <Sparkles className="inline size-3.5 mr-1.5" />
-                    {t('kb.qaReasoning')}
-                  </summary>
-                  <div className="px-3 pb-3 text-[12px] text-muted-foreground whitespace-pre-wrap">
-                    {reasoning}
-                  </div>
-                </details>
-              )}
-
-              {/* Answer text */}
-              {answer && (
-                <div className="rounded-xl bg-card border p-4">
-                  <ChatTextBlock content={answer} />
-                  {isStreaming && (
-                    <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
-                  )}
-                </div>
-              )}
-
-              {/* Answer Assets (images/tables from retrieval) */}
-              {!isStreaming && answerAssets.length > 0 && (
-                <KbAnswerAssets kbId={kbId} assets={answerAssets} onImageClick={openLightbox} />
-              )}
-
-              {/* Sources (collapsible, with rich rendering) */}
-              {!isStreaming && (answerSources.length > 0 || retrievalGroups) && (
-                <KbQaSources
-                  kbId={kbId}
-                  answerSources={answerSources}
-                  retrievalGroups={retrievalGroups}
-                  onImageClick={openLightbox}
-                />
-              )}
-
-              {/* No sources */}
-              {!isStreaming && answerSources.length === 0 && !answer && (
-                <p className="text-[12px] text-muted-foreground text-center py-4">
-                  {t('kb.qaNoSources')}
-                </p>
-              )}
-            </div>
+      <div className="flex min-w-0 flex-1 flex-col bg-muted/10">
+        {isStreaming && (
+          <div className="flex justify-end border-b bg-background/85 px-4 py-2">
+            <Badge variant="outline" className="gap-1.5 rounded-md text-[11px] font-medium">
+              <Loader2 className="size-3 animate-spin" />
+              {pendingAssistant?.stage || t('kb.qaStatusGenerating')}
+            </Badge>
           </div>
         )}
-      </div>
 
-      {/* Input area */}
-      <div className="border-t pt-3 space-y-2">
-        <div className="flex items-end gap-2">
-          <Textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t('kb.qaPlaceholder')}
-            className="text-[13px] min-h-[44px] max-h-[120px] resize-none"
-            rows={1}
-            disabled={isStreaming}
-          />
-          {isStreaming ? (
-            <Button size="sm" variant="outline" onClick={handleAbort} className="shrink-0">
-              <StopCircle className="size-4" />
-            </Button>
+        <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {!hasMessages ? (
+            <div className="flex h-full min-h-[360px] items-center justify-center p-8 text-center">
+              <div className="w-full max-w-md">
+                <div className="mx-auto flex size-16 items-center justify-center rounded-2xl border bg-background text-primary shadow-sm">
+                  <FileSearch className="size-7" />
+                </div>
+                <h3 className="mt-5 text-base font-semibold">
+                  {canAsk ? t('kb.qaWelcome') : t('kb.qaNoReadyDocs')}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {canAsk ? kbName : t('kb.qaNoReadyDocsHint')}
+                </p>
+                <div className="mt-5 flex justify-center">
+                  <Badge variant="secondary" className="rounded-md">
+                    {canAsk
+                      ? t('kb.qaReadyDocs', { n: readyDocuments.length })
+                      : t('kb.qaNoReadyDocs')}
+                  </Badge>
+                </div>
+              </div>
+            </div>
           ) : (
-            <Button
-              size="sm"
-              onClick={handleSubmit}
-              disabled={!question.trim()}
-              className="shrink-0"
-            >
-              <Send className="size-4" />
-            </Button>
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 pb-3">
+              {messages.map((message) => (
+                <QaMessageBubble
+                  key={message.id}
+                  message={message}
+                  kbId={kbId}
+                  showThinking={showThinking}
+                  thinkingOpen={thinkingOpen[message.id]}
+                  onThinkingToggle={toggleThinking}
+                  onImageClick={openLightbox}
+                  onSourceOpen={openSource}
+                  onPageCitation={handlePageCitation}
+                  onDeleteRound={handleDeleteRound}
+                  onRegenerate={handleRegenerate}
+                  isStreaming={isStreaming}
+                />
+              ))}
+            </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="generateAnswer"
-            checked={generateAnswer}
-            onCheckedChange={(checked) => setGenerateAnswer(!!checked)}
-          />
-          <label
-            htmlFor="generateAnswer"
-            className="text-[12px] text-muted-foreground cursor-pointer"
-          >
-            {t('kb.qaGenerateAnswer')}
-          </label>
+
+        <div className="border-t bg-background/90 px-2 py-1">
+          <div className="mx-auto w-full max-w-5xl">
+            <div className="rounded-lg border bg-card px-2 py-1 shadow-sm transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10">
+              <div className="flex items-end gap-2">
+                <Textarea
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={canAsk ? t('kb.qaPlaceholder') : t('kb.qaNoReadyDocs')}
+                  className="max-h-20 min-h-7 resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 shadow-none focus-visible:ring-0"
+                  rows={1}
+                  disabled={isStreaming || !canAsk}
+                />
+                <label className="mb-1.5 hidden cursor-pointer items-center gap-2 whitespace-nowrap text-[12px] text-muted-foreground sm:flex">
+                  <Checkbox
+                    checked={showThinking}
+                    onCheckedChange={(checked) => setShowThinking(!!checked)}
+                  />
+                  {t('kb.qaThinkingToggle')}
+                </label>
+                {isStreaming ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAbort}
+                    className="h-8 shrink-0"
+                  >
+                    <StopCircle data-icon="inline-start" />
+                    {t('kb.qaStop')}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={handleSubmit}
+                    disabled={!question.trim() || !canAsk}
+                    className="h-8 shrink-0"
+                  >
+                    <Send data-icon="inline-start" />
+                    {t('kb.qaSend')}
+                  </Button>
+                )}
+              </div>
+              <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground sm:hidden">
+                <Checkbox
+                  checked={showThinking}
+                  onCheckedChange={(checked) => setShowThinking(!!checked)}
+                />
+                {t('kb.qaThinkingToggle')}
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Image Lightbox */}
       <KbImageLightbox
         imageUrl={lightboxImage}
         title={lightboxTitle}
         onClose={() => setLightboxImage(null)}
       />
+
+      {sourcePreview && (
+        <KbDocumentOriginalSheet
+          kbId={kbId}
+          doc={sourcePreview.doc}
+          page={sourcePreview.page}
+          open={!!sourcePreview}
+          onOpenChange={(open) => {
+            if (!open) setSourcePreview(null)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function QaMessageBubble({
+  message,
+  kbId,
+  showThinking,
+  thinkingOpen,
+  onThinkingToggle,
+  onImageClick,
+  onSourceOpen,
+  onPageCitation,
+  onDeleteRound,
+  onRegenerate,
+  isStreaming,
+}: {
+  message: QaMessage
+  kbId: string
+  showThinking: boolean
+  thinkingOpen: boolean | undefined
+  onThinkingToggle: (id: string, open: boolean) => void
+  onImageClick: (url: string, title: string) => void
+  onSourceOpen: (node: ScoredNode) => void
+  onPageCitation: (docId: string, page: number) => void
+  onDeleteRound: (id: string) => void
+  onRegenerate: (id: string) => void
+  isStreaming: boolean
+}) {
+  const t = useT()
+  const hasThinking = !!message.reasoning?.trim()
+  const hasAssets = (message.answerAssets?.length ?? 0) > 0
+  const hasSources =
+    (message.answerSources?.length ?? 0) > 0 ||
+    !!(
+      message.retrievalGroups &&
+      (message.retrievalGroups.text_results.length > 0 ||
+        message.retrievalGroups.image_results.length > 0 ||
+        message.retrievalGroups.table_results.length > 0)
+    )
+
+  // Auto-open the thinking panel while streaming is in flight so users
+  // can watch reasoning land live. After streaming ends we collapse it
+  // back so the panel isn't permanently taking up reading space. User
+  // toggles win — once they click the summary themselves we stop
+  // overriding their choice.
+  const detailsOpen = thinkingOpen === undefined ? !!message.pending : thinkingOpen
+
+  // Reasoning panel sticky-bottom — same idea as the outer scroll: keep
+  // following the latest reasoning text unless the user has scrolled up
+  // inside the panel to read something.
+  const reasoningRef = useRef<HTMLDivElement | null>(null)
+  const reasoningStickRef = useRef(true)
+  useEffect(() => {
+    if (!detailsOpen) return
+    const el = reasoningRef.current
+    if (!el) return
+    if (!reasoningStickRef.current) return
+    // rAF so the DOM has painted the new text and scrollHeight reflects
+    // the actual content height before we drive scrollTop.
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+  }, [message.reasoning, detailsOpen])
+
+  if (message.role === 'user') {
+    return (
+      <article className="flex justify-end">
+        <div className="max-w-[min(78%,720px)]">
+          <div className="mb-1.5 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+            <span>{t('kb.qaYou')}</span>
+            <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <User className="size-3" />
+            </span>
+          </div>
+          <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground shadow-sm">
+            {message.content}
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  return (
+    <article className="group flex justify-start">
+      <div className="w-full">
+        <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="flex size-5 items-center justify-center rounded-full bg-muted text-primary">
+            <Bot className="size-3" />
+          </span>
+          <span className="font-medium text-foreground">{t('kb.qaAssistant')}</span>
+          {message.stage && (
+            <Badge variant="outline" className="h-5 rounded-md px-1.5 text-[10px] font-medium">
+              {message.stage}
+            </Badge>
+          )}
+        </div>
+
+        <div
+          className={cn(
+            'flex flex-col gap-3 rounded-2xl rounded-tl-md border bg-background p-4 shadow-sm',
+            message.error && 'border-destructive/40 bg-destructive/5',
+          )}
+        >
+          {showThinking && (hasThinking || (message.pending && !message.content)) && (
+            <details
+              className="max-w-3xl overflow-hidden rounded-xl border bg-muted/30"
+              open={detailsOpen}
+              onToggle={(e) => {
+                const nextOpen = (e.currentTarget as HTMLDetailsElement).open
+                if (nextOpen !== detailsOpen) {
+                  onThinkingToggle(message.id, nextOpen)
+                }
+              }}
+            >
+              <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[12px] font-medium text-muted-foreground hover:text-foreground">
+                <Sparkles className="size-3.5" />
+                <span>{t('kb.qaReasoning')}</span>
+              </summary>
+              <div
+                ref={reasoningRef}
+                onScroll={(e) => {
+                  const target = e.currentTarget
+                  const distance = target.scrollHeight - target.scrollTop - target.clientHeight
+                  reasoningStickRef.current = distance < 24
+                }}
+                className="max-h-48 overflow-y-auto px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground"
+              >
+                {hasThinking ? (
+                  <pre className="whitespace-pre-wrap font-sans">{message.reasoning}</pre>
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    {message.progressDetail || message.stage || t('kb.qaStatusRetrieving')}
+                    <span className="inline-flex gap-1" aria-hidden="true">
+                      <span className="size-1 rounded-full bg-current opacity-30 animate-pulse" />
+                      <span className="size-1 rounded-full bg-current opacity-50 animate-pulse" />
+                      <span className="size-1 rounded-full bg-current opacity-70 animate-pulse" />
+                    </span>
+                  </span>
+                )}
+              </div>
+            </details>
+          )}
+
+          {message.content ? (
+            <div className="text-sm leading-relaxed">
+              <ChatTextBlock
+                content={linkifyPageCitations(
+                  message.content,
+                  resolveCitationDoc(message.answerSources),
+                )}
+                shouldIntercept={(href) => href.startsWith('kb-page:')}
+                onIntercept={(href) => {
+                  const parsed = parsePageCitationHref(href)
+                  if (!parsed) return
+                  onPageCitation(parsed.docId, parsed.page)
+                }}
+              />
+              {message.pending && (
+                <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary/60 align-text-bottom" />
+              )}
+            </div>
+          ) : message.pending && !showThinking ? (
+            <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              {message.progressDetail || message.stage || t('kb.qaStatusRetrieving')}
+            </div>
+          ) : null}
+
+          {!message.pending && hasAssets && (
+            <KbAnswerAssets
+              kbId={kbId}
+              assets={message.answerAssets ?? []}
+              onImageClick={onImageClick}
+            />
+          )}
+
+          {!message.pending && hasSources && (
+            <KbQaSources
+              kbId={kbId}
+              answerSources={message.answerSources ?? []}
+              retrievalGroups={message.retrievalGroups}
+              onImageClick={onImageClick}
+              onSourceOpen={onSourceOpen}
+            />
+          )}
+
+          {!message.pending && !message.content && !hasSources && (
+            <p className="text-[12px] text-muted-foreground">{t('kb.qaNoSources')}</p>
+          )}
+
+          {!message.pending && (
+            <div className="flex items-center gap-1 border-t pt-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => onRegenerate(message.id)}
+                disabled={isStreaming}
+                title={t('kb.qaRegenerate')}
+                className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+              >
+                <RefreshCw data-icon="inline-start" />
+                {t('kb.qaRegenerate')}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => onDeleteRound(message.id)}
+                disabled={isStreaming}
+                title={t('kb.qaDeleteRound')}
+                className="text-muted-foreground hover:text-destructive disabled:opacity-30"
+              >
+                <Trash2 data-icon="inline-start" />
+                {t('kb.qaDeleteRound')}
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
   )
 }

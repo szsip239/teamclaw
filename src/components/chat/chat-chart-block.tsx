@@ -218,7 +218,7 @@ export const ChatChartBlock = memo(function ChatChartBlock({ optionJson }: ChatC
     } catch {
       return { option: null, error: 'chat.chartJsonInvalid' as const }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-parse when JSON changes
+
   }, [optionJson])
 
   if (error || !option || showRaw) {

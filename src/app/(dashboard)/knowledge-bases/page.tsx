@@ -17,6 +17,7 @@ export default function KnowledgeBasesPage() {
   const user = useAuthStore((s) => s.user)
 
   const [scopeFilter, setScopeFilter] = useState("all")
+  const [categoryFilter, setCategoryFilter] = useState("all")
   const [search, setSearch] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -24,6 +25,7 @@ export default function KnowledgeBasesPage() {
 
   const { data, isLoading } = useKnowledgeBases({
     scope: scopeFilter !== "all" ? scopeFilter : undefined,
+    category: categoryFilter !== "all" ? categoryFilter : undefined,
     search: search || undefined,
   })
 
@@ -46,6 +48,8 @@ export default function KnowledgeBasesPage() {
         knowledgeBases={knowledgeBases}
         scopeFilter={scopeFilter}
         onScopeFilterChange={setScopeFilter}
+        categoryFilter={categoryFilter}
+        onCategoryFilterChange={setCategoryFilter}
         search={search}
         onSearchChange={setSearch}
       />

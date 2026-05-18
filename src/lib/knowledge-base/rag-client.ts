@@ -24,6 +24,8 @@ export async function submitIngestionJob(params: {
   kbId: string
   docId: string
   filePath: string
+  fileName?: string
+  displayName?: string
   ocrModel?: string
   ocrWorkers?: number
 }): Promise<{ job_id: string; status: string }> {
@@ -33,6 +35,8 @@ export async function submitIngestionJob(params: {
       kb_id: params.kbId,
       doc_id: params.docId,
       file_path: params.filePath,
+      file_name: params.fileName,
+      display_name: params.displayName,
       ocr_model: params.ocrModel,
       ocr_workers: params.ocrWorkers,
     }),
@@ -61,6 +65,33 @@ export async function getJobStatus(jobId: string): Promise<{
   return res.json()
 }
 
+export interface RagDocumentIndexInfo {
+  kb_id: string
+  doc_id: string
+  profile_status: string
+  profile_detail: string
+  summary: string
+  doc_type: string
+  keywords: string[]
+  title_aliases: string[]
+  chapter_summary: string
+  page_count: number | null
+  indexed_page_count: number
+  index_row_count: number
+  embedded_row_count: number
+  updated_at: string | null
+}
+
+export async function getDocumentIndexInfo(
+  kbId: string,
+  docId: string,
+): Promise<RagDocumentIndexInfo | null> {
+  const res = await ragFetch(`/api/knowledge-bases/${kbId}/documents/${docId}/index-info`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`RAG document index info failed: ${res.status}`)
+  return res.json()
+}
+
 /** Delete vectors for a KB or specific document. */
 export async function deleteVectors(kbId: string, docId?: string): Promise<number> {
   const res = await ragFetch('/api/documents', {
@@ -78,6 +109,7 @@ export async function queryStream(params: {
   kbId: string
   question: string
   generateAnswer?: boolean
+  enableThinking?: boolean
   topK?: number
 }): Promise<ReadableStream<Uint8Array>> {
   const res = await ragFetch('/api/query/stream', {
@@ -86,6 +118,7 @@ export async function queryStream(params: {
       kb_id: params.kbId,
       question: params.question,
       generate_answer: params.generateAnswer ?? true,
+      enable_thinking: params.enableThinking ?? true,
       top_k: params.topK ?? 5,
     }),
   })

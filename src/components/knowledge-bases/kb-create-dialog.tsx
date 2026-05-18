@@ -13,19 +13,25 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Loader2, BookOpen, Globe, Building2, UserCircle } from "lucide-react"
+import { Loader2, BookOpen, Globe, Building2, UserCircle, Shield, FileText, Link } from "lucide-react"
 import { toast } from "sonner"
 import { useCreateKb } from "@/hooks/use-knowledge-bases"
 import { useDepartments } from "@/hooks/use-departments"
 import { useAuthStore } from "@/stores/auth-store"
 import { useT } from "@/stores/language-store"
-import type { KbScope } from "@/types/knowledge-base"
+import type { KbScope, KbCategory } from "@/types/knowledge-base"
 import type { TranslationKey } from "@/locales/zh-CN"
 
 const SCOPE_OPTIONS: { value: KbScope; labelKey: string; icon: typeof Globe; descKey: string; roles: string[] }[] = [
   { value: "GLOBAL", labelKey: "kb.scopeGlobal", icon: Globe, descKey: "kb.scopeGlobalDesc", roles: ["SYSTEM_ADMIN"] },
   { value: "DEPARTMENT", labelKey: "kb.scopeDepartment", icon: Building2, descKey: "kb.scopeDepartmentDesc", roles: ["SYSTEM_ADMIN", "DEPT_ADMIN"] },
   { value: "PERSONAL", labelKey: "kb.scopePersonal", icon: UserCircle, descKey: "kb.scopePersonalDesc", roles: ["SYSTEM_ADMIN", "DEPT_ADMIN", "USER"] },
+]
+
+const CATEGORY_OPTIONS: { value: KbCategory; labelKey: string; icon: typeof Globe; descKey: string; roles: string[] }[] = [
+  { value: "INTERNAL", labelKey: "kb.category.INTERNAL", icon: FileText, descKey: "kb.category.description.INTERNAL", roles: ["SYSTEM_ADMIN", "DEPT_ADMIN", "USER"] },
+  { value: "EXTERNAL", labelKey: "kb.category.EXTERNAL", icon: Link, descKey: "kb.category.description.EXTERNAL", roles: ["SYSTEM_ADMIN"] },
+  { value: "RULES", labelKey: "kb.category.RULES", icon: Shield, descKey: "kb.category.description.RULES", roles: ["SYSTEM_ADMIN"] },
 ]
 
 interface KbCreateDialogProps {
@@ -39,6 +45,7 @@ export function KbCreateDialog({ open, onOpenChange }: KbCreateDialogProps) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [scope, setScope] = useState<KbScope | "">("")
+  const [category, setCategory] = useState<KbCategory | "">("")
   const [departmentId, setDepartmentId] = useState("")
 
   const createKb = useCreateKb()
@@ -49,12 +56,17 @@ export function KbCreateDialog({ open, onOpenChange }: KbCreateDialogProps) {
     (opt) => user && opt.roles.includes(user.role),
   )
 
+  const availableCategories = CATEGORY_OPTIONS.filter(
+    (opt) => user && opt.roles.includes(user.role),
+  )
+
   const showDeptSelect = scope === "DEPARTMENT" && user?.role === "SYSTEM_ADMIN"
 
   function reset() {
     setName("")
     setDescription("")
     setScope("")
+    setCategory("")
     setDepartmentId("")
   }
 
@@ -65,6 +77,7 @@ export function KbCreateDialog({ open, onOpenChange }: KbCreateDialogProps) {
         name,
         description: description || undefined,
         scope: scope || undefined,
+        category: category || undefined,
         departmentId: departmentId || undefined,
       })
       toast.success(t('kb.createdMsg', { name }))
@@ -133,6 +146,37 @@ export function KbCreateDialog({ open, onOpenChange }: KbCreateDialogProps) {
                           : "hover:border-muted-foreground/30 hover:bg-muted/50"
                       }`}
                       onClick={() => setScope(opt.value)}
+                    >
+                      <opt.icon className={`size-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                      <span className={`text-[12px] font-medium ${isSelected ? "text-primary" : ""}`}>
+                        {t(opt.labelKey as TranslationKey)}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground leading-tight">
+                        {t(opt.descKey as TranslationKey)}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {availableCategories.length > 1 && (
+            <div className="space-y-2">
+              <Label className="text-[13px]">{t('kb.category')}</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {availableCategories.map((opt) => {
+                  const isSelected = category === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                          : "hover:border-muted-foreground/30 hover:bg-muted/50"
+                      }`}
+                      onClick={() => setCategory(opt.value)}
                     >
                       <opt.icon className={`size-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
                       <span className={`text-[12px] font-medium ${isSelected ? "text-primary" : ""}`}>
