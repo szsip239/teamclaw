@@ -28,15 +28,20 @@ export function RagConfigPanel() {
   const [rerankModel, setRerankModel] = useState("")
   const [ocrModel, setOcrModel] = useState("")
   const [ocrWorkers, setOcrWorkers] = useState(4)
+  const [paddleocrToken, setPaddleocrToken] = useState("")
+  const [paddleocrModel, setPaddleocrModel] = useState("PP-OCRv5")
 
   // Visibility toggles for API keys
   const [showLlmKey, setShowLlmKey] = useState(false)
   const [showEmbKey, setShowEmbKey] = useState(false)
   const [showRerankKey, setShowRerankKey] = useState(false)
+  const [showPaddleocrToken, setShowPaddleocrToken] = useState(false)
 
   // Populate form from fetched config
   useEffect(() => {
     if (config) {
+      // The settings form is editable local state; refresh it when the async config load completes.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLlmBaseUrl(String(config['rag.llm.baseUrl'] ?? ''))
       setLlmApiKey(String(config['rag.llm.apiKey'] ?? ''))
       setLlmModel(String(config['rag.llm.model'] ?? ''))
@@ -49,6 +54,8 @@ export function RagConfigPanel() {
       setRerankModel(String(config['rag.rerank.model'] ?? ''))
       setOcrModel(String(config['rag.ocr.model'] ?? ''))
       setOcrWorkers(Number(config['rag.ocr.workers']) || 4)
+      setPaddleocrToken(String(config['rag.paddleocr.token'] ?? ''))
+      setPaddleocrModel(String(config['rag.paddleocr.model'] || 'PP-OCRv5'))
     }
   }, [config])
 
@@ -67,6 +74,8 @@ export function RagConfigPanel() {
         'rag.rerank.model': rerankModel,
         'rag.ocr.model': ocrModel,
         'rag.ocr.workers': ocrWorkers,
+        'rag.paddleocr.token': paddleocrToken,
+        'rag.paddleocr.model': paddleocrModel,
       })
       toast.success(t('settings.ragSaved'))
     } catch {
@@ -196,23 +205,34 @@ export function RagConfigPanel() {
         )}
       </section>
 
-      {/* OCR Section */}
+      {/* PaddleOCR Section */}
       <section className="space-y-3">
-        <h4 className="text-[13px] font-medium border-b pb-2">{t('settings.ragOcr')}</h4>
+        <h4 className="text-[13px] font-medium border-b pb-2">{t('settings.ragPaddleOcr')}</h4>
+        <p className="text-[11px] text-muted-foreground">
+          {t('settings.ragPaddleOcrHint')}
+        </p>
         <div className="space-y-2">
-          <Label className="text-[12px]">{t('settings.ragOcrModel')}</Label>
-          <Input value={ocrModel} onChange={(e) => setOcrModel(e.target.value)} className="text-[13px]" />
+          <Label className="text-[12px]">{t('settings.ragPaddleOcrToken')}</Label>
+          <div className="relative">
+            <Input
+              type={showPaddleocrToken ? "text" : "password"}
+              value={paddleocrToken}
+              onChange={(e) => setPaddleocrToken(e.target.value)}
+              className="text-[13px] pr-10"
+              placeholder="b9501e311e..."
+            />
+            <button
+              type="button"
+              onClick={() => setShowPaddleocrToken(!showPaddleocrToken)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showPaddleocrToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
-          <Label className="text-[12px]">{t('settings.ragOcrWorkers')}</Label>
-          <Input
-            type="number"
-            min={1}
-            max={16}
-            value={ocrWorkers}
-            onChange={(e) => setOcrWorkers(Number(e.target.value))}
-            className="text-[13px] w-24"
-          />
+          <Label className="text-[12px]">{t('settings.ragPaddleOcrModel')}</Label>
+          <Input value={paddleocrModel} onChange={(e) => setPaddleocrModel(e.target.value)} className="text-[13px]" />
         </div>
       </section>
 

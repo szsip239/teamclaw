@@ -2,6 +2,12 @@ import { z } from 'zod'
 
 const slugRegex = /^[a-z0-9][a-z0-9_-]*$/
 
+export const importedSkillFileSchema = z.object({
+  path: z.string().min(1).max(500),
+  contentBase64: z.string(),
+  size: z.number().int().min(0).optional(),
+})
+
 export const createSkillSchema = z.object({
   slug: z
     .string()
@@ -15,6 +21,7 @@ export const createSkillSchema = z.object({
   departmentIds: z.array(z.string()).optional(),
   tags: z.array(z.string().max(30)).max(10).optional(),
   skillContent: z.string().optional(), // Initial SKILL.md content
+  importFiles: z.array(importedSkillFileSchema).max(200).optional(),
 })
 
 export type CreateSkillInput = z.infer<typeof createSkillSchema>

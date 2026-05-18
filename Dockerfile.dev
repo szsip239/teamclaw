@@ -1,0 +1,38 @@
+# Dev-mode Next.js runner — used by docker-compose.yml so the whole
+# stack can come up with one `docker compose up`. Production builds use
+# the multi-stage Dockerfile instead.
+FROM node:20-alpine
+
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Use Chinese npm mirror for faster installs from CN networks
+RUN npm config set registry https://registry.npmmirror.com/
+
+# Install deps first (cached across code-only changes). Source is
+# bind-mounted at runtime so we re-`npm install` automatically if
+# package.json changes (entrypoint below).
+COPY package.json package-lock.json* ./
+RUN npm ci --ignore-scripts || npm install --ignore-scripts
+
+# Generate Prisma client at startup so schema changes take effect on
+# restart without rebuilding the image.
+EXPOSE 3100
+
+ENV PORT=3100
+ENV HOSTNAME=0.0.0.0
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Entrypoint:
+#   1) If host package.json differs from baked one, sync deps
+#   2) Regenerate Prisma client (cheap if unchanged)
+#   3) Run `next dev` on 0.0.0.0:3100 with turbopack
+CMD ["sh", "-c", "\
+if ! cmp -s /app/package.json /app/.baked-package.json 2>/dev/null; then \
+  echo 'package.json changed → re-installing deps'; \
+  npm install --ignore-scripts && cp /app/package.json /app/.baked-package.json; \
+fi; \
+npx prisma generate && \
+npx next dev --turbopack --port 3100 --hostname 0.0.0.0\
+"]

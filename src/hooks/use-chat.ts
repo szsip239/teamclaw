@@ -93,6 +93,7 @@ export function useClearContext() {
     mutationFn: (sessionId: string) =>
       api.post(`/api/v1/chat/sessions/${sessionId}/clear-context`),
     onSuccess: (_data, sessionId) => {
+      useChatStore.getState().setKbSources([])
       qc.invalidateQueries({ queryKey: chatKeys.history(sessionId) })
       qc.invalidateQueries({ queryKey: chatKeys.sessions() })
     },

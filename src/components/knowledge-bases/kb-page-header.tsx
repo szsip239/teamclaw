@@ -1,9 +1,17 @@
 "use client"
 
+import { useState } from "react"
 import { motion } from "motion/react"
-import { BookOpen, Plus, Search } from "lucide-react"
+import { BookOpen, Plus, Search, Settings2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -11,7 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { RagConfigPanel } from "@/components/settings/rag-config-panel"
 import { useT } from "@/stores/language-store"
+import { useAuthStore } from "@/stores/auth-store"
 import type { KnowledgeBaseOverview } from "@/types/knowledge-base"
 
 interface KbPageHeaderProps {
@@ -20,6 +30,8 @@ interface KbPageHeaderProps {
   knowledgeBases: KnowledgeBaseOverview[]
   scopeFilter: string
   onScopeFilterChange: (value: string) => void
+  categoryFilter: string
+  onCategoryFilterChange: (value: string) => void
   search: string
   onSearchChange: (value: string) => void
 }
@@ -30,10 +42,15 @@ export function KbPageHeader({
   knowledgeBases,
   scopeFilter,
   onScopeFilterChange,
+  categoryFilter,
+  onCategoryFilterChange,
   search,
   onSearchChange,
 }: KbPageHeaderProps) {
   const t = useT()
+  const user = useAuthStore((s) => s.user)
+  const canManageRag = user?.role === 'SYSTEM_ADMIN'
+  const [ragConfigOpen, setRagConfigOpen] = useState(false)
 
   return (
     <div className="space-y-4">
@@ -62,13 +79,36 @@ export function KbPageHeader({
             </span>
           </div>
         </div>
-        {canCreate && (
-          <Button size="sm" onClick={onCreateClick} className="gap-1.5">
-            <Plus className="size-3.5" />
-            {t('kb.create')}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {canManageRag && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setRagConfigOpen(true)}
+              className="gap-1.5"
+            >
+              <Settings2 className="size-3.5" />
+              {t('kb.ragConfig')}
+            </Button>
+          )}
+          {canCreate && (
+            <Button size="sm" onClick={onCreateClick} className="gap-1.5">
+              <Plus className="size-3.5" />
+              {t('kb.create')}
+            </Button>
+          )}
+        </div>
       </motion.div>
+
+      <Dialog open={ragConfigOpen} onOpenChange={setRagConfigOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t('kb.ragConfig')}</DialogTitle>
+            <DialogDescription>{t('kb.ragConfigDesc')}</DialogDescription>
+          </DialogHeader>
+          <RagConfigPanel />
+        </DialogContent>
+      </Dialog>
 
       {/* Filter row */}
       <motion.div
@@ -95,6 +135,17 @@ export function KbPageHeader({
             <SelectItem value="GLOBAL">{t('kb.scopeGlobal')}</SelectItem>
             <SelectItem value="DEPARTMENT">{t('kb.scopeDepartment')}</SelectItem>
             <SelectItem value="PERSONAL">{t('kb.scopePersonal')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={categoryFilter} onValueChange={onCategoryFilterChange}>
+          <SelectTrigger className="w-[140px] h-9 text-[13px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('kb.all')}</SelectItem>
+            <SelectItem value="INTERNAL">{t('kb.category.INTERNAL')}</SelectItem>
+            <SelectItem value="EXTERNAL">{t('kb.category.EXTERNAL')}</SelectItem>
+            <SelectItem value="RULES">{t('kb.category.RULES')}</SelectItem>
           </SelectContent>
         </Select>
       </motion.div>

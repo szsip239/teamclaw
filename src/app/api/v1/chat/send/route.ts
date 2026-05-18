@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { instanceId, agentId, message, sessionId: targetSessionId, attachments } = parsed.data
+  const { instanceId, agentId, message, sessionId: targetSessionId, attachments, kbIds } = parsed.data
 
   // --- Permission check ---
   if (userRole !== 'SYSTEM_ADMIN') {
@@ -866,7 +866,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await adapter.sendMessage(client, sessionKey, message, idempotencyKey, {
+    // --- KB Context Injection ---
+    let augmentedMessage = message
+    if (kbIds && kbIds.length > 0 && !closed) {
+      try {
+        const { queryKBsForContext } = await import('@/lib/knowledge-base/rag-query-context')
+        const result = await queryKBsForContext(kbIds, message)
+        if (result.context) {
+          augmentedMessage = result.context
+        }
+        if (result.sources.length > 0) {
+          write({
+            type: 'kb_sources',
+            sources: result.sources,
+          })
+        }
+      } catch (err) {
+        // Non-fatal: continue with original message
+        console.warn('[chat/send] KB context query failed:', (err as Error).message)
+      }
+    }
+
+    await adapter.sendMessage(client, sessionKey, augmentedMessage, idempotencyKey, {
       attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
     })
     // Signal client that gateway has received the message — safe to start

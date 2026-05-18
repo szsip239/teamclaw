@@ -27,13 +27,33 @@ const ChatMermaidBlock = dynamic(
 
 interface ChatTextBlockProps {
   content: string
+  // Pure predicate run during render: should this href be styled as an
+  // in-app interactive chip (instead of an external link)? MUST be pure
+  // — no setState. Used by KB QA to recognize page-citation hrefs.
+  shouldIntercept?: (href: string) => boolean
+  // Click handler invoked when the user clicks an intercepted anchor.
+  // Runs only on click — side effects belong here, not in the predicate.
+  onIntercept?: (href: string) => void
 }
 
-export const ChatTextBlock = memo(function ChatTextBlock({ content }: ChatTextBlockProps) {
+export const ChatTextBlock = memo(function ChatTextBlock({
+  content,
+  shouldIntercept,
+  onIntercept,
+}: ChatTextBlockProps) {
+  // LLMs occasionally emit raw HTML <br> inside markdown cells.
+  // ReactMarkdown strips HTML for safety — turn <br> into actual
+  // newlines so bullets and table cells render correctly.
+  const cleaned = content.replace(/<br\s*\/?>/gi, '\n')
   return (
     <div className="text-sm leading-relaxed prose-chat overflow-x-auto min-w-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        // react-markdown strips href values whose URL scheme isn't in the
+        // safe-list (http/https/mailto/tel) by default. We use custom
+        // schemes like `kb-page:` for page-citation chips that get
+        // intercepted in JS — let those through without rewriting.
+        urlTransform={(url) => url}
         components={{
           // --- Code blocks ---
           pre({ children }) {
@@ -99,12 +119,26 @@ export const ChatTextBlock = memo(function ChatTextBlock({ content }: ChatTextBl
           },
           // --- Links ---
           a({ href, children }) {
+            const intercepted = !!href && !!shouldIntercept?.(href)
             return (
               <a
                 href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 dark:text-blue-400 underline decoration-blue-600/30 dark:decoration-blue-400/30 hover:decoration-blue-600 dark:hover:decoration-blue-400 cursor-pointer break-all transition-colors"
+                target={intercepted ? undefined : '_blank'}
+                rel={intercepted ? undefined : 'noopener noreferrer'}
+                onClick={
+                  intercepted && href
+                    ? (e) => {
+                        e.preventDefault()
+                        onIntercept?.(href)
+                      }
+                    : undefined
+                }
+                className={cn(
+                  'cursor-pointer break-all transition-colors',
+                  intercepted
+                    ? 'inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[12px] font-medium text-primary no-underline hover:bg-primary/20'
+                    : 'text-blue-600 dark:text-blue-400 underline decoration-blue-600/30 dark:decoration-blue-400/30 hover:decoration-blue-600 dark:hover:decoration-blue-400',
+                )}
               >
                 {children}
               </a>
@@ -148,7 +182,7 @@ export const ChatTextBlock = memo(function ChatTextBlock({ content }: ChatTextBl
           },
         }}
       >
-        {content}
+        {cleaned}
       </ReactMarkdown>
     </div>
   )

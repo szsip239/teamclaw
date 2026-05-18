@@ -3,7 +3,7 @@
  * Returns an async iterator of parsed SSE events.
  */
 export interface KbSSEEvent {
-  type: 'retrieval' | 'chunk' | 'reasoning' | 'error' | 'done'
+  type: 'progress' | 'retrieval' | 'chunk' | 'reasoning' | 'error' | 'done'
   data: Record<string, unknown>
 }
 
@@ -12,13 +12,14 @@ export async function* streamKbQuery(
   question: string,
   generateAnswer: boolean = true,
   topK: number = 5,
+  enableThinking: boolean = true,
   signal?: AbortSignal,
 ): AsyncGenerator<KbSSEEvent> {
   const res = await fetch(`/api/v1/knowledge-bases/${kbId}/query/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ question, generateAnswer, topK }),
+    body: JSON.stringify({ question, generateAnswer, topK, enableThinking }),
     signal,
   })
 

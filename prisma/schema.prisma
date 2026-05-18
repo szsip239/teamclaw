@@ -42,6 +42,12 @@ enum KbScope {
   PERSONAL     // 仅创建者可见
 }
 
+enum KbCategory {
+  INTERNAL     // 内部知识库 — company docs, policies, procedures
+  EXTERNAL     // 外部知识库 — industry standards, public references
+  RULES        // 规则库 — system rules, constraints, must-follow guidelines
+}
+
 enum DocumentStatus {
   PENDING      // 已上传，等待处理
   PROCESSING   // OCR / 向量化进行中
@@ -83,6 +89,7 @@ model User {
   installedSkills  SkillInstallation[] @relation("SkillInstaller")
   createdResources Resource[]          @relation("ResourceCreator")
   knowledgeBases   KnowledgeBase[]     @relation("KbCreator")
+  kbConversations  KbConversation[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 }
@@ -218,6 +225,7 @@ model ChatSession {
   messageCount  Int       @default(0)
   isActive      Boolean   @default(true)
   liveMessages  Json?     // Post-run auto-snapshot, overwritten after each chat reply
+  mountedKbIds  String[]  @default([])
   snapshots     ChatMessageSnapshot[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -351,18 +359,59 @@ model KnowledgeBase {
   name            String
   description     String?             @db.Text
   scope           KbScope             @default(PERSONAL)
+  category        KbCategory          @default(INTERNAL)
   departmentId    String?
   department      Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   createdById     String
   createdBy       User                @relation("KbCreator", fields: [createdById], references: [id])
   documentCount   Int                 @default(0)
   documents       KnowledgeDocument[]
+  conversations   KbConversation[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
   @@index([scope])
   @@index([departmentId])
   @@index([createdById])
+  @@index([category])
+}
+
+// Per-user, per-KB chat session — ChatGPT-style multi-conversation history.
+// Title is auto-derived from the first user message; user can rename.
+model KbConversation {
+  id              String          @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase   @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String          @default("新对话")
+  messages        KbMessage[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([knowledgeBaseId, userId, updatedAt])
+}
+
+// Immutable record of one chat turn (user question OR assistant answer).
+// Streaming-derived data (reasoning, source citations, retrieval groups,
+// answer-asset thumbnails) is persisted as JSON so we can rehydrate the
+// full UI state when the user reopens a conversation later.
+model KbMessage {
+  id                  String         @id @default(cuid())
+  conversationId      String
+  conversation        KbConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role                String         // "user" | "assistant"
+  content             String         @db.Text
+  reasoning           String?        @db.Text
+  answerSourcesJson   Json?
+  answerAssetsJson    Json?
+  retrievalGroupsJson Json?
+  stage               String?
+  error               Boolean        @default(false)
+  stopped             Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 model KnowledgeDocument {
