@@ -4,6 +4,82 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.5.1 (2026-05-22)
+
+> 分支 `codex/teamclaw-kb-rag-skills-updates` vs `main` 的全部增量。
+
+### 🎯 Highlights
+
+- **PDF.js 资源去仓库化**: 把 ~36MB 的 `pdfjs-dist` build / cmaps / standard_fonts 从 git 仓库剥离，改用 npm 依赖 + `scripts/sync-pdfjs.mjs` 在 `postinstall` / `prebuild` / `dev` 三处自动同步。仓库瘦身 ~75 000 行，升级 PDF.js 只需 bump `package.json` 版本号。
+- **聊天 ↔ 知识库 解耦**: 聊天侧不再挂载知识库、不再做 RAG 上下文注入。RAG 问答完全由「知识库 → 问答」页面承担，简化心智模型，避免两条 RAG 入口的状态分裂。
+- **侧边栏新增「工具箱」**: 原「舆情监控」侧边栏直链升级为可扩展的「工具箱」(`/tools`)，单卡片网格承载多个未来内置工具，「舆情监控」作为首个工具卡保留并指向原 `/public-opinion` 页面。
+
+---
+
+### ✨ New Features
+
+**工具箱**
+
+- 新增页面 `src/app/(dashboard)/tools/page.tsx`：响应式卡片网格，支持 `available: false` 的「即将推出」标记，便于后续按需追加工具
+- 新增 nav 入口 `工具箱 / Toolbox`（Wrench 图标 → `/tools`），替换原 `舆情监控 / Public Opinion` 侧边栏直链
+- 「舆情监控」改为工具箱内首个卡片，点击跳转到现有 `/public-opinion` 占位页（页面本身未改动）
+- 新增 i18n 键（中英双语）：`nav.toolbox`、`page.toolbox` / `page.toolboxDesc`、`toolbox.openTool` / `toolbox.comingSoon` / `toolbox.empty` / `toolbox.publicOpinion.title|desc`
+- `src/lib/dashboard-title.ts` 注册 `/tools → page.toolbox`，导航条标题随路由切换
+
+**PDF.js 同步脚本**
+
+- 新增 `scripts/sync-pdfjs.mjs`：从 `node_modules/pdfjs-dist` 拷贝 `build/`（pdf.mjs、pdf.worker.mjs 及对应 source map）、`cmaps/`、`standard_fonts/` 到 `public/pdfjs/`，幂等 `rm -rf` + `cp`
+- `package.json` 把同步挂到三处生命周期：
+  - `postinstall` — `npm install` 后自动同步
+  - `prebuild` — `npm run build` 前自动同步
+  - `dev` — `npm run dev` 启动前先同步（防本地切分支后 PDF 预览空白）
+- 新增 `npm run sync:pdfjs` 别名供手动触发
+- `.gitignore` 忽略 `public/pdfjs/build/`、`public/pdfjs/web/cmaps/`、`public/pdfjs/web/standard_fonts/`
+- 仓库内仅保留 npm 包不含的 generic viewer（`viewer.html` / `viewer.mjs` / `viewer.css` / `locale/` / `images/` / `debugger.*`）
+
+---
+
+### 🔧 Internal Changes
+
+**聊天侧 RAG 路径整体下线**
+
+- 移除组件：`src/components/chat/chat-kb-selector.tsx`、`src/components/knowledge-bases/kb-qa-sources.tsx`
+- 移除库：`src/lib/knowledge-base/rag-query-context.ts`（RAG 上下文注入逻辑）
+- 移除路由：`/api/v1/chat/sessions/[id]/knowledge-bases`
+- chat-store 去掉 `mountedKbIds` 状态、`pdfPreview` 状态及配套 actions
+- send route (`src/app/api/v1/chat/send/route.ts`) 移除 KB 上下文注入分支，`message` 不再经 `queryKBsForContext` 改写，直接进 gateway
+- chat-input 视觉重做：所有控件（📎 附件、📁 移动文件面板、Textarea、Send/Stop）合并进单个 pill 风格圆角容器
+- chat-header 移除 `mountedKbIds` Badge 展示
+- chat session 验证 schema 移除 `kbIds` 字段
+
+**知识库内问答增强**
+
+- `src/components/knowledge-bases/kb-qa-tab.tsx` 大幅重写 (+190/-... 行)，原 `kb-qa-sources.tsx` 的来源面板逻辑内联进 QA 视图，配合 `page-citations` 提供「第 N 页」可点击 chip
+- 走 `/api/v1/knowledge-bases/[id]/documents/[docId]/file` 拉原文 PDF，复用同一套 pdf.js viewer iframe
+
+**依赖与脚手架**
+
+- 新增 dependency：`pdfjs-dist@4.4.168`（生产依赖，运行时由 `sync-pdfjs.mjs` 在构建期拷到 public）
+- `prisma/schema.prisma` 微调 1 行
+- 路径不安全的删除：`public/pdfjs/build/`、`public/pdfjs/web/cmaps/`、`public/pdfjs/web/standard_fonts/`（共 ~200 个二进制 / 大文件）
+
+---
+
+### 🐛 Bug Fixes / 已知坑
+
+- 旧本地仓库切到本分支、且没跑过 `npm install`（或跑了 `--ignore-scripts`）时，会出现「文档预览空白、`第 N 页` chip 点击无反应」。原因：viewer.html 加载，但内部 `import '../build/pdf.mjs'` 404。
+  - 修复一句话：`npm install` 或 `npm run sync:pdfjs`。
+  - 长期保险：本版本已把 `dev` 脚本前置 `sync:pdfjs`，下次 `npm run dev` 时会自动补齐。
+
+---
+
+### 📋 Commits
+
+- `f8a6238` Streamline PDF.js assets and KB chat flow
+- `5e7636b` feat: replace public-opinion sidebar entry with toolbox
+
+---
+
 ## v0.5.0 (2026-05-18)
 
 ### 🎯 Highlights
