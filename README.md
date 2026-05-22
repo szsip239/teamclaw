@@ -61,6 +61,12 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 - 作用域管理 — PERSONAL / DEPARTMENT / GLOBAL 三级知识库隔离
 - 多租户存储 — 所有 RAG 数据存在 `rag` schema，每条 SQL 以 `kb_id` 为隔离轴
 
+**工具箱**
+
+- 统一入口 — 侧边栏「工具箱」聚合所有内置辅助工具，卡片式网格展示
+- 可扩展 — 单文件 `TOOLS` 数组配置，新工具通过 `available: false` 标记"即将推出"
+- 内置「舆情监控」— 聚合关键词、来源和风险信号的占位页，后续可接入搜索 / 社媒 / RSS 数据源
+
 **多实例管理**
 
 - Docker 一键创建 — 配置镜像、端口、绑定即可部署
@@ -440,6 +446,7 @@ graph TB
 | Skills | 12     | ClawHub 市场、安装/发布、版本管理、IDE 编辑                                               |
 | 实例   | 13     | Docker 创建、外部接入、健康监控、配置编辑                                                 |
 | 知识库 | 10     | PDF/DOCX/Excel 上传、PaddleOCR、FTS+向量+RRF 混合检索、PDF 页面预览、多文档路由、流式问答 |
+| 工具箱 | 1      | 卡片式工具集合，舆情监控等内置工具入口                                                    |
 | 认证   | 5      | JWT 登录、Token 轮转、限流                                                                |
 | 组织   | 5      | 用户/部门 CRUD、RBAC 权限                                                                 |
 | 审计   | 2      | 操作日志、CSV 导出                                                                        |
