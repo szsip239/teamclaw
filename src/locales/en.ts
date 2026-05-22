@@ -67,6 +67,7 @@ const en: Record<TranslationKey, string> = {
   'nav.instances': 'Instances',
   'nav.agents': 'Agents',
   'nav.skills': 'Skills',
+  'nav.toolbox': 'Toolbox',
   'nav.publicOpinion': 'Public Opinion',
   'nav.organization': 'Organization',
   'nav.users': 'Users',
@@ -86,6 +87,7 @@ const en: Record<TranslationKey, string> = {
   'page.instances': 'Instances',
   'page.agents': 'Agents',
   'page.skills': 'Skills',
+  'page.toolbox': 'Toolbox',
   'page.publicOpinion': 'Public Opinion',
   'page.users': 'Users',
   'page.departments': 'Departments',
@@ -968,6 +970,14 @@ const en: Record<TranslationKey, string> = {
     'Configure platform global parameters including security policies, integrations, and notification settings.',
   'page.publicOpinionDesc':
     'Aggregate keywords, sources, and risk signals, with search, social, and RSS data sources ready to connect later.',
+  'page.toolboxDesc':
+    'A collection of utilities — click any tool to open it and complete daily tasks.',
+  'toolbox.openTool': 'Open tool',
+  'toolbox.comingSoon': 'Coming soon',
+  'toolbox.empty': 'No tools available yet',
+  'toolbox.publicOpinion.title': 'Public Opinion',
+  'toolbox.publicOpinion.desc':
+    'Aggregate keywords, sources, and risk signals to monitor external reputation and incidents.',
 
   // ── Cron ──────────────────────────────────────────
   'nav.cron': 'Cron Jobs',

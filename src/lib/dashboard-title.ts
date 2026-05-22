@@ -6,6 +6,7 @@ export const pageTitleKeys: Record<string, TranslationKey> = {
   '/instances': 'page.instances',
   '/agents': 'page.agents',
   '/skills': 'page.skills',
+  '/tools': 'page.toolbox',
   '/public-opinion': 'page.publicOpinion',
   '/cron': 'page.cron',
   '/users': 'page.users',

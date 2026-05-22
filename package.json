@@ -18,7 +18,7 @@
     "docker"
   ],
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "npm run sync:pdfjs && next dev --turbopack",
     "build": "next build",
     "prebuild": "node scripts/sync-pdfjs.mjs",
     "postinstall": "node scripts/sync-pdfjs.mjs",

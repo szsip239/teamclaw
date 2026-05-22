@@ -65,6 +65,7 @@ const zhCN = {
   'nav.instances': '实例管理',
   'nav.agents': 'Agent 管理',
   'nav.skills': 'Skills 管理',
+  'nav.toolbox': '工具箱',
   'nav.publicOpinion': '舆情监控',
   'nav.organization': '组织',
   'nav.users': '用户管理',
@@ -84,6 +85,7 @@ const zhCN = {
   'page.instances': '实例管理',
   'page.agents': 'Agent 管理',
   'page.skills': 'Skills 管理',
+  'page.toolbox': '工具箱',
   'page.publicOpinion': '舆情监控',
   'page.users': '用户管理',
   'page.departments': '部门管理',
@@ -951,6 +953,12 @@ const zhCN = {
   'page.approvalsDesc': '查看和处理待审批的请求，管理审批流程和规则。',
   'page.settingsDesc': '配置平台全局参数，包括安全策略、集成和通知设置。',
   'page.publicOpinionDesc': '聚合关键词、来源和风险信号，后续可接入搜索、社媒和 RSS 数据源。',
+  'page.toolboxDesc': '集合各类辅助工具，点击进入对应工具完成日常任务。',
+  'toolbox.openTool': '打开工具',
+  'toolbox.comingSoon': '即将推出',
+  'toolbox.empty': '暂无可用工具',
+  'toolbox.publicOpinion.title': '舆情监控',
+  'toolbox.publicOpinion.desc': '聚合关键词、来源和风险信号，监控外部声誉与突发事件。',
 
   // ── Cron ──────────────────────────────────────────
   'nav.cron': '定时任务',
