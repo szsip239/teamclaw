@@ -7,7 +7,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { ChatKbSelector } from './chat-kb-selector'
 
 const IMAGE_MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const FILE_MAX_SIZE = 5 * 1024 * 1024 // 5MB
@@ -205,24 +204,20 @@ export function ChatInput() {
           </div>
         )}
 
-        <div className="flex items-end gap-2">
-          {/* File upload button */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept={FILE_ACCEPT}
-            multiple
-            onChange={handleFileSelect}
-          />
-          {/* KB mount button */}
-          <ChatKbSelector />
-
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept={FILE_ACCEPT}
+          multiple
+          onChange={handleFileSelect}
+        />
+        <div className="flex items-end gap-1 rounded-lg border bg-card px-1.5 py-1 shadow-sm transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10">
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="shrink-0"
+            className="size-8 shrink-0"
             onClick={() => fileInputRef.current?.click()}
             disabled={isStreaming}
             title={t('chat.uploadFile')}
@@ -230,13 +225,12 @@ export function ChatInput() {
             <Paperclip className="size-4" />
           </Button>
 
-          {/* Mobile: file panel toggle button */}
           {showFilePanelButton && (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="shrink-0"
+              className="size-8 shrink-0"
               onClick={() => setMobileFilePanelOpen(!mobileFilePanelOpen)}
               title={t('chat.filePanel')}
             >
@@ -250,18 +244,23 @@ export function ChatInput() {
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={t('chat.inputPlaceholder')}
-            className="min-h-[44px] max-h-[200px] resize-none"
+            className="min-h-8 max-h-[200px] resize-none border-0 bg-transparent px-1 py-1.5 text-sm leading-5 shadow-none focus-visible:ring-0"
             rows={1}
             enterKeyHint="send"
           />
           {isStreaming && (
-            <Button variant="destructive" size="icon" className="shrink-0" onClick={handleStop}>
+            <Button
+              variant="destructive"
+              size="icon"
+              className="size-8 shrink-0"
+              onClick={handleStop}
+            >
               <Square className="size-4" />
             </Button>
           )}
           <Button
             size="icon"
-            className="shrink-0"
+            className="size-8 shrink-0"
             onClick={handleSend}
             disabled={(!input.trim() && pendingFiles.length === 0) || !selectedAgent}
           >

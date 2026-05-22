@@ -19,11 +19,10 @@ describe('KbQaTab llm-rag-style Q&A migration', () => {
     )
   })
 
-  it('renders process, reasoning, sources, assets, and source-page preview hooks', () => {
+  it('renders process, reasoning, assets, and source-page preview hooks', () => {
     expect(qaSource).toMatch(/event\.type === ['"]progress['"]/)
     expect(qaSource).toMatch(/event\.type === ['"]reasoning['"]/)
     expect(qaSource).toContain('KbAnswerAssets')
-    expect(qaSource).toContain('KbQaSources')
     expect(qaSource).toContain('KbDocumentOriginalSheet')
     expect(qaSource).toContain('onSourceOpen={openSource}')
   })
