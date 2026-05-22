@@ -67,21 +67,6 @@ export function ChatMain() {
     }
   }, [activeSessionId, sessions, qc])
 
-  // Sync mounted KBs when session changes
-  const setMountedKbIds = useChatStore((s) => s.setMountedKbIds)
-  useEffect(() => {
-    if (!matchingSession) {
-      setMountedKbIds([])
-      return
-    }
-    // Sync from session data directly (avoids extra fetch)
-    if (matchingSession.mountedKbIds) {
-      setMountedKbIds(matchingSession.mountedKbIds)
-    } else {
-      setMountedKbIds([])
-    }
-  }, [matchingSession, setMountedKbIds])
-
   // When history data arrives or updates, assemble the full message list.
   // Skip during streaming to avoid overwriting real-time content.
   // Re-apply when: session changes, data refreshes (dataUpdatedAt), or messages cleared.

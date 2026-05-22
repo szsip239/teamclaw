@@ -47,6 +47,11 @@ nginx/cert/
 # vercel
 .vercel
 
+# PDF.js library assets synced from pdfjs-dist (npm) by scripts/sync-pdfjs.mjs
+/public/pdfjs/build/
+/public/pdfjs/web/cmaps/
+/public/pdfjs/web/standard_fonts/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

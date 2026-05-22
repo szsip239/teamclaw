@@ -225,7 +225,6 @@ model ChatSession {
   messageCount  Int       @default(0)
   isActive      Boolean   @default(true)
   liveMessages  Json?     // Post-run auto-snapshot, overwritten after each chat reply
-  mountedKbIds  String[]  @default([])
   snapshots     ChatMessageSnapshot[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

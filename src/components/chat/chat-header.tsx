@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { PanelLeftClose, PanelLeft, RotateCcw, Bot, Loader2, Download, X, BookOpen } from "lucide-react"
+import { PanelLeftClose, PanelLeft, RotateCcw, Bot, Loader2, Download, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -33,7 +33,6 @@ export function ChatHeader() {
   const exportMode = useChatStore((s) => s.exportMode)
   const setExportMode = useChatStore((s) => s.setExportMode)
   const messages = useChatStore((s) => s.messages)
-  const mountedKbIds = useChatStore((s) => s.mountedKbIds)
   const selectedExportIds = useChatStore((s) => s.selectedExportIds)
   const overLimit = selectedExportIds.length > MAX_EXPORT_MESSAGES
 
@@ -130,15 +129,6 @@ export function ChatHeader() {
             {!isMobile && (
               <Badge variant="outline" className="text-xs">
                 {selectedAgent.instanceName}
-              </Badge>
-            )}
-            {mountedKbIds.length > 0 && (
-              <Badge
-                variant="secondary"
-                className="text-xs gap-1 text-muted-foreground"
-              >
-                <BookOpen className="size-3" />
-                {t('chat.kbCount', { n: String(mountedKbIds.length) })}
               </Badge>
             )}
             <div className="ml-auto flex items-center gap-1">

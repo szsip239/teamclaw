@@ -10,13 +10,6 @@ export const sendMessageSchema = z.object({
     content: z.string(),       // base64 (no data:... prefix)
     mimeType: z.string().max(100),
   })).max(5).optional(),       // max 5 attachments
-  kbIds: z.array(z.string()).max(10).optional(), // mounted KB IDs
 })
 
 export type SendMessageInput = z.infer<typeof sendMessageSchema>
-
-export const mountKbSchema = z.object({
-  kbId: z.string().min(1),
-})
-
-export type MountKbInput = z.infer<typeof mountKbSchema>
