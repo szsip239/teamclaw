@@ -1,15 +1,16 @@
 "use client"
 
 import { Badge } from "@/components/ui/badge"
-import { Database, Cloud } from "lucide-react"
+import { Database, Cloud, HardDrive } from "lucide-react"
 import { useT } from "@/stores/language-store"
 import type { SkillSource } from "@/types/skill"
 import type { TranslationKey } from "@/locales/zh-CN"
 
-const SOURCE_CONFIG = {
+const SOURCE_CONFIG: Record<SkillSource, { labelKey: TranslationKey | null; icon: typeof Database; className: string }> = {
   LOCAL: { labelKey: 'skill.sourceLocal' as TranslationKey, icon: Database, className: "text-slate-600 border-slate-500/20 dark:text-slate-400" },
   CLAWHUB: { labelKey: null, icon: Cloud, className: "text-cyan-600 border-cyan-500/20 dark:text-cyan-400" },
-} as const
+  INSTANCE: { labelKey: 'skill.sourceInstance' as TranslationKey, icon: HardDrive, className: "text-emerald-600 border-emerald-500/20 dark:text-emerald-400" },
+}
 
 export function SkillSourceBadge({ source }: { source: SkillSource }) {
   const t = useT()

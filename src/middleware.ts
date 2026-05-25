@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/login',
   '/api/v1/auth/register',
   '/api/v1/auth/refresh',
+  '/api/v1/internal/',
   '/api/health',
   '/_next',
   '/favicon.ico',
@@ -40,6 +41,18 @@ function isApiRoute(pathname: string): boolean {
   return pathname.startsWith('/api/')
 }
 
+async function extractToken(req: NextRequest): Promise<string | null> {
+  // Priority 1: access_token cookie
+  const cookieToken = req.cookies.get('access_token')?.value
+  if (cookieToken) return cookieToken
+
+  // Priority 2: Authorization: Bearer <token> header
+  const authHeader = req.headers.get('authorization')
+  if (authHeader?.startsWith('Bearer ')) return authHeader.slice(7)
+
+  return null
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -47,7 +60,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  const token = req.cookies.get('access_token')?.value
+  const token = await extractToken(req)
 
   if (!token) {
     if (isApiRoute(pathname)) {

@@ -46,9 +46,10 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 **Skills 市场**
 
 - ClawHub 集成 — 从公共市场搜索、安装和更新技能包
+- 实例自动发现 — 通过 OpenClaw 对话或 CLI 安装的 skill 自动同步到管理页面，无需手动导入
 - 技能开发 — IDE 风格的文件编辑器，本地开发后发布到 ClawHub
 - 版本管理 — 安装追踪、版本检查与一键升级
-- 作用域控制 — 支持 PERSONAL / DEPARTMENT / GLOBAL 三级作用域
+- 作用域控制 — PERSONAL / DEPARTMENT / GLOBAL 三级作用域，新增 INSTANCE 来源标签
 
 **知识库 (RAG)**
 
@@ -65,7 +66,8 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 
 - 统一入口 — 侧边栏「工具箱」聚合所有内置辅助工具，卡片式网格展示
 - 可扩展 — 单文件 `TOOLS` 数组配置，新工具通过 `available: false` 标记"即将推出"
-- 内置「舆情监控」— 聚合关键词、来源和风险信号的占位页，后续可接入搜索 / 社媒 / RSS 数据源
+- **法规追踪** — 绑定知识库为追踪条目，自动提取关键词并通过博查 API 搜索法规/标准更新，发现新版本后写入待办清单。配套 OpenClaw skill 可一键运行检查流水线
+- **舆情监控** — 聚合关键词、来源和风险信号的占位页，可接入搜索 / 社媒 / RSS 数据源
 
 **多实例管理**
 
@@ -446,7 +448,7 @@ graph TB
 | Skills | 12     | ClawHub 市场、安装/发布、版本管理、IDE 编辑                                               |
 | 实例   | 13     | Docker 创建、外部接入、健康监控、配置编辑                                                 |
 | 知识库 | 10     | PDF/DOCX/Excel 上传、PaddleOCR、FTS+向量+RRF 混合检索、PDF 页面预览、多文档路由、流式问答 |
-| 工具箱 | 1      | 卡片式工具集合，舆情监控等内置工具入口                                                    |
+| 工具箱 | 3      | 卡片式工具集合、法规追踪、舆情监控等内置工具入口                                          |
 | 认证   | 5      | JWT 登录、Token 轮转、限流                                                                |
 | 组织   | 5      | 用户/部门 CRUD、RBAC 权限                                                                 |
 | 审计   | 2      | 操作日志、CSV 导出                                                                        |
@@ -506,9 +508,10 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 **Skills Marketplace**
 
 - ClawHub integration — search, install, and update skill packages from public marketplace
+- Instance auto-discovery — skills installed via OpenClaw chat or CLI automatically sync to the management page
 - Skill development — IDE-style file editor, develop locally and publish to ClawHub
 - Version management — installation tracking, version checks, and one-click upgrades
-- Scope control — PERSONAL / DEPARTMENT / GLOBAL skill scopes
+- Scope control — PERSONAL / DEPARTMENT / GLOBAL skill scopes + INSTANCE source badge
 
 **Knowledge Base (RAG)**
 
@@ -822,6 +825,7 @@ graph TB
 | Auth           | 5      | JWT login, token rotation, rate limiting                                                                              |
 | Org            | 5      | User/department CRUD, RBAC                                                                                            |
 | Audit          | 2      | Operation logs, CSV export                                                                                            |
+| Toolbox        | 3      | Card-style tool collection, regulation tracker, public opinion, and more built-in utilities                           |
 | Dashboard      | 1      | Instance/session/user/skill metrics                                                                                   |
 | Other          | 5      | Resource keys, instance access                                                                                        |
 
