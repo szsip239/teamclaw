@@ -34,6 +34,7 @@ enum SkillCategory {
 enum SkillSource {
   LOCAL        // 平台本地创建
   CLAWHUB      // 从 ClawHub 拉取
+  INSTANCE     // 从 OpenClaw 实例工作空间自动发现
 }
 
 enum KbScope {
@@ -90,6 +91,7 @@ model User {
   createdResources Resource[]          @relation("ResourceCreator")
   knowledgeBases   KnowledgeBase[]     @relation("KbCreator")
   kbConversations  KbConversation[]
+  regulationTrackers RegulationTracker[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 }
@@ -225,7 +227,6 @@ model ChatSession {
   messageCount  Int       @default(0)
   isActive      Boolean   @default(true)
   liveMessages  Json?     // Post-run auto-snapshot, overwritten after each chat reply
-  mountedKbIds  String[]  @default([])
   snapshots     ChatMessageSnapshot[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -367,6 +368,7 @@ model KnowledgeBase {
   documentCount   Int                 @default(0)
   documents       KnowledgeDocument[]
   conversations   KbConversation[]
+  trackers        RegulationTracker[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
@@ -374,6 +376,66 @@ model KnowledgeBase {
   @@index([departmentId])
   @@index([createdById])
   @@index([category])
+}
+
+// User-scoped tracker that watches a KnowledgeBase for clause updates.
+// Wiki-style clause summaries are derived live from KnowledgeDocument
+// indexInfo; lastCheckedAt marks the latest doc.updatedAt the user has seen,
+// so the frontend can flag newer documents as "新增".
+//
+// keywords drive the periodic web-search pipeline; if empty, the check skill
+// will fall back to aggregating each document's indexInfo.keywords on the fly.
+// notifyChannels is an array of "email" / "wework" identifiers, optional for
+// MVP — the chat agent surfaces results directly even without notifications.
+model RegulationTracker {
+  id              String        @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  keywords        String[]      @default([])
+  notifyChannels  String[]      @default([])
+  searchCron      String?
+  lastCheckedAt   DateTime?
+  lastCheckRunAt  DateTime?
+  pendingUpdates  PendingUpdate[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([userId, knowledgeBaseId])
+  @@index([userId])
+  @@index([knowledgeBaseId])
+}
+
+// One regulation update / news / paper discovered for a tracker.
+// Status workflow: NEW → SEEN (user opened it) → APPLIED (user marked
+// "incorporated") or DISMISSED (irrelevant). Dedup is by `sourceUrl` per
+// tracker; re-running check is idempotent.
+model PendingUpdate {
+  id              String            @id @default(cuid())
+  trackerId       String
+  tracker         RegulationTracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  sourceUrl       String
+  source          String            @default("web_search")
+  title           String
+  summary         String            @db.Text
+  suggestion      String?           @db.Text
+  matchedKeywords String[]          @default([])
+  status          PendingStatus     @default(NEW)
+  foundAt         DateTime          @default(now())
+  reviewedAt      DateTime?
+
+  @@unique([trackerId, sourceUrl])
+  @@index([trackerId, status])
+  @@index([status, foundAt])
+}
+
+enum PendingStatus {
+  NEW
+  SEEN
+  APPLIED
+  DISMISSED
 }
 
 // Per-user, per-KB chat session — ChatGPT-style multi-conversation history.

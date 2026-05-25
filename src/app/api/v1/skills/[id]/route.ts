@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
+import * as fs from 'fs/promises'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation, param } from '@/lib/middleware/auth'
 import { auditLog } from '@/lib/audit'
 import { updateSkillSchema } from '@/lib/validations/skill'
 import { isSkillVisible, canEditSkill, canCreateSkillWithCategory } from '@/lib/skills/permissions'
 import { deleteSkillDir, renameSkillDir } from '@/lib/skills/fs'
+import { dockerManager } from '@/lib/docker'
 import type { SkillDetail, SkillCategory, SkillSource } from '@/types/skill'
 
 // GET /api/v1/skills/[id] — Skill detail
@@ -201,6 +203,32 @@ export const PUT = withAuth(
   ),
 )
 
+/** Best-effort cleanup of installed skill files on a single instance. */
+async function cleanupInstalledFiles(
+  slug: string,
+  install: {
+    installPath: string
+    instance: { containerId: string | null; workspacePath: string | null }
+  },
+): Promise<void> {
+  const isExternal = !install.instance.containerId && !!install.instance.workspacePath
+  let skillDir: string
+  if (install.installPath === 'global') {
+    skillDir = isExternal
+      ? `${install.instance.workspacePath}/skills/${slug}`
+      : `/home/node/.openclaw/skills/${slug}`
+  } else {
+    // workspace-level installs need gateway config to resolve the full path;
+    // skip here (uninstall via the uninstall endpoint handles those explicitly).
+    return
+  }
+  if (isExternal) {
+    await fs.rm(skillDir, { recursive: true, force: true })
+  } else if (install.instance.containerId) {
+    await dockerManager.removeContainerDir(install.instance.containerId, skillDir)
+  }
+}
+
 // DELETE /api/v1/skills/[id] — Delete skill
 export const DELETE = withAuth(
   withPermission('skills:develop', async (req, { user, params }) => {
@@ -221,6 +249,20 @@ export const DELETE = withAuth(
     if (!canEditSkill(skill, user)) {
       return NextResponse.json({ error: 'No permission to delete this skill' }, { status: 403 })
     }
+
+    // Clean up installed files on all instances before deleting DB records.
+    // This is best-effort — individual failures are logged but won't block the delete.
+    const installations = await prisma.skillInstallation.findMany({
+      where: { skillId: id },
+      include: { instance: { select: { containerId: true, workspacePath: true } } },
+    })
+    await Promise.allSettled(
+      installations.map((inst) =>
+        cleanupInstalledFiles(skill.slug, inst).catch((err) =>
+          console.error(`Failed to cleanup ${skill.slug} on instance ${inst.instanceId}:`, err),
+        ),
+      ),
+    )
 
     // Delete DB records (cascade deletes versions + installations)
     await prisma.skill.delete({ where: { id } })

@@ -1,5 +1,6 @@
-import { readdir, readFile, writeFile, mkdir, rm, stat, rename } from 'fs/promises'
+import { readdir, readFile, writeFile, mkdir, rm, stat, rename, access } from 'fs/promises'
 import { join, relative, resolve } from 'path'
+import { prisma } from '@/lib/db'
 import type { SkillFileEntry } from '@/types/skill'
 
 /** Base directory for skill file storage */
@@ -7,16 +8,49 @@ export function getSkillsBaseDir(): string {
   return process.env.TEAMCLAW_SKILLS_DIR || join(process.cwd(), 'data', 'skills')
 }
 
-/** Get the directory path for a specific skill */
+/** Get the directory path for a specific skill (local filesystem) */
 export function getSkillDir(slug: string): string {
   return join(getSkillsBaseDir(), slug)
 }
 
-/** Validate path safety: no traversal, stays within skill dir */
-export function isSkillPathSafe(slug: string, filePath: string): boolean {
+/**
+ * For INSTANCE skills, locate the actual skill directory in one of the
+ * connected instance workspaces. Returns null if not found.
+ */
+export async function findInstanceSkillDir(slug: string): Promise<string | null> {
+  try {
+    const instances = await prisma.instance.findMany({
+      where: { workspacePath: { not: null } },
+      select: { workspacePath: true },
+    })
+    const candidates = [
+      ...instances.map((i) => join(i.workspacePath!, 'skills', slug)),
+      ...instances.map((i) => join(i.workspacePath!, 'workspace', 'skills', slug)),
+    ]
+    for (const dir of candidates) {
+      try {
+        await access(join(dir, 'SKILL.md'))
+        return dir
+      } catch {
+        continue
+      }
+    }
+  } catch {
+    // Prisma unavailable or no instances
+  }
+  return null
+}
+
+/** Resolve the actual on-disk directory for a skill based on its source. */
+export async function resolveSkillDir(slug: string): Promise<string> {
+  const instDir = await findInstanceSkillDir(slug)
+  return instDir ?? getSkillDir(slug)
+}
+
+/** Validate path safety: no traversal, no absolute paths */
+export function isSkillPathSafe(_slug: string, filePath: string): boolean {
   if (filePath.includes('..') || filePath.startsWith('/')) return false
-  const resolved = resolve(getSkillDir(slug), filePath)
-  return resolved.startsWith(getSkillDir(slug))
+  return true
 }
 
 /** Ensure a skill directory exists */
@@ -95,7 +129,8 @@ export async function readSkillFile(
   filePath: string,
 ): Promise<string> {
   assertSafePath(slug, filePath)
-  const fullPath = join(getSkillDir(slug), filePath)
+  const dir = await resolveSkillDir(slug)
+  const fullPath = join(dir, filePath)
   return readFile(fullPath, 'utf-8')
 }
 
@@ -106,9 +141,10 @@ export async function writeSkillFile(
   content: string,
 ): Promise<void> {
   assertSafePath(slug, filePath)
-  const fullPath = join(getSkillDir(slug), filePath)
-  const dir = join(fullPath, '..')
-  await mkdir(dir, { recursive: true })
+  const dir = await resolveSkillDir(slug)
+  const fullPath = join(dir, filePath)
+  const parent = join(fullPath, '..')
+  await mkdir(parent, { recursive: true })
   await writeFile(fullPath, content, 'utf-8')
 }
 
@@ -118,7 +154,8 @@ export async function deleteSkillFile(
   filePath: string,
 ): Promise<void> {
   assertSafePath(slug, filePath)
-  const fullPath = join(getSkillDir(slug), filePath)
+  const dir = await resolveSkillDir(slug)
+  const fullPath = join(dir, filePath)
   await rm(fullPath, { recursive: true })
 }
 

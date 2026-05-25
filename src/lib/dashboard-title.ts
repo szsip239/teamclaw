@@ -6,7 +6,9 @@ export const pageTitleKeys: Record<string, TranslationKey> = {
   '/instances': 'page.instances',
   '/agents': 'page.agents',
   '/skills': 'page.skills',
+  '/tools': 'page.toolbox',
   '/public-opinion': 'page.publicOpinion',
+  '/regulations': 'page.regulations',
   '/cron': 'page.cron',
   '/users': 'page.users',
   '/departments': 'page.departments',
@@ -20,5 +22,6 @@ export function resolveDashboardTitleKey(pathname: string): TranslationKey | nul
   if (pageTitleKeys[pathname]) return pageTitleKeys[pathname]
   if (/^\/instances\/[^/]+\/config$/.test(pathname)) return 'page.advancedConfig'
   if (/^\/skills\/[^/]+$/.test(pathname)) return 'page.skillDetail'
+  if (/^\/regulations\/[^/]+$/.test(pathname)) return 'page.regulations'
   return null
 }

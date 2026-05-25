@@ -92,9 +92,6 @@ interface ChatState {
   connectionStatus: 'ok' | 'unreachable' | 'session-lost'
   setConnectionStatus: (v: 'ok' | 'unreachable' | 'session-lost') => void
 
-  // Knowledge Base mounting
-  mountedKbIds: string[]
-  setMountedKbIds: (ids: string[]) => void
   kbSources: KbSourceRef[]
   setKbSources: (sources: KbSourceRef[]) => void
 
@@ -522,7 +519,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }))
 
       for await (const event of streamChat(
-        { instanceId, agentId, message, sessionId, attachments: streamAttachments, kbIds: get().mountedKbIds },
+        { instanceId, agentId, message, sessionId, attachments: streamAttachments },
         controller.signal,
       )) {
         switch (event.type) {
@@ -705,7 +702,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeSessionId: null,
       connectionStatus: 'ok',
       remoteStreaming: false,
-      mountedKbIds: [],
       kbSources: [],
     })
   },
@@ -713,8 +709,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   connectionStatus: 'ok',
   setConnectionStatus: (v) => set({ connectionStatus: v }),
 
-  mountedKbIds: [],
-  setMountedKbIds: (ids) => set({ mountedKbIds: ids }),
   kbSources: [],
   setKbSources: (sources) => set({ kbSources: sources }),
 

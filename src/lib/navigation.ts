@@ -7,15 +7,16 @@ import {
   LayoutDashboard,
   MessageSquare,
   Puzzle,
-  Radar,
   ScrollText,
   Server,
   Users,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 
 import type { TranslationKey } from '@/locales/zh-CN'
 
+export const TOOLBOX_PATH = '/tools'
 export const PUBLIC_OPINION_PATH = '/public-opinion'
 
 export interface SidebarNavItem {
@@ -58,7 +59,7 @@ export function buildSidebarNavGroups(t: Translate, role: string | null | undefi
         { title: t('nav.agents'), icon: Bot, href: '/agents' },
         { title: t('nav.skills'), icon: Puzzle, href: '/skills' },
         { title: t('nav.knowledgeBases'), icon: BookOpen, href: '/knowledge-bases' },
-        { title: t('nav.publicOpinion'), icon: Radar, href: PUBLIC_OPINION_PATH },
+        { title: t('nav.toolbox'), icon: Wrench, href: TOOLBOX_PATH },
         { title: t('nav.cron'), icon: Clock, href: '/cron' },
       ],
     },

@@ -57,7 +57,6 @@ export interface ChatSessionResponse {
   lastMessageAt: string | null
   messageCount: number
   isActive: boolean
-  mountedKbIds?: string[]
   createdAt: string
 }
 
