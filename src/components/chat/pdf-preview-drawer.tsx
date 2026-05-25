@@ -133,7 +133,7 @@ export function PdfPreviewDrawer({ preview, onClose }: Props) {
         </header>
         {error ? (
           <div className="flex flex-1 items-center justify-center p-6 text-sm text-destructive">
-            PDF 加载失败：{error}
+            {t('chat.pdfPreview.loadFailed')}: {error}
           </div>
         ) : src ? (
           <iframe
@@ -145,7 +145,7 @@ export function PdfPreviewDrawer({ preview, onClose }: Props) {
         ) : (
           <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            正在加载 PDF…
+            {t('chat.pdfPreview.loading')}
           </div>
         )}
       </aside>

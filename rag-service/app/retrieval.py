@@ -231,6 +231,22 @@ def _preview_text(text: str, *, limit: int = 120) -> str:
     return f"{cleaned[:limit].rstrip()}..."
 
 
+def _safe_first_choice(response: Any, context: str) -> Any:
+    """Return response.choices[0] or log a clear diagnostic when choices is empty."""
+    if not getattr(response, "choices", None):
+        logger.error(
+            "[llm.empty_choices] context=%s model=%s response_keys=%s",
+            context,
+            getattr(response, "model", "unknown"),
+            sorted(getattr(response, "model_extra", {}) or {}),
+        )
+        raise RuntimeError(
+            f"LLM returned empty choices ({context}). "
+            "Check the API key, model name, and base URL for the LLM provider."
+        )
+    return response.choices[0]
+
+
 def understand_retrieval_query(question: str, creds: RequestCredentials) -> dict[str, Any]:
     source = " ".join(str(question or "").split()).strip()
     if not source:
@@ -256,7 +272,8 @@ def understand_retrieval_query(question: str, creds: RequestCredentials) -> dict
         response_format={"type": "json_object"},
         extra_body={"enable_thinking": False},
     )
-    parsed = _extract_json_object(response.choices[0].message.content or "")
+    choice = _safe_first_choice(response, "query-understanding")
+    parsed = _extract_json_object(choice.message.content or "")
     if not parsed:
         logger.warning("[query.understanding.invalid] question=%r", _preview_text(question))
         return {}
@@ -586,7 +603,8 @@ async def _filter_page_hits_by_relevance(
             response_format={"type": "json_object"},
             extra_body={"enable_thinking": False},
         )
-        raw = response.choices[0].message.content or ""
+        choice = _safe_first_choice(response, "doc-relevance-filter")
+        raw = choice.message.content or ""
         parsed = _extract_json_object(raw)
         relevant: set[str] = set()
         for value in parsed.get("relevant_document_ids") or []:

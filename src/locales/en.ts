@@ -372,6 +372,8 @@ const en: Record<TranslationKey, string> = {
   'chat.pdfPreview.title': 'PDF preview',
   'chat.pdfPreview.page': 'p.{n}',
   'chat.pdfPreview.openHint': 'Open this page',
+  'chat.pdfPreview.loadFailed': 'PDF load failed',
+  'chat.pdfPreview.loading': 'Loading PDF...',
   'chat.kbNoResults': 'No relevant knowledge found',
   'chat.kbSearchFailed': 'KB query failed',
   'chat.kbMaxReached': 'Maximum {n} KBs',
