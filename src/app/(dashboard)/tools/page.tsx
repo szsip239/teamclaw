@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowUpRight, Radar, Wrench, type LucideIcon } from 'lucide-react'
+import { ArrowUpRight, Radar, ScrollText, Wrench, type LucideIcon } from 'lucide-react'
 import Link from 'next/link'
 import { motion } from 'motion/react'
 
@@ -25,6 +25,14 @@ const TOOLS: ToolItem[] = [
     titleKey: 'toolbox.publicOpinion.title',
     descKey: 'toolbox.publicOpinion.desc',
     href: '/public-opinion',
+    available: true,
+  },
+  {
+    key: 'regulations',
+    icon: ScrollText,
+    titleKey: 'toolbox.regulations.title',
+    descKey: 'toolbox.regulations.desc',
+    href: '/regulations',
     available: true,
   },
 ]

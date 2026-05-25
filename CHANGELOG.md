@@ -4,6 +4,87 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.5.2 (2026-05-25)
+
+> 分支 `codex/teamclaw-kb-rag-skills-updates` — 法规追踪、Skill 同步、认证增强。
+
+### 🎯 Highlights
+
+- **法规追踪**: 新增「工具箱 → 法规追踪」模块，用户可将知识库绑定为追踪条目，定时检查法规/标准更新。配套 `regulation-tracker` skill 可在 OpenClaw 中一键运行检查流水线。
+- **Skill 实例自动发现**: 在 OpenClaw 对话中通过 ClawHub 安装的 skill 会自动出现在 TeamClaw Skills 管理页面，无需手动导入。新增 `INSTANCE` 来源标签。
+- **Bearer Token 认证**: 中间件支持 `Authorization: Bearer <JWT>` 请求头，API 路由可通过 JWT 直接鉴权，不再仅依赖 cookie。
+- **博查搜索接入**: 法规追踪的检查流水线支持通过博查 API 进行真实法规搜索（需配置 `BOCHA_API_KEY`）。
+
+---
+
+### ✨ New Features
+
+**法规追踪 (Regulation Tracker)**
+
+- 新增页面 `src/app/(dashboard)/regulations/`：追踪条目列表 + 创建/删除/详情页
+- 新增 API `src/app/api/v1/regulations/`：CRUD 追踪条目、一键检查、待办更新管理
+- 新增内部 API `src/app/api/v1/internal/regulations/check/`：供 skill/cron 调用，支持服务令牌 + 用户邮箱认证
+- 新增 `RegulationTracker` + `PendingUpdate` 数据模型（Prisma schema + migration）
+- 新增 hooks (`use-regulations.ts`)、types (`regulation.ts`)、validation (`regulation.ts`)
+- 新增 `/data/skills/regulation-tracker/` — OpenClaw skill：`check.py` 调用 TeamClaw API 执行检查
+- 工具箱新增「法规追踪」工具卡（ScrollText icon → `/regulations`）
+- 搜索提供者可插拔：`MockSearchProvider`（演示）→ `BochaSearchProvider`（生产）
+- i18n：中英文全覆盖（`regulations.*` 键族）
+
+**Skill 实例同步**
+
+- Skills API (`GET /api/v1/skills`) 自动扫描已连接实例的 workspace，发现未注册 skill 后自动创建 DB 记录（source=`INSTANCE`）
+- `SkillSourceBadge` 新增 INSTANCE 标签（绿色 HardDrive icon）
+- Skills 页面筛选下拉新增「实例」选项
+- Skill 文件 API（列表/读写/删）对 INSTANCE 类型自动定位实例 workspace 路径
+- 新增 `resolveSkillDir()`、`findInstanceSkillDir()` — 跨 `data/skills/` 和实例 workspace 的目录解析
+- i18n：`skill.sourceInstance`（实例/Instance）
+
+**Bearer Token 认证**
+
+- `src/middleware.ts`：`extractToken()` 优先读 cookie，其次读 `Authorization: Bearer` header
+- 所有 API 路由自动支持 Bearer JWT（无需额外改动，中间件注入 `x-user-id` 等请求头）
+- `/api/v1/internal/` 加入 `PUBLIC_PATHS`（内部端点走自有鉴权，不走 JWT 中间件）
+
+---
+
+### 🔧 Internal Changes
+
+**Skill 删除增强**
+
+- DELETE skill 前遍历所有 `SkillInstallation`，清理实例上的实际文件目录
+- 新增 `cleanupInstalledFiles()` — 对外部实例用 `fs.rm()`，Docker 实例用 `dockerManager.removeContainerDir()`
+- 清理是 best-effort（`Promise.allSettled`），单实例失败不阻塞删除
+
+**安装时环境变量提示**
+
+- install API 解析 SKILL.md frontmatter 的 `metadata.requires.env`
+- 响应中返回 `requiredEnvVars` + `primaryEnvVar`，前端弹 warning toast 提示用户配置
+- i18n：`skill.envVarsRequired`（中英文）
+
+**依赖变更**
+
+- `prisma/schema.prisma`：`SkillSource` 枚举新增 `INSTANCE`
+- `RegulationTracker` + `PendingUpdate` + `PendingStatus` 模型
+- `.env`：新增 `REGULATION_SKILL_TOKEN`、`REGULATION_SEARCH_PROVIDER`、`BOCHA_API_KEY`
+
+---
+
+### 🐛 Bug Fixes
+
+- **Skill 删除只删一半**：DELETE 仅清 DB + `data/skills/`，不清实例 workspace → 现遍历 installation 同步清理
+- **内部 API 被中间件拦截**：`/api/v1/internal/` 不在白名单 → 加入 `PUBLIC_PATHS`
+- **INSTANCE skill 详情页空白**：文件 API 硬编码读 `data/skills/` → 现对 INSTANCE skill 查实例 workspace
+
+---
+
+### 📋 Commits
+
+- `a80a6ad` docs: README + CHANGELOG v0.5.1 covering branch deltas vs main
+- Multiple uncommitted changes on `codex/teamclaw-kb-rag-skills-updates`
+
+---
+
 ## v0.5.1 (2026-05-22)
 
 > 分支 `codex/teamclaw-kb-rag-skills-updates` vs `main` 的全部增量。
