@@ -23,9 +23,12 @@ server {
     ssl_ciphers         HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
 
+    # ── Docker DNS resolver (prevents stale IP caching) ──
+    resolver 127.0.0.11 valid=30s;
+
     # ── Security headers ─────────────────────────────────
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options DENY always;
+    add_header X-Frame-Options SAMEORIGIN always;
     add_header X-Content-Type-Options nosniff always;
 
     # ── Request body size (file uploads / attachments) ───
@@ -33,14 +36,16 @@ server {
 
     # ── Static assets (Next.js _next/static) ─────────────
     location /_next/static/ {
-        proxy_pass http://app:3100;
+        set $backend "app:3100";
+        proxy_pass http://$backend;
         expires 365d;
         add_header Cache-Control "public, immutable";
     }
 
     # ── SSE streaming: chat/send ─────────────────────────
     location = /api/v1/chat/send {
-        proxy_pass http://app:3100;
+        set $backend "app:3100";
+        proxy_pass http://$backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -56,7 +61,8 @@ server {
 
     # ── SSE streaming: files/watch ───────────────────────
     location ~ ^/api/v1/chat/sessions/.+/files/watch$ {
-        proxy_pass http://app:3100;
+        set $backend "app:3100";
+        proxy_pass http://$backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -72,7 +78,8 @@ server {
 
     # ── Default proxy ────────────────────────────────────
     location / {
-        proxy_pass http://app:3100;
+        set $backend "app:3100";
+        proxy_pass http://$backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

@@ -367,6 +367,8 @@ const zhCN = {
   'chat.pdfPreview.title': 'PDF 预览',
   'chat.pdfPreview.page': '第 {n} 页',
   'chat.pdfPreview.openHint': '点击查看该页',
+  'chat.pdfPreview.loadFailed': 'PDF 加载失败',
+  'chat.pdfPreview.loading': '正在加载 PDF…',
   'chat.kbNoResults': '未找到相关知识',
   'chat.kbSearchFailed': '知识库查询失败',
   'chat.kbMaxReached': '最多 {n} 个知识库',
