@@ -80,6 +80,11 @@ next-env.d.ts
 !/data/skills/vane-search/
 # _meta.json carries per-user ownerId from the OpenClaw marketplace — never commit
 /data/skills/*/_meta.json
+# Sensitive: OAuth tokens, session state, local settings snapshots
+/data/skills/**/.tokens.json
+/data/skills/**/.claude/state/
+/data/skills/**/.claude/settings.local.json
+/data/skills/*backup*/
 
 # reference & study docs
 openclaw*.md
