@@ -1,5 +1,5 @@
 export type SkillCategory = 'DEFAULT' | 'DEPARTMENT' | 'PERSONAL'
-export type SkillSource = 'LOCAL' | 'CLAWHUB'
+export type SkillSource = 'LOCAL' | 'CLAWHUB' | 'INSTANCE'
 
 /** Skill overview for list page */
 export interface SkillOverview {

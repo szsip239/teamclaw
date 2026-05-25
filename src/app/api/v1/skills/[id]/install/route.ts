@@ -7,7 +7,7 @@ import type { AuthContext } from '@/lib/middleware/auth'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { installSkillSchema } from '@/lib/validations/skill'
-import { listSkillFiles, getSkillDir } from '@/lib/skills/fs'
+import { listSkillFiles, getSkillDir, parseFrontmatter } from '@/lib/skills/fs'
 import { dockerManager } from '@/lib/docker'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import {
@@ -27,6 +27,25 @@ function resolveExternalPath(workspacePath: string, gatewayPath: string): string
   // workspacePath = /Users/user/.openclaw → homeDir = /Users/user
   const homeDir = path.resolve(workspacePath, '..')
   return gatewayPath.replace(/^~/, homeDir)
+}
+
+/** Extract required env var names from a SKILL.md frontmatter metadata block. */
+async function extractRequiredEnvVars(
+  slug: string,
+): Promise<{ env: string[]; primary: string | null }> {
+  try {
+    const content = await readFile(join(getSkillDir(slug), 'SKILL.md'), 'utf-8')
+    const fm = parseFrontmatter(content)
+    if (!fm?.metadata) return { env: [], primary: null }
+    const meta = typeof fm.metadata === 'string' ? JSON.parse(fm.metadata) : fm.metadata
+    const openclaw = meta?.openclaw ?? meta
+    return {
+      env: (openclaw?.requires?.env as string[]) ?? [],
+      primary: (openclaw?.primaryEnv as string) ?? null,
+    }
+  } catch {
+    return { env: [], primary: null }
+  }
 }
 
 // POST /api/v1/skills/[id]/install - Install skill to agent
@@ -219,6 +238,8 @@ export const POST = withAuth(
         result: 'SUCCESS',
       })
 
+      const requiredEnv = await extractRequiredEnvVars(skill.slug)
+
       return NextResponse.json({
         installation: {
           id: installation.id,
@@ -230,6 +251,8 @@ export const POST = withAuth(
           targetPath: targetDir,
           filesCount: files.length,
         },
+        requiredEnvVars: requiredEnv.env,
+        primaryEnvVar: requiredEnv.primary,
       })
     }),
   ),

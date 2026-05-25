@@ -6,7 +6,7 @@ import type {
   GatewayEvent,
 } from '@/types/gateway'
 
-const PROTOCOL_VERSION = 3
+const PROTOCOL_VERSION = 4
 // 120s default: first-chat system-prompt generation takes ~60s, plus
 // provider-plugin pnpm staging can block the event loop for ~20s.
 const REQUEST_TIMEOUT_MS = 120_000

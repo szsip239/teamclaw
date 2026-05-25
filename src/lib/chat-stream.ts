@@ -7,7 +7,6 @@ export async function* streamChat(
     message: string
     sessionId?: string
     attachments?: { name: string; content: string; mimeType: string }[]
-    kbIds?: string[]
   },
   signal?: AbortSignal,
 ): AsyncGenerator<ChatStreamEvent> {

@@ -7,6 +7,7 @@ import { motion } from "motion/react"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { SkillDetailHeader } from "@/components/skills/skill-detail-header"
+import { SkillApiKeySection } from "@/components/skills/skill-api-key-section"
 import { SkillIdeLayout } from "@/components/skills/skill-ide-layout"
 import { SkillInstallDialog } from "@/components/skills/skill-install-dialog"
 import { SkillPublishDialog } from "@/components/skills/skill-publish-dialog"
@@ -107,6 +108,8 @@ export default function SkillDetailPage({ params }: { params: Promise<{ id: stri
             : undefined
         }
       />
+
+      <SkillApiKeySection skillId={id} />
 
       <SkillIdeLayout skill={skill} canEdit={canEdit} />
 

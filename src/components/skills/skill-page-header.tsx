@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { Plus, Puzzle, Download, Globe, Building2, UserCircle, Database, Cloud, Search } from "lucide-react"
+import { Plus, Puzzle, Download, Globe, Building2, UserCircle, Database, Cloud, HardDrive, Search } from "lucide-react"
 import { useT } from "@/stores/language-store"
 import type { SkillOverview } from "@/types/skill"
 
@@ -133,6 +133,9 @@ export function SkillPageHeader({
             </SelectItem>
             <SelectItem value="CLAWHUB">
               <span className="flex items-center gap-1.5"><Cloud className="size-3" /> ClawHub</span>
+            </SelectItem>
+            <SelectItem value="INSTANCE">
+              <span className="flex items-center gap-1.5"><HardDrive className="size-3" /> {t('skill.sourceInstance')}</span>
             </SelectItem>
           </SelectContent>
         </Select>

@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
+import { readdir, stat } from 'fs/promises'
+import { join, relative } from 'path'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { isSkillVisible } from '@/lib/skills/permissions'
-import { listSkillFiles } from '@/lib/skills/fs'
+import { listSkillFiles, resolveSkillDir } from '@/lib/skills/fs'
+import type { SkillFileEntry } from '@/types/skill'
 
 // GET /api/v1/skills/[id]/files — List files in skill directory
 export const GET = withAuth(
@@ -33,7 +36,34 @@ export const GET = withAuth(
     }
 
     try {
-      const files = await listSkillFiles(skill.slug, dir)
+      // For INSTANCE skills, list from the instance workspace; otherwise
+      // read from the local data/skills/ tree.
+      let files: SkillFileEntry[]
+      if (skill.source === 'INSTANCE') {
+        const base = await resolveSkillDir(skill.slug)
+        const target = dir ? join(base, dir) : base
+        const entries = await readdir(target, { withFileTypes: true })
+        files = await Promise.all(
+          entries
+            .sort((a, b) => {
+              if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
+              return a.name.localeCompare(b.name)
+            })
+            .map(async (ent) => {
+              const relPath = relative(base, join(target, ent.name))
+              const entry: SkillFileEntry = { name: ent.name, path: relPath, type: ent.isDirectory() ? 'directory' : 'file' }
+              if (!ent.isDirectory()) {
+                try {
+                  const st = await stat(join(target, ent.name))
+                  entry.size = st.size
+                } catch { /* ignore */ }
+              }
+              return entry
+            }),
+        )
+      } else {
+        files = await listSkillFiles(skill.slug, dir)
+      }
       return NextResponse.json({ files, slug: skill.slug, dir: dir ?? '' })
     } catch (err) {
       return NextResponse.json(

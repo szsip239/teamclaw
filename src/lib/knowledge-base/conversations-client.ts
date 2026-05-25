@@ -119,7 +119,7 @@ export async function appendMessage(
     retrievalGroups?: unknown
     autoTitle?: boolean
   },
-): Promise<void> {
+): Promise<{ id: string; createdAt: string }> {
   const res = await fetch(`${base(kbId)}/${convId}/messages`, {
     method: 'POST',
     credentials: 'include',
@@ -127,4 +127,5 @@ export async function appendMessage(
     body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error('persist message failed')
+  return res.json()
 }

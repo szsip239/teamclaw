@@ -56,8 +56,21 @@ export function SkillInstallDialog({ open, onOpenChange, skill }: SkillInstallDi
     if (!skill) return
 
     try {
-      await installSkill.mutateAsync({ instanceId, agentId, installPath })
+      const result = await installSkill.mutateAsync({ instanceId, agentId, installPath })
       toast.success(t('skill.installedMsg', { name: skill.name }))
+
+      // Warn if the skill requires env vars that the user needs to configure on the instance
+      const requiredEnvVars = (result as { requiredEnvVars?: string[]; primaryEnvVar?: string | null })?.requiredEnvVars
+      if (requiredEnvVars && requiredEnvVars.length > 0) {
+        const primaryEnv = (result as { primaryEnvVar?: string | null })?.primaryEnvVar
+        const cmd = primaryEnv
+          ? `openclaw config set skills.entries.${skill.slug}.apiKey YOUR_KEY`
+          : ''
+        toast.warning(t('skill.envVarsRequired', { vars: requiredEnvVars.join(', '), cmd }), {
+          duration: 12000,
+        })
+      }
+
       reset()
       onOpenChange(false)
     } catch (err) {

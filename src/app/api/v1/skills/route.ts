@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { readdir, readFile } from 'fs/promises'
+import { join } from 'path'
 import type { Prisma } from '@/generated/prisma'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
@@ -19,7 +21,91 @@ import {
   readImportedSkillText,
   writeImportedSkillFiles,
 } from '@/lib/skills/import'
-import type { SkillOverview, SkillListResponse, SkillCategory } from '@/types/skill'
+import type { SkillOverview, SkillListResponse, SkillCategory, SkillSource } from '@/types/skill'
+
+/** Scan external instance workspaces for skill directories not yet in the DB,
+ *  auto-register them, and return as SkillOverview items. */
+async function discoverInstanceSkills(
+  dbSlugs: Set<string>,
+  creatorId: string,
+): Promise<SkillOverview[]> {
+  const result: SkillOverview[] = []
+  const instances = await prisma.instance.findMany({
+    where: { workspacePath: { not: null } },
+    select: { workspacePath: true },
+  })
+
+  const scanDirs = new Set<string>()
+  for (const inst of instances) {
+    if (inst.workspacePath) {
+      scanDirs.add(join(inst.workspacePath, 'skills'))
+      scanDirs.add(join(inst.workspacePath, 'workspace', 'skills'))
+    }
+  }
+
+  for (const dir of scanDirs) {
+    let entries: string[]
+    try {
+      entries = await readdir(dir)
+    } catch {
+      continue
+    }
+    for (const slug of entries) {
+      if (dbSlugs.has(slug)) continue
+
+      let raw: string
+      try {
+        raw = await readFile(join(dir, slug, 'SKILL.md'), 'utf-8')
+      } catch {
+        // Not a skill directory — skip
+        continue
+      }
+      const fm = parseFrontmatter(raw)
+      const name = (fm?.name as string) || slug
+      const description = (fm?.description as string) || ''
+
+      // Auto-register so it appears on subsequent requests without re-scanning.
+      let skill: { id: string; slug: string; name: string; description: string | null; emoji: string | null; category: string; source: string; version: string; tags: string[]; createdAt: Date; updatedAt: Date }
+      const existing = await prisma.skill.findUnique({ where: { slug } })
+      if (existing) {
+        dbSlugs.add(slug)
+        continue
+      }
+      skill = await prisma.skill.create({
+        data: {
+          slug,
+          name: String(name),
+          description: String(description || '').slice(0, 500) || null,
+          category: 'DEFAULT',
+          source: 'INSTANCE',
+          version: '0.1.0',
+          creatorId,
+          tags: [],
+        },
+      })
+
+      result.push({
+        id: skill.id,
+        slug: skill.slug,
+        name: skill.name,
+        description: skill.description,
+        emoji: null,
+        category: 'DEFAULT',
+        source: 'INSTANCE',
+        version: skill.version,
+        tags: [],
+        creatorName: '',
+        departments: [],
+        installationCount: 0,
+        createdAt: skill.createdAt.toISOString(),
+        updatedAt: skill.updatedAt.toISOString(),
+      })
+      dbSlugs.add(slug)
+    }
+  }
+
+  return result
+}
 
 // GET /api/v1/skills — List skills with pagination and filtering
 export const GET = withAuth(
@@ -90,7 +176,7 @@ export const GET = withAuth(
       description: skill.description,
       emoji: skill.emoji,
       category: skill.category as SkillCategory,
-      source: skill.source as 'LOCAL' | 'CLAWHUB',
+      source: skill.source as SkillSource,
       version: skill.version,
       tags: skill.tags,
       creatorName: skill.creator.name,
@@ -100,9 +186,16 @@ export const GET = withAuth(
       updatedAt: skill.updatedAt.toISOString(),
     }))
 
+    // Discover skills from connected instance workspaces that are not yet in
+    // the DB (e.g. skills installed via OpenClaw CLI / ClawHub / chat agent).
+    const dbSlugs = new Set(skills.map((s) => s.slug))
+    const discovered = await discoverInstanceSkills(dbSlugs, user.id)
+
+    const allSkills = [...visibleSkills, ...discovered]
+
     const response: SkillListResponse = {
-      skills: visibleSkills,
-      total,
+      skills: allSkills,
+      total: total + discovered.length,
       page,
       pageSize,
     }

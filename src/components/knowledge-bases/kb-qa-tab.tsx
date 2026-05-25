@@ -17,7 +17,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { ChatTextBlock } from '@/components/chat/chat-text-block'
-import { KbQaSources } from './kb-qa-sources'
 import { KbAnswerAssets } from './kb-answer-assets'
 import { KbImageLightbox } from './kb-image-lightbox'
 import { KbDocumentOriginalSheet } from './kb-document-original-sheet'
@@ -42,6 +41,11 @@ import {
 import { cn } from '@/lib/utils'
 import { useT } from '@/stores/language-store'
 import type { KnowledgeDocumentInfo, ScoredNode } from '@/types/knowledge-base'
+
+// Hoisted so ChatTextBlock's memo isn't defeated by a fresh function on
+// every render — re-rendering causes ReactMarkdown to rebuild the table
+// wrapper and lose the inner scroll position.
+const isPageCitationHref = (href: string) => href.startsWith('kb-page:')
 
 interface KbQaTabProps {
   kbId: string
@@ -161,7 +165,10 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
   // Tracks whether the user is reading from the bottom (so we keep
   // auto-scrolling) or has scrolled up to look at something (so we
   // stop hijacking their scroll position).
-  const stickToBottomRef = useRef(true)
+  // Defaults to false so loading a historical conversation lands at the
+  // top instead of jumping to the latest reply — flipped to true when
+  // the user sends a new message or scrolls to the bottom themselves.
+  const stickToBottomRef = useRef(false)
   const readyDocuments = useMemo(
     () => documents.filter((doc) => doc.status === 'SUCCEEDED'),
     [documents],
@@ -284,6 +291,23 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
       abortRef.current = controller
       setIsStreaming(true)
 
+      // Mirror the assistant message in plain locals as the stream runs.
+      // We persist from these at the end instead of trying to read React
+      // state — setState updaters in async paths are not guaranteed to
+      // execute before the next line under React 18 batching, so the
+      // earlier `setMessages(prev => { snap = ...; return prev })` trick
+      // routinely produced `snap === undefined` and silently skipped
+      // persisting the assistant turn.
+      let finalContent = ''
+      let finalReasoning = ''
+      let finalStage: string | undefined
+      let finalAssets: ScoredNode[] = []
+      let finalSources: ScoredNode[] = []
+      let finalGroups: RetrievalGroups | undefined
+      let finalError = false
+      let finalStopped = false
+      let finalized = false
+
       try {
         for await (const event of streamKbQuery(
           kbId,
@@ -306,48 +330,61 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
             const assets = normalizeSources(event.data.answer_assets)
             const sources = normalizeSources(event.data.answer_sources)
             const allSources = normalizeSources(event.data.sources)
+            const groups: RetrievalGroups = {
+              text_results: allSources.filter((source) => source.kind === 'text'),
+              image_results: allSources.filter((source) => source.kind === 'image'),
+              table_results: allSources.filter((source) => source.kind === 'table'),
+            }
+            finalAssets = assets
+            finalSources = sources
+            finalGroups = groups
             updateAssistant(assistantId, (message) => ({
               ...message,
               stage: t('kb.qaStatusContext'),
               progressDetail: t('kb.qaProgressContext', { n: allSources.length }),
               answerAssets: assets,
               answerSources: sources,
-              retrievalGroups: {
-                text_results: allSources.filter((source) => source.kind === 'text'),
-                image_results: allSources.filter((source) => source.kind === 'image'),
-                table_results: allSources.filter((source) => source.kind === 'table'),
-              },
+              retrievalGroups: groups,
             }))
             continue
           }
 
           if (event.type === 'reasoning') {
+            const delta = (event.data.delta as string) ?? ''
+            finalReasoning += delta
             updateAssistant(assistantId, (message) => ({
               ...message,
               stage: t('kb.qaStatusThinking'),
               progressDetail: t('kb.qaProgressThinking'),
-              reasoning: `${message.reasoning ?? ''}${(event.data.delta as string) ?? ''}`,
+              reasoning: `${message.reasoning ?? ''}${delta}`,
             }))
             continue
           }
 
           if (event.type === 'chunk') {
+            const text = (event.data.text as string) ?? ''
+            finalContent += text
             updateAssistant(assistantId, (message) => ({
               ...message,
               stage: t('kb.qaStatusGenerating'),
               progressDetail: t('kb.qaProgressGenerating'),
-              content: `${message.content}${(event.data.text as string) ?? ''}`,
+              content: `${message.content}${text}`,
             }))
             continue
           }
 
           if (event.type === 'error') {
+            const msg = (event.data.message as string) || t('operationFailed')
+            finalContent = msg
+            finalError = true
+            finalStage = t('kb.qaStatusFailed')
+            finalized = true
             updateAssistant(assistantId, (message) => ({
               ...message,
               pending: false,
               error: true,
               stage: t('kb.qaStatusFailed'),
-              content: (event.data.message as string) || t('operationFailed'),
+              content: msg,
             }))
             break
           }
@@ -355,11 +392,17 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
           if (event.type === 'done') {
             const doneAssets = normalizeSources(event.data.answer_assets)
             const doneSources = normalizeSources(event.data.answer_sources)
+            const doneReasoning = ((event.data.reasoning as string) || finalReasoning || '').trim()
+            if (doneAssets.length > 0) finalAssets = doneAssets
+            if (doneSources.length > 0) finalSources = doneSources
+            finalReasoning = doneReasoning
+            finalStage = t('kb.qaStatusCompleted')
+            finalized = true
             updateAssistant(assistantId, (message) => ({
               ...message,
               pending: false,
               stage: t('kb.qaStatusCompleted'),
-              reasoning: ((event.data.reasoning as string) || message.reasoning || '').trim(),
+              reasoning: doneReasoning,
               answerAssets: doneAssets.length > 0 ? doneAssets : message.answerAssets,
               answerSources: doneSources.length > 0 ? doneSources : message.answerSources,
             }))
@@ -368,52 +411,57 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
         }
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
+          const stoppedText = finalContent || t('kb.qaStopped')
+          finalContent = stoppedText
+          finalStopped = true
+          finalStage = t('kb.qaStatusStopped')
+          finalized = true
           updateAssistant(assistantId, (message) => ({
             ...message,
             pending: false,
             stopped: true,
             stage: t('kb.qaStatusStopped'),
             progressDetail: t('kb.qaStopped'),
-            content: message.content || t('kb.qaStopped'),
+            content: stoppedText,
           }))
         } else {
+          const msg = (err as Error).message || t('operationFailed')
+          finalContent = msg
+          finalError = true
+          finalStage = t('kb.qaStatusFailed')
+          finalized = true
           updateAssistant(assistantId, (message) => ({
             ...message,
             pending: false,
             error: true,
             stage: t('kb.qaStatusFailed'),
-            content: (err as Error).message || t('operationFailed'),
+            content: msg,
           }))
         }
       } finally {
         setIsStreaming(false)
         abortRef.current = null
 
-        // Read the finalized message via a *pure* snapshot so React
-        // Strict Mode (dev) won't double-fire the side effect.
-        // Side effects inside a setState updater are an anti-pattern
-        // because Strict Mode intentionally invokes updaters twice.
-        let snap: QaMessage | undefined
-        setMessages((prev) => {
-          snap = prev.find((m) => m.id === assistantId)
-          return prev
-        })
-        const finalized = snap && !snap.pending ? snap : undefined
-
         if (finalized) {
           appendMessage(kbId, convId, {
             role: 'assistant',
-            content: finalized.content,
-            reasoning: finalized.reasoning || null,
-            stage: finalized.stage ?? null,
-            error: finalized.error,
-            stopped: finalized.stopped,
-            answerSources: finalized.answerSources ?? [],
-            answerAssets: finalized.answerAssets ?? [],
-            retrievalGroups: finalized.retrievalGroups ?? null,
-          }).catch(() => {
-            /* swallow */
+            content: finalContent,
+            reasoning: finalReasoning || null,
+            stage: finalStage ?? null,
+            error: finalError,
+            stopped: finalStopped,
+            answerSources: finalSources,
+            answerAssets: finalAssets,
+            retrievalGroups: finalGroups ?? null,
           })
+            .then((result) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, id: result.id } : m)),
+              )
+            })
+            .catch(() => {
+              /* swallow */
+            })
 
           setConversations((prevList) => {
             const idx = prevList.findIndex((c) => c.id === convId)
@@ -475,6 +523,10 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
       answerSources: [],
     }
 
+    // User is actively chatting — re-enable stick-to-bottom so the new
+    // user bubble + streaming reply scroll into view regardless of where
+    // they were reading before.
+    stickToBottomRef.current = true
     setMessages((prev) => [...prev, userMessage, assistantMessage])
     setQuestion('')
 
@@ -482,9 +534,17 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
       role: 'user',
       content: q,
       autoTitle: isFirstMessageInConv,
-    }).catch(() => {
-      /* swallow */
     })
+      .then((result) => {
+        // Replace the placeholder id with the server-assigned cuid so that
+        // subsequent delete operations can locate the row in the database.
+        setMessages((prev) =>
+          prev.map((m) => (m.id === userMessage.id ? { ...m, id: result.id } : m)),
+        )
+      })
+      .catch(() => {
+        /* swallow */
+      })
 
     await runAssistantStream({
       question: q,
@@ -585,7 +645,9 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
     })
 
     for (const id of toRemove) {
-      if (id.startsWith('user-') || id.startsWith('assistant-')) continue
+      // Placeholder ids (user-*/assistant-*) mean the message was never
+      // persisted to the backend — skip the API call.
+      if (id.startsWith('assistant-')) continue
       try {
         await deleteMessage(kbId, activeConvId, id)
       } catch {
@@ -726,7 +788,7 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
               </div>
             </div>
           ) : (
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 pb-3">
+            <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-3">
               {messages.map((message) => (
                 <QaMessageBubble
                   key={message.id}
@@ -748,7 +810,7 @@ export function KbQaTab({ kbId, kbName, documents }: KbQaTabProps) {
         </div>
 
         <div className="border-t bg-background/90 px-3 py-2.5 pb-5">
-          <div className="mx-auto w-full max-w-5xl">
+          <div className="mx-auto w-full max-w-[1600px]">
             <div className="rounded-lg border bg-card px-2 py-1 shadow-sm transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10">
               <div className="flex items-end gap-2">
                 <Textarea
@@ -850,14 +912,23 @@ function QaMessageBubble({
   const t = useT()
   const hasThinking = !!message.reasoning?.trim()
   const hasAssets = (message.answerAssets?.length ?? 0) > 0
-  const hasSources =
-    (message.answerSources?.length ?? 0) > 0 ||
-    !!(
-      message.retrievalGroups &&
-      (message.retrievalGroups.text_results.length > 0 ||
-        message.retrievalGroups.image_results.length > 0 ||
-        message.retrievalGroups.table_results.length > 0)
-    )
+
+  // Memoize so the prop reference to ChatTextBlock is stable across
+  // re-renders triggered by unrelated state (e.g. opening the original
+  // preview sheet). Otherwise ReactMarkdown re-parses and the
+  // overflow-auto table wrapper loses its inner scroll position.
+  const linkifiedContent = useMemo(
+    () => linkifyPageCitations(message.content, resolveCitationDoc(message.answerSources)),
+    [message.content, message.answerSources],
+  )
+  const handleInterceptClick = useCallback(
+    (href: string) => {
+      const parsed = parsePageCitationHref(href)
+      if (!parsed) return
+      onPageCitation(parsed.docId, parsed.page)
+    },
+    [onPageCitation],
+  )
 
   // Auto-open the thinking panel while streaming is in flight so users
   // can watch reasoning land live. After streaming ends we collapse it
@@ -965,16 +1036,9 @@ function QaMessageBubble({
           {message.content ? (
             <div className="text-sm leading-relaxed">
               <ChatTextBlock
-                content={linkifyPageCitations(
-                  message.content,
-                  resolveCitationDoc(message.answerSources),
-                )}
-                shouldIntercept={(href) => href.startsWith('kb-page:')}
-                onIntercept={(href) => {
-                  const parsed = parsePageCitationHref(href)
-                  if (!parsed) return
-                  onPageCitation(parsed.docId, parsed.page)
-                }}
+                content={linkifiedContent}
+                shouldIntercept={isPageCitationHref}
+                onIntercept={handleInterceptClick}
               />
               {message.pending && (
                 <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary/60 align-text-bottom" />
@@ -995,17 +1059,7 @@ function QaMessageBubble({
             />
           )}
 
-          {!message.pending && hasSources && (
-            <KbQaSources
-              kbId={kbId}
-              answerSources={message.answerSources ?? []}
-              retrievalGroups={message.retrievalGroups}
-              onImageClick={onImageClick}
-              onSourceOpen={onSourceOpen}
-            />
-          )}
-
-          {!message.pending && !message.content && !hasSources && (
+          {!message.pending && !message.content && (
             <p className="text-[12px] text-muted-foreground">{t('kb.qaNoSources')}</p>
           )}
 
