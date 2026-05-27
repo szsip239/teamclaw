@@ -14,6 +14,32 @@ import type { ChatHistoryMessage, ChatHistoryResult } from '@/types/gateway'
 import type { ChatToolCall, ChatContentBlock, ChatMessage } from '@/types/chat'
 import type { GatewayClient } from '@/lib/gateway/client'
 
+export const LIVE_HISTORY_LIMIT = 500
+export const MAX_LIVE_MESSAGES = 800
+
+const snapshotLocks = new Map<string, Promise<void>>()
+
+async function withSessionSnapshotLock<T>(
+  chatSessionId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = snapshotLocks.get(chatSessionId) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(fn)
+  const tracked = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  snapshotLocks.set(chatSessionId, tracked)
+
+  try {
+    return await run
+  } finally {
+    if (snapshotLocks.get(chatSessionId) === tracked) {
+      snapshotLocks.delete(chatSessionId)
+    }
+  }
+}
+
 // ─── Extraction helpers (shared across snapshot + liveMessages) ──────
 
 export function extractText(content: ChatHistoryMessage['content']): string {
@@ -229,7 +255,7 @@ export async function archiveSession(
   // Fetch history from gateway (may fail if gateway is offline)
   let rawMessages: ChatHistoryMessage[] = []
   try {
-    const rawResult = await client.request('chat.history', { sessionKey, limit: 200 })
+    const rawResult = await client.request('chat.history', { sessionKey, limit: LIVE_HISTORY_LIMIT })
     const historyResult = rawResult as ChatHistoryResult
     rawMessages = historyResult.messages ?? []
   } catch {
@@ -380,6 +406,180 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
   return result
 }
 
+function cloneContentBlocks(blocks: ChatContentBlock[] | undefined): ChatContentBlock[] | undefined {
+  return blocks?.map((block) => ({ ...block }))
+}
+
+function cloneToolCalls(toolCalls: ChatToolCall[] | undefined): ChatToolCall[] | undefined {
+  return toolCalls?.map((toolCall) => ({ ...toolCall }))
+}
+
+function cloneMessage(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    ...(message.contentBlocks ? { contentBlocks: cloneContentBlocks(message.contentBlocks) } : {}),
+    ...(message.toolCalls ? { toolCalls: cloneToolCalls(message.toolCalls) } : {}),
+    ...(message.attachments ? { attachments: message.attachments.map((attachment) => ({ ...attachment })) } : {}),
+    ...(message.kbSources ? { kbSources: message.kbSources.map((source) => ({ ...source })) } : {}),
+  }
+}
+
+function messagesMatch(a: ChatMessage, b: ChatMessage): boolean {
+  return a.role === b.role && a.content === b.content
+}
+
+function findIncomingOverlap(
+  existing: ChatMessage[],
+  incoming: ChatMessage[],
+): { start: number; length: number } {
+  let bestStart = existing.length
+  let bestLength = 0
+
+  for (let start = 0; start < existing.length; start++) {
+    let length = 0
+    while (
+      start + length < existing.length &&
+      length < incoming.length &&
+      messagesMatch(existing[start + length], incoming[length])
+    ) {
+      length++
+    }
+
+    if (length > bestLength || (length > 0 && length === bestLength && start > bestStart)) {
+      bestStart = start
+      bestLength = length
+    }
+  }
+
+  return { start: bestStart, length: bestLength }
+}
+
+function contentBlockKey(block: ChatContentBlock): string {
+  if (block.type === 'image') return `image:${block.imageId ?? block.imageUrl ?? ''}`
+  return `text:${block.text ?? ''}`
+}
+
+function mergeContentBlocks(
+  oldBlocks: ChatContentBlock[] | undefined,
+  newBlocks: ChatContentBlock[] | undefined,
+): ChatContentBlock[] | undefined {
+  const merged = cloneContentBlocks(oldBlocks) ?? []
+  const seen = new Set(merged.map(contentBlockKey))
+
+  for (const block of newBlocks ?? []) {
+    const key = contentBlockKey(block)
+    if (seen.has(key)) continue
+    merged.push({ ...block })
+    seen.add(key)
+  }
+
+  return merged.length > 0 ? merged : undefined
+}
+
+function hasValue(value: unknown): boolean {
+  return value != null && value !== ''
+}
+
+function mergeToolCalls(
+  oldToolCalls: ChatToolCall[] | undefined,
+  newToolCalls: ChatToolCall[] | undefined,
+): ChatToolCall[] | undefined {
+  const oldCalls = oldToolCalls ?? []
+  const newCalls = newToolCalls ?? []
+  const max = Math.max(oldCalls.length, newCalls.length)
+  const merged: ChatToolCall[] = []
+
+  for (let i = 0; i < max; i++) {
+    const oldCall = oldCalls[i]
+    const newCall = newCalls[i]
+
+    if (oldCall && newCall) {
+      merged.push({
+        toolName: oldCall.toolName || newCall.toolName,
+        toolInput: hasValue(oldCall.toolInput) ? oldCall.toolInput : newCall.toolInput,
+        toolOutput: hasValue(oldCall.toolOutput) ? oldCall.toolOutput : newCall.toolOutput,
+      })
+    } else if (oldCall) {
+      merged.push({ ...oldCall })
+    } else if (newCall) {
+      merged.push({ ...newCall })
+    }
+  }
+
+  return merged.length > 0 ? merged : undefined
+}
+
+function mergeMessagePreservingOldData(oldMessage: ChatMessage, newMessage: ChatMessage): ChatMessage {
+  const contentBlocks = mergeContentBlocks(oldMessage.contentBlocks, newMessage.contentBlocks)
+  const toolCalls = mergeToolCalls(oldMessage.toolCalls, newMessage.toolCalls)
+
+  return {
+    ...newMessage,
+    id: oldMessage.id,
+    createdAt: oldMessage.createdAt,
+    content: oldMessage.content || newMessage.content,
+    ...(oldMessage.thinking || newMessage.thinking
+      ? { thinking: oldMessage.thinking || newMessage.thinking }
+      : {}),
+    ...(oldMessage.error || newMessage.error ? { error: oldMessage.error || newMessage.error } : {}),
+    ...(oldMessage.attachments || newMessage.attachments
+      ? { attachments: oldMessage.attachments ?? newMessage.attachments }
+      : {}),
+    ...(oldMessage.kbSources || newMessage.kbSources
+      ? { kbSources: oldMessage.kbSources ?? newMessage.kbSources }
+      : {}),
+    ...(contentBlocks ? { contentBlocks } : {}),
+    ...(toolCalls ? { toolCalls } : {}),
+  }
+}
+
+export function mergeLiveMessagesAppendOnly(
+  existingMessages: ChatMessage[],
+  incomingMessages: ChatMessage[],
+): ChatMessage[] {
+  if (existingMessages.length === 0) return incomingMessages.map(cloneMessage)
+  if (incomingMessages.length === 0) return existingMessages.map(cloneMessage)
+
+  const existing = existingMessages.map(cloneMessage)
+  const incoming = incomingMessages.map(cloneMessage)
+  const overlap = findIncomingOverlap(existing, incoming)
+  const merged = existing
+
+  for (let i = 0; i < overlap.length; i++) {
+    merged[overlap.start + i] = mergeMessagePreservingOldData(
+      merged[overlap.start + i],
+      incoming[i],
+    )
+  }
+
+  merged.push(...incoming.slice(overlap.length))
+  return merged
+}
+
+function isSuffixOfLiveMessages(gatewayMessages: ChatMessage[], liveMessages: ChatMessage[]): boolean {
+  if (gatewayMessages.length === 0) return false
+  if (gatewayMessages.length > liveMessages.length) return false
+
+  const start = liveMessages.length - gatewayMessages.length
+  for (let i = 0; i < gatewayMessages.length; i++) {
+    if (!messagesMatch(liveMessages[start + i], gatewayMessages[i])) return false
+  }
+  return true
+}
+
+export function shouldUseLiveMessagesFallback(
+  gatewayMessages: ChatMessage[],
+  liveMessages: ChatMessage[],
+  sameGatewaySession: boolean,
+): boolean {
+  if (!sameGatewaySession) return false
+  if (liveMessages.length <= gatewayMessages.length) return false
+  if (isSuffixOfLiveMessages(gatewayMessages, liveMessages)) return true
+
+  const missing = liveMessages.length - gatewayMessages.length
+  return missing >= Math.max(20, Math.ceil(liveMessages.length * 0.25))
+}
+
 /**
  * Resolve MEDIA paths in tool outputs per-message.
  * Each assistant message with toolCalls gets its OWN images from its own MEDIA paths.
@@ -444,12 +644,16 @@ export async function saveLiveSnapshot(
   userAttachments?: { name: string; mimeType: string; content: string }[],
   capturedToolInputs?: { toolName: string; toolInput: unknown }[],
 ): Promise<void> {
-  const rawResult = await client.request('chat.history', { sessionKey, limit: 200 }, 10_000)
+  const rawResult = await client.request(
+    'chat.history',
+    { sessionKey, limit: LIVE_HISTORY_LIMIT },
+    10_000,
+  )
   const historyResult = rawResult as ChatHistoryResult
   const rawMessages = historyResult.messages ?? []
   if (rawMessages.length === 0) return
 
-  const liveMessages = transformToLiveMessages(rawMessages)
+  let liveMessages = transformToLiveMessages(rawMessages)
 
   // Merge user-uploaded image attachments into the last user message's contentBlocks.
   // Gateway chat.history strips user image attachments, so we must re-inject them
@@ -499,41 +703,36 @@ export async function saveLiveSnapshot(
   // when the session is rebuilt (SIGUSR1, reconnect, etc.). If it changes,
   // archive the old liveMessages before overwriting.
   const gwSessionId = historyResult.sessionId
-  const session = await prisma.chatSession.findUnique({
-    where: { id: chatSessionId },
-    select: { gwSessionId: true, liveMessages: true },
-  })
-  const existingLive = (session?.liveMessages ?? []) as unknown as ChatMessage[]
 
-  if (session?.gwSessionId && gwSessionId && session.gwSessionId !== gwSessionId) {
-    if (Array.isArray(existingLive) && existingLive.length > 0) {
-      console.warn(
-        `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
-        `gwSessionId changed ${session.gwSessionId} → ${gwSessionId}. Archiving old messages.`,
-      )
-      await persistLiveAsSnapshot(chatSessionId, existingLive)
+  await withSessionSnapshotLock(chatSessionId, async () => {
+    const session = await prisma.chatSession.findUnique({
+      where: { id: chatSessionId },
+      select: { gwSessionId: true, liveMessages: true },
+    })
+    const existingLive = Array.isArray(session?.liveMessages)
+      ? (session.liveMessages as unknown as ChatMessage[])
+      : []
+    const archiveMessages: ChatMessage[] = []
+
+    if (session?.gwSessionId && gwSessionId && session.gwSessionId !== gwSessionId) {
+      if (existingLive.length > 0) {
+        console.warn(
+          `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
+          `gwSessionId changed ${session.gwSessionId} → ${gwSessionId}. Archiving old messages.`,
+        )
+        archiveMessages.push(...existingLive)
+      }
+    } else {
+      liveMessages = mergeLiveMessagesAppendOnly(existingLive, liveMessages)
     }
-  } else if (Array.isArray(existingLive)) {
-    // Same session — carry forward contentBlocks from existing liveMessages.
-    // Previous runs' images are already persisted; don't lose them when
-    // saveLiveSnapshot overwrites with fresh (image-less) chat.history data.
-    mergeExistingContentBlocks(liveMessages, existingLive)
-    // Also carry forward toolInput captured during SSE streaming.
-    // chat.history only returns tool results (output), not the original
-    // arguments/input.  SSE agent:item events have the descriptions.
-    mergeToolInputs(liveMessages, existingLive)
-  }
 
-  // Pre-compute imageId on all image blocks so the image endpoint
-  // can look up by field match instead of re-hashing on every request.
-  stampImageIds(liveMessages)
+    const overflow = Math.max(0, liveMessages.length - MAX_LIVE_MESSAGES)
+    if (overflow > 0) {
+      archiveMessages.push(...liveMessages.slice(0, overflow))
+      liveMessages = liveMessages.slice(overflow)
+    }
 
-  await prisma.chatSession.update({
-    where: { id: chatSessionId },
-    data: {
-      liveMessages: liveMessages as unknown as Prisma.InputJsonValue,
-      gwSessionId: gwSessionId || undefined,
-    },
+    await writeLiveMessages(chatSessionId, liveMessages, gwSessionId, archiveMessages)
   })
 }
 
@@ -671,8 +870,18 @@ export async function persistLiveAsSnapshot(
 ): Promise<void> {
   // Ensure imageIds are stamped before persisting to snapshots
   stampImageIds(messages)
+  const data = buildLiveSnapshotRows(sessionId, messages)
+  if (data.length > 0) {
+    await prisma.chatMessageSnapshot.createMany({ data })
+  }
+}
+
+function buildLiveSnapshotRows(
+  sessionId: string,
+  messages: ChatMessage[],
+): Prisma.ChatMessageSnapshotCreateManyInput[] {
   const batchId = randomUUID()
-  const data = messages
+  return messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map((msg, i) => ({
       chatSessionId: sessionId,
@@ -684,7 +893,56 @@ export async function persistLiveAsSnapshot(
       toolCalls: msg.toolCalls ? (msg.toolCalls as unknown as Prisma.InputJsonValue) : undefined,
       contentBlocks: msg.contentBlocks ? (msg.contentBlocks as unknown as Prisma.InputJsonValue) : undefined,
     }))
-  if (data.length > 0) {
-    await prisma.chatMessageSnapshot.createMany({ data })
+}
+
+async function writeLiveMessages(
+  chatSessionId: string,
+  liveMessages: ChatMessage[],
+  gwSessionId: string | undefined,
+  archiveMessages: ChatMessage[],
+): Promise<void> {
+  // Pre-compute imageId on all image blocks so the image endpoint
+  // can look up by field match instead of re-hashing on every request.
+  stampImageIds(liveMessages)
+  if (archiveMessages.length > 0) stampImageIds(archiveMessages)
+
+  const updateArgs = {
+    where: { id: chatSessionId },
+    data: {
+      liveMessages: liveMessages as unknown as Prisma.InputJsonValue,
+      ...(gwSessionId ? { gwSessionId } : {}),
+    },
   }
+  const archiveData = buildLiveSnapshotRows(chatSessionId, archiveMessages)
+
+  if (archiveData.length === 0) {
+    await prisma.chatSession.update(updateArgs)
+    return
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.chatMessageSnapshot.createMany({ data: archiveData })
+    await tx.chatSession.update(updateArgs)
+  })
+}
+
+export async function appendLiveMessages(
+  chatSessionId: string,
+  messages: ChatMessage[],
+): Promise<void> {
+  await withSessionSnapshotLock(chatSessionId, async () => {
+    const session = await prisma.chatSession.findUnique({
+      where: { id: chatSessionId },
+      select: { liveMessages: true },
+    })
+    const existingLive = Array.isArray(session?.liveMessages)
+      ? (session.liveMessages as unknown as ChatMessage[])
+      : []
+    const liveMessages = [...existingLive.map(cloneMessage), ...messages.map(cloneMessage)]
+    stampImageIds(liveMessages)
+    await prisma.chatSession.update({
+      where: { id: chatSessionId },
+      data: { liveMessages: liveMessages as unknown as Prisma.InputJsonValue },
+    })
+  })
 }

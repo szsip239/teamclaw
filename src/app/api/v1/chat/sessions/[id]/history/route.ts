@@ -10,7 +10,9 @@ import {
   stripFinalTags,
   splitThinkingFallback,
   mergeExistingContentBlocks,
+  mergeLiveMessagesAppendOnly,
   mergeToolInputs,
+  shouldUseLiveMessagesFallback,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
@@ -195,6 +197,7 @@ export const GET = withAuth(
           )
           const historyResult = rawResult as ChatHistoryResult
           const msgs = transformMessages(historyResult.messages ?? [])
+          let cachedLive: ChatMessage[] | null = null
 
           // Merge image contentBlocks from liveMessages (captured during SSE streaming).
           // chat.history doesn't return inline image blocks, so liveMessages is
@@ -202,12 +205,27 @@ export const GET = withAuth(
           if (session.liveMessages) {
             const cached = session.liveMessages as unknown as ChatMessage[]
             if (Array.isArray(cached)) {
-              mergeExistingContentBlocks(msgs, cached)
-              mergeToolInputs(msgs, cached)
+              cachedLive = cached
             }
           }
 
-          currentMessages = msgs
+          const sameGatewaySession =
+            !session.gwSessionId ||
+            !historyResult.sessionId ||
+            session.gwSessionId === historyResult.sessionId
+
+          if (
+            cachedLive &&
+            shouldUseLiveMessagesFallback(msgs, cachedLive, sameGatewaySession)
+          ) {
+            currentMessages = mergeLiveMessagesAppendOnly(cachedLive, msgs)
+          } else {
+            if (cachedLive) {
+              mergeExistingContentBlocks(msgs, cachedLive)
+              mergeToolInputs(msgs, cachedLive)
+            }
+            currentMessages = msgs
+          }
 
           // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
           // Don't auto-archive — let the user decide whether to retry or start a new conversation.
