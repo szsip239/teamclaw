@@ -27,6 +27,15 @@ function isSecure(req: NextRequest): boolean {
   return req.headers.get('x-forwarded-proto') === 'https'
 }
 
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'P2002'
+  )
+}
+
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req)
   const userAgent = req.headers.get('user-agent') || undefined
@@ -131,15 +140,25 @@ export async function POST(req: NextRequest) {
   })
   const refreshToken = await signRefreshToken(user.id)
   const tokenHash = createHash('sha256').update(refreshToken).digest('hex')
+  const refreshTokenData = {
+    userId: user.id,
+    tokenHash,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  }
 
   // Store refresh token in DB
-  await prisma.refreshToken.create({
-    data: {
-      userId: user.id,
-      tokenHash,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    },
-  })
+  await prisma.refreshToken.deleteMany({ where: { userId: user.id } })
+  try {
+    await prisma.refreshToken.create({ data: refreshTokenData })
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error
+    }
+
+    // Same-second concurrent logins can generate the same JWT hash.
+    await prisma.refreshToken.deleteMany({ where: { userId: user.id } })
+    await prisma.refreshToken.create({ data: refreshTokenData })
+  }
 
   // Update lastLoginAt
   await prisma.user.update({

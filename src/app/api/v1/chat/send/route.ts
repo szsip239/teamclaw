@@ -17,7 +17,12 @@ import {
   buildExternalWorkspaceSessionTarget,
 } from '@/lib/session-files/helpers'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
-import { archiveSession, saveLiveSnapshot, extractContentBlocks } from '@/lib/chat/snapshot-helpers'
+import {
+  appendLiveMessages,
+  archiveSession,
+  saveLiveSnapshot,
+  extractContentBlocks,
+} from '@/lib/chat/snapshot-helpers'
 import {
   MIME_BY_EXT,
   extractMediaPaths,
@@ -843,24 +848,13 @@ export async function POST(req: NextRequest) {
         mimeType: a.mimeType,
       }))
       try {
-        const cur = await prisma.chatSession.findUnique({
-          where: { id: chatSessionId },
-          select: { liveMessages: true },
-        })
-        const live = (Array.isArray(cur?.liveMessages)
-          ? cur!.liveMessages
-          : []) as unknown as Record<string, unknown>[]
-        live.push({
+        await appendLiveMessages(chatSessionId, [{
           id: randomUUID(),
           role: 'user',
           content: message,
           contentBlocks: imageBlocks,
           createdAt: new Date().toISOString(),
-        })
-        await prisma.chatSession.update({
-          where: { id: chatSessionId },
-          data: { liveMessages: live as unknown as Prisma.InputJsonValue },
-        })
+        }])
       } catch {
         // Non-fatal: saveLiveSnapshot will handle it at run end
       }
