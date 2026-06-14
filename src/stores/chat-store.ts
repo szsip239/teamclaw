@@ -588,9 +588,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const finalStreaming = get().streamingMessage
       const finalKbSources = finalStreaming?.kbSources ?? []
       if (historySynced) {
+        // Clear streamingMessage FIRST so the stage reply unmounts before
+        // history ChatTextBlock renders — prevents two copies appearing.
+        set({ streamingMessage: null })
         set((s) => ({
           messages: attachKbSourcesToLatestAssistant(s.messages, finalKbSources),
-          streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
           abortController: null,

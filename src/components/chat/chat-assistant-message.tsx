@@ -175,8 +175,9 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
             if (!desc && !name) return null
             return <ChatStageReply text={desc} toolName={name} />
           })()}
+          {/* #13: stage reply during streaming → ChatTextBlock after done (history only) */}
           {isStreaming && message.content && <ChatStageReply text={message.content} />}
-          {!isStreaming && message.content && <ChatTextBlock content={message.content} />}
+          {message.content && !isStreaming && <ChatTextBlock content={message.content} />}
           {imageBlocks.map((block) => (
             <ChatImageBlock
               key={imageBlockDisplayKey(block)}

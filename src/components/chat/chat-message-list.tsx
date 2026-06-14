@@ -344,7 +344,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
         })}
         {streamingMessage && (
           <ChatAssistantMessage
-            key={streamingMessage.id}
+            key={`streaming-${streamingMessage.id}`}
             message={streamingMessage}
             isStreaming={isStreaming}
           />
