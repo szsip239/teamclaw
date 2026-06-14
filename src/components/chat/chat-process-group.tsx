@@ -36,8 +36,8 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
     const flat: ProcessStep[] = []
 
     for (const step of steps) {
-      // #13: thinking is hidden — skip rendering entirely
-      if (step.thinking) continue
+      // #13: thinking is hidden — don't add thinking flat steps.
+      // Tool calls on the SAME message must still be processed.
       for (const tc of step.toolCalls ?? []) {
         tools.set(tc.toolName, (tools.get(tc.toolName) ?? 0) + 1)
         flat.push({ type: "tool", toolCall: tc })
