@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { extname } from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
@@ -29,6 +29,7 @@ import {
   readImageAsDataUrl,
   readContainerImageAsDataUrl,
 } from '@/lib/chat/image-helpers'
+import { computeTextDelta } from '@/lib/chat/stream-delta'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult } from '@/types/gateway'
@@ -57,6 +58,36 @@ interface ExtractedImage {
   url: string
   mimeType?: string
   alt?: string
+}
+
+interface GatewayAttachment {
+  fileName: string
+  mimeType: string
+  content: string
+}
+
+function attachmentContentKey(att: Pick<GatewayAttachment, 'mimeType' | 'content'>): string {
+  return createHash('sha256')
+    .update(att.mimeType)
+    .update(':')
+    .update(att.content)
+    .digest('hex')
+}
+
+function dedupeAttachments<T extends Pick<GatewayAttachment, 'mimeType' | 'content'>>(
+  attachments: T[],
+): T[] {
+  const seen = new Set<string>()
+  const unique: T[] = []
+
+  for (const att of attachments) {
+    const key = attachmentContentKey(att)
+    if (seen.has(key)) continue
+    unique.push(att)
+    seen.add(key)
+  }
+
+  return unique
 }
 
 function extractImagesFromMessage(message: unknown): ExtractedImage[] {
@@ -443,11 +474,15 @@ export async function POST(req: NextRequest) {
         lastThinkingContent = thinkingContent
       }
 
-      if (textContent && textContent !== lastTextContent) {
-        const newText = textContent.slice(lastTextContent.length)
-        if (newText) write({ type: 'text', content: newText })
-        lastTextContent = textContent
-      }
+      // v4: computeTextDelta handles deltaText/replace/cumulative-slice uniformly
+      const tdelta = computeTextDelta({
+        deltaText: evt.deltaText as string | undefined,
+        replace: evt.replace as boolean | undefined,
+        cumulative: textContent,
+        lastEmitted: lastTextContent,
+      })
+      if (tdelta.text) write({ type: 'text', content: tdelta.text })
+      lastTextContent = tdelta.nextLast
 
       // Capture inline image blocks if OpenClaw embeds them in chat events
       const images = extractImagesFromMessage(evt.message)
@@ -479,10 +514,14 @@ export async function POST(req: NextRequest) {
         if (newThinking) write({ type: 'thinking', content: newThinking })
       }
 
-      if (textContent && textContent !== lastTextContent) {
-        const newText = textContent.slice(lastTextContent.length)
-        if (newText) write({ type: 'text', content: newText })
-      }
+      // v4: computeTextDelta handles deltaText/replace/cumulative-slice uniformly
+      const tdelta = computeTextDelta({
+        deltaText: evt.deltaText as string | undefined,
+        replace: evt.replace as boolean | undefined,
+        cumulative: textContent,
+        lastEmitted: lastTextContent,
+      })
+      if (tdelta.text) write({ type: 'text', content: tdelta.text })
 
       // Capture any remaining inline image blocks from final message
       const images = extractImagesFromMessage(evt.message)
@@ -693,7 +732,7 @@ export async function POST(req: NextRequest) {
   // client gets the SSE connection immediately (no multi-second delay from
   // Docker exec operations like symlink creation, dir listing, and image download).
   ;(async () => {
-    const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
+    const sessionFileAttachments: GatewayAttachment[] = []
     const SESSION_IMAGE_EXTS: Record<string, string> = {
       '.png': 'image/png',
       '.jpg': 'image/jpeg',
@@ -818,19 +857,19 @@ export async function POST(req: NextRequest) {
       // Non-blocking: skip on any error
     }
 
-    const mappedAttachments = [
+    const mappedAttachments = dedupeAttachments([
       ...(attachments?.map((a) => ({
         fileName: a.name,
         mimeType: a.mimeType,
         content: a.content,
       })) ?? []),
       ...sessionFileAttachments,
-    ]
+    ])
 
     // Capture ONLY 📎 chat attachments for liveMessages persistence (not sidebar input/ files).
     // Session file attachments are sent to the agent via mappedAttachments but should NOT
     // appear as contentBlocks in chat message bubbles.
-    for (const a of attachments ?? []) {
+    for (const a of dedupeAttachments(attachments ?? [])) {
       if (a.mimeType.startsWith('image/')) {
         userImageAttachments.push({ name: a.name, mimeType: a.mimeType, content: a.content })
       }
