@@ -4,8 +4,9 @@ import { memo } from 'react'
 import dynamic from 'next/dynamic'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Loader2 } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useChatStore } from '@/stores/chat-store'
 
 function ChartLoadingSkeleton() {
   return (
@@ -44,17 +45,35 @@ export const ChatTextBlock = memo(function ChatTextBlock({
   // LLMs occasionally emit raw HTML <br> inside markdown cells.
   // ReactMarkdown strips HTML for safety — turn <br> into actual
   // newlines so bullets and table cells render correctly.
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
   const cleaned = content.replace(/<br\s*\/?>/gi, '\n')
   return (
     <div className="text-sm leading-relaxed prose-chat overflow-x-auto min-w-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        // react-markdown strips href values whose URL scheme isn't in the
-        // safe-list (http/https/mailto/tel) by default. We use custom
-        // schemes like `kb-page:` for page-citation chips that get
-        // intercepted in JS — let those through without rewriting.
         urlTransform={(url) => url}
         components={{
+          // Rewrite output/ links to session file download API
+          a({ href, children, ...props }) {
+            const h = String(href ?? '')
+            if (h.startsWith('output/') && activeSessionId) {
+              const apiUrl = `/api/v1/chat/sessions/${activeSessionId}/files/${h}`
+              return (
+                <a
+                  href={apiUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-primary underline hover:no-underline"
+                  {...props}
+                >
+                  <Download className="size-3" />
+                  {children}
+                </a>
+              )
+            }
+            return <a href={h} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+          },
           // --- Code blocks ---
           pre({ children }) {
             return <div className="my-2">{children}</div>
