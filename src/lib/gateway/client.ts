@@ -6,7 +6,10 @@ import type {
   GatewayEvent,
 } from '@/types/gateway'
 
-const PROTOCOL_VERSION = 3
+// v4: OpenClaw 6.6 gateway requires protocol v4 (MIN_CLIENT_PROTOCOL_VERSION=4);
+// v3 clients are rejected with close code 1002. All connected instances must be
+// on OpenClaw 6.6 (sales container upgrade is the prerequisite — see issue #7).
+const PROTOCOL_VERSION = 4
 // 120s default: first-chat system-prompt generation takes ~60s, plus
 // provider-plugin pnpm staging can block the event loop for ~20s.
 const REQUEST_TIMEOUT_MS = 120_000
@@ -21,6 +24,28 @@ interface PendingRequest {
 }
 
 type EventCallback = (payload: unknown) => void
+
+/**
+ * Build the connect-handshake params. Kept as a pure function so the protocol
+ * contract (version negotiation, client identity, scopes) is unit-testable
+ * without opening a socket.
+ */
+export function buildConnectParams(token: string) {
+  return {
+    minProtocol: PROTOCOL_VERSION,
+    maxProtocol: PROTOCOL_VERSION,
+    client: {
+      id: 'openclaw-control-ui' as const,
+      version: '1.0.0',
+      platform: typeof process !== 'undefined' ? process.platform : 'unknown',
+      mode: 'backend' as const,
+    },
+    role: 'operator' as const,
+    auth: { token },
+    scopes: ['operator.read', 'operator.write', 'operator.admin'],
+    caps: [],
+  }
+}
 
 export class GatewayClient {
   private ws: WebSocket | null = null
@@ -256,19 +281,7 @@ export class GatewayClient {
 
   /** Send the connect request with protocol negotiation + auth. */
   private sendConnect(): void {
-    const params = {
-      minProtocol: PROTOCOL_VERSION,
-      maxProtocol: PROTOCOL_VERSION,
-      client: {
-        id: 'openclaw-control-ui' as const,
-        version: '1.0.0',
-        platform: typeof process !== 'undefined' ? process.platform : 'unknown',
-        mode: 'backend' as const,
-      },
-      auth: { token: this.token },
-      scopes: ['operator.read', 'operator.write', 'operator.admin'],
-      caps: [],
-    }
+    const params = buildConnectParams(this.token)
 
     this.request('connect', params as unknown as Record<string, unknown>)
       .then((helloOk) => {
