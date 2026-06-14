@@ -684,10 +684,16 @@ export async function POST(req: NextRequest) {
         }
         return
       }
+      // kind=analysis → agent reasoning, skip per user preference (thinking hidden)
+      if (kind === 'analysis') return
+
       const phase = data.phase as string
       const toolName = String(data.name ?? 'tool')
 
-      if (kind === 'tool') {
+      // kind=command is how the v4 gateway sends tool execution events through
+      // the built-in agent runtime (codex-app-server). Direct WS connections get
+      // kind=tool; GatewayClient connections get kind=command with the same shape.
+      if (kind === 'tool' || kind === 'command') {
         if (phase === 'start') {
           activeToolName = toolName
           toolOutputBuf.set(toolName, '')
