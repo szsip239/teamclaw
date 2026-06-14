@@ -531,9 +531,10 @@ export function mergeToolCalls(
 
     if (oldCall && newCall) {
       merged.push({
-        toolName: oldCall.toolName || newCall.toolName,
+        // Prefer new gateway data (authoritative); old enriches with SSE-captured inputs
+        toolName: newCall.toolName || oldCall.toolName,
         toolInput: hasValue(oldCall.toolInput) ? oldCall.toolInput : newCall.toolInput,
-        toolOutput: hasValue(oldCall.toolOutput) ? oldCall.toolOutput : newCall.toolOutput,
+        toolOutput: hasValue(newCall.toolOutput) ? newCall.toolOutput : oldCall.toolOutput,
       })
     } else if (newCall) {
       merged.push({ ...newCall })

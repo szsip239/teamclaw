@@ -323,4 +323,13 @@ describe('mergeToolCalls', () => {
     expect(result![0].toolName).toBe('exec')
     expect(result![0].toolInput).toBe('ls') // preserves old enriched input
   })
+
+  it('prefers new gateway toolName over stale old data', () => {
+    const result = mergeToolCalls(
+      [{ toolName: 'bash', toolInput: null, toolOutput: '' }],
+      [{ toolName: 'exec', toolInput: null, toolOutput: 'ok' }],
+    )
+    expect(result![0].toolName).toBe('exec')
+    expect(result![0].toolOutput).toBe('ok')
+  })
 })

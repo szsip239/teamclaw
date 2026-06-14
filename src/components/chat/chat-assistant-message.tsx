@@ -10,6 +10,7 @@ import { ChatErrorBlock } from './chat-error-block'
 import { ChatImageBlock } from './chat-image-block'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
+import { imageBlockDisplayKey, uniqueImageBlocks } from '@/lib/chat/image-blocks'
 import { selectVisibleKbSources } from '@/lib/chat/kb-sources'
 import { useState } from 'react'
 
@@ -146,6 +147,7 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
     : useCompactOwn
       ? [message]
       : null
+  const imageBlocks = uniqueImageBlocks(message.contentBlocks)
 
   return (
     <div className="flex justify-start">
@@ -165,11 +167,13 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
             </>
           )}
           {message.content && <ChatTextBlock content={message.content} />}
-          {message.contentBlocks?.map((block, i) =>
-            block.type === 'image' && block.imageUrl ? (
-              <ChatImageBlock key={i} imageUrl={block.imageUrl} alt={block.alt} />
-            ) : null,
-          )}
+          {imageBlocks.map((block) => (
+            <ChatImageBlock
+              key={imageBlockDisplayKey(block)}
+              imageUrl={block.imageUrl!}
+              alt={block.alt}
+            />
+          ))}
           {isStreaming && !message.content && (
             <div className="flex items-center gap-1 py-2">
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:0ms]" />
