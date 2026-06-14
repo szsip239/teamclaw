@@ -31,6 +31,7 @@ vi.mock('@/lib/db', () => ({
 }))
 
 vi.mock('@/lib/chat/image-helpers', () => ({
+  computeImageId: vi.fn((dataUrl: string) => `hash:${dataUrl}`),
   extractMediaPaths: vi.fn(() => []),
   readImageAsDataUrl: vi.fn(),
   readContainerImageAsDataUrl: vi.fn(),
@@ -43,6 +44,7 @@ import {
   archiveSession,
   MAX_LIVE_MESSAGES,
   mergeLiveMessagesAppendOnly,
+  mergeToolCalls,
   saveLiveSnapshot,
   shouldUseLiveMessagesFallback,
 } from './snapshot-helpers'
@@ -63,6 +65,16 @@ function chatMessage(
 
 function user(content: string): ChatHistoryMessage {
   return { role: 'user', content }
+}
+
+function userWithImage(content: string, mimeType: string, data: string): ChatHistoryMessage {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: content },
+      { type: 'image', source: { type: 'base64', media_type: mimeType, data } },
+    ],
+  }
 }
 
 function assistant(content: string): ChatHistoryMessage {
@@ -183,6 +195,41 @@ describe('live snapshot append-only merge', () => {
     )
   })
 
+  it('does not duplicate uploaded image attachments already present in history', async () => {
+    const imageData = 'same-image'
+    const client = {
+      request: vi.fn().mockResolvedValue({
+        sessionId: 'gw-1',
+        messages: [
+          userWithImage('see this', 'image/png', imageData),
+          assistant('ok'),
+        ],
+      }),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      gwSessionId: 'gw-1',
+      liveMessages: [],
+    })
+
+    await saveLiveSnapshot(
+      'chat-1',
+      client as never,
+      'agent:a:tc:u',
+      null,
+      undefined,
+      [{ name: 'image.png', mimeType: 'image/png', content: imageData }],
+    )
+
+    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const liveMessages = updateArg.data.liveMessages as ChatMessage[]
+
+    expect(liveMessages[0].contentBlocks).toHaveLength(1)
+    expect(liveMessages[0].contentBlocks?.[0].imageUrl).toBe(
+      'data:image/png;base64,same-image',
+    )
+  })
+
   it('archives sessions with the unified 500 history limit', async () => {
     const client = {
       request: vi.fn()
@@ -252,5 +299,28 @@ describe('live snapshot append-only merge', () => {
     expect(updateArg.data.liveMessages).toHaveLength(MAX_LIVE_MESSAGES)
     expect(updateArg.data.liveMessages[0].content).toBe('message-2')
     expect(updateArg.data.liveMessages.at(-1).content).toBe('new reply')
+  })
+})
+
+describe('mergeToolCalls', () => {
+  it('drops stale tool calls from old messages when the new message has fewer', () => {
+    const result = mergeToolCalls(
+      [{ toolName: 'bash', toolInput: 'ls', toolOutput: 'AGENTS.md' }],
+      undefined,
+    )
+    expect(result).toBeUndefined()
+  })
+
+  it('drops extra old tool calls beyond the new count', () => {
+    const result = mergeToolCalls(
+      [
+        { toolName: 'exec', toolInput: 'ls', toolOutput: 'ok' },
+        { toolName: 'read', toolInput: 'x.md', toolOutput: '...' },
+      ],
+      [{ toolName: 'exec', toolInput: null, toolOutput: 'ok' }],
+    )
+    expect(result).toHaveLength(1)
+    expect(result![0].toolName).toBe('exec')
+    expect(result![0].toolInput).toBe('ls') // preserves old enriched input
   })
 })
