@@ -160,7 +160,7 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
             <ChatProcessGroup steps={allSteps} inline />
           ) : (
             <>
-              {message.thinking && <ChatThinkingBlock content={message.thinking} />}
+              {/* #13: thinking hidden — removed ChatThinkingBlock */}
               {message.toolCalls?.map((tc, i) => (
                 <ChatToolCallBlock key={i} toolCall={tc} />
               ))}
