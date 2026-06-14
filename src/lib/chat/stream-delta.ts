@@ -27,18 +27,28 @@ export interface DeltaOutput {
 }
 
 export function computeTextDelta(input: DeltaInput): DeltaOutput {
-  if (typeof input.deltaText === 'string') {
+  // Non-prefix replacement: use deltaText as the authoritative replacement.
+  if (input.replace) {
     return {
-      text: input.deltaText,
-      replace: input.replace === true,
+      text: input.deltaText ?? '',
+      replace: true,
       nextLast: input.cumulative,
     }
   }
-  // Fallback (no deltaText): slice the cumulative snapshot. Defensive — v4
-  // always carries deltaText, but legacy/edge events may not.
-  return {
-    text: input.cumulative.slice(input.lastEmitted.length),
-    replace: false,
-    nextLast: input.cumulative,
+  // When we already have partial text (e.g. from agent item preamble events),
+  // slice the cumulative remainder instead of emitting the full deltaText.
+  const sliced = input.cumulative.slice(input.lastEmitted.length)
+  if (sliced) {
+    return { text: sliced, replace: false, nextLast: input.cumulative }
   }
+  // No new cumulative text.  v4 deltaText may still carry an increment — use
+  // it directly, but only when we haven't already seen this content.
+  if (typeof input.deltaText === 'string') {
+    return {
+      text: input.deltaText,
+      replace: false,
+      nextLast: input.cumulative,
+    }
+  }
+  return { text: '', replace: false, nextLast: input.cumulative }
 }

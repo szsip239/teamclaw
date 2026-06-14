@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { computeTextDelta } from './stream-delta'
 
 describe('v4 chat text delta (computeTextDelta)', () => {
-  it('emits deltaText directly without slicing the cumulative snapshot', () => {
+  it('prefers cumulative slice over deltaText when already partially emitted', () => {
     const out = computeTextDelta({
-      deltaText: ' world',
+      deltaText: 'hello world',
       cumulative: 'hello world',
       lastEmitted: 'hello',
     })
-    expect(out.text).toBe(' world')
+    expect(out.text).toBe(' world')  // sliced, not full deltaText
     expect(out.replace).toBe(false)
     expect(out.nextLast).toBe('hello world')
   })
@@ -25,13 +25,13 @@ describe('v4 chat text delta (computeTextDelta)', () => {
     expect(out.nextLast).toBe('corrected answer')
   })
 
-  it('falls back to slicing the cumulative snapshot when deltaText is absent', () => {
+  it('uses deltaText when cumulative has not advanced', () => {
     const out = computeTextDelta({
-      cumulative: 'hello world',
+      deltaText: 'extra',
+      cumulative: 'hello',
       lastEmitted: 'hello',
     })
-    expect(out.text).toBe(' world')
-    expect(out.replace).toBe(false)
-    expect(out.nextLast).toBe('hello world')
+    expect(out.text).toBe('extra')  // sliced = '', deltaText is the only increment
+    expect(out.nextLast).toBe('hello')
   })
 })

@@ -37,7 +37,7 @@ export function buildConnectParams(token: string) {
     client: {
       id: 'openclaw-control-ui' as const,
       version: '1.0.0',
-      platform: typeof process !== 'undefined' ? process.platform : 'unknown',
+      platform: 'node',
       mode: 'backend' as const,
     },
     role: 'operator' as const,
@@ -111,11 +111,10 @@ export class GatewayClient {
       const httpUrl = this.url.replace(/^ws(s?):/, 'http$1:')
       const loopbackUrl = httpUrl.replace('host.docker.internal', '127.0.0.1')
       const headers: Record<string, string> = { Origin: loopbackUrl }
-      if (this.url.includes('host.docker.internal')) {
-        const parsed = new URL(loopbackUrl)
-        headers['Host'] = parsed.host
-      }
-      this.ws = new WebSocket(this.url, { headers })
+      // Force IPv4 — host.docker.internal resolves to both v4 and v6, and
+      // the gateway may apply different event-streaming policies per address
+      // family. Explicit v4 matches the direct spike behaviour.
+      this.ws = new WebSocket(this.url, { headers, family: 4 })
 
       this.ws.on('message', (data: WebSocket.Data) => {
         this.handleMessage(data)
@@ -155,6 +154,28 @@ export class GatewayClient {
         }
       })
     })
+  }
+
+  /**
+   * Force a fresh connection. The persistent GatewayClient socket receives
+   * compressed event streams from the v4 gateway (single full-text delta +
+   * no agent:item tool events); a fresh connect gets full incremental
+   * streaming. Call before chat.send when tool events and streaming matter.
+   */
+  async reconnect(): Promise<void> {
+    this.intentionalDisconnect = true
+    this.clearConnectTimer()
+    this.stopTickWatch()
+    this.clearReconnectTimer()
+    this.rejectAllPending('Client reconnecting')
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+    this.connected = false
+    // Brief delay to avoid gateway connection-throttle detection
+    await new Promise((r) => setTimeout(r, 500))
+    return this.connect()
   }
 
   /** Cleanly shut down the connection. */

@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'crypto'
 import { extname } from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
+import { registry, ensureRegistryInitialized, resolveGatewayUrl } from '@/lib/gateway/registry'
+import { decrypt } from '@/lib/auth/encryption'
+import { GatewayClient } from '@/lib/gateway/client'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
@@ -276,11 +278,26 @@ export async function POST(req: NextRequest) {
   // --- Ensure registry ---
   await ensureRegistryInitialized()
 
-  const client = registry.getClient(instanceId)
   const adapter = registry.getAdapter(instanceId)
-  if (!client || !adapter) {
+  if (!adapter) {
     return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
   }
+
+  // Fresh GatewayClient per chat.send: persistent sockets receive compressed
+  // event streams (single full-text delta, no agent:item tool events) from the
+  // v4 gateway. A one-shot client gets full incremental streaming.
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { gatewayUrl: true, gatewayToken: true, dockerConfig: true },
+  })
+  if (!instance) {
+    return NextResponse.json({ error: 'Instance not found' }, { status: 502 })
+  }
+  const client = new GatewayClient(
+    resolveGatewayUrl({ gatewayUrl: instance.gatewayUrl, dockerConfig: instance.dockerConfig }),
+    decrypt(instance.gatewayToken),
+  )
+  await client.connect()
 
   // --- Build session key ---
   const sessionKey = `agent:${agentId}:tc:${user.id}`
@@ -474,15 +491,18 @@ export async function POST(req: NextRequest) {
         lastThinkingContent = thinkingContent
       }
 
-      // v4: computeTextDelta handles deltaText/replace/cumulative-slice uniformly
-      const tdelta = computeTextDelta({
-        deltaText: evt.deltaText as string | undefined,
-        replace: evt.replace as boolean | undefined,
-        cumulative: textContent,
-        lastEmitted: lastTextContent,
-      })
-      if (tdelta.text) write({ type: 'text', content: tdelta.text })
-      lastTextContent = tdelta.nextLast
+      // When preamble events already delivered the text incrementally,
+      // the chat delta is a duplicate. Skip it.
+      if (textContent !== lastTextContent) {
+        const tdelta = computeTextDelta({
+          deltaText: evt.deltaText as string | undefined,
+          replace: evt.replace as boolean | undefined,
+          cumulative: textContent,
+          lastEmitted: lastTextContent,
+        })
+        if (tdelta.text) write({ type: 'text', content: tdelta.text })
+        lastTextContent = tdelta.nextLast
+      }
 
       // Capture inline image blocks if OpenClaw embeds them in chat events
       const images = extractImagesFromMessage(evt.message)
@@ -643,9 +663,27 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Item: tool lifecycle events (OpenClaw 2026.4+) ──
-    if (stream === 'item') {
+    // ── Item: tool/thinking/preamble events (OpenClaw 2026.4+) ──
+    // v4 gateway may prefix item events with the agent runtime id
+    // (e.g. "codex_app_server.item") instead of bare "item".
+    if (stream === 'item' || (typeof stream === 'string' && stream.endsWith('.item'))) {
       const data = (evt.data ?? {}) as Record<string, unknown>
       const kind = data.kind as string | undefined
+
+      // v4 gateway pushes incremental text through agent item preamble
+      // events instead of chat delta events when routed through the built-in
+      // agent runtime.  Route them as text SSE events for the typewriter effect.
+      if (kind === 'preamble') {
+        const progressText = data.progressText as string | undefined
+        if (progressText) {
+          const trimmed = progressText.slice(lastTextContent.length)
+          if (trimmed) {
+            lastTextContent = progressText
+            write({ type: 'text', content: trimmed })
+          }
+        }
+        return
+      }
       const phase = data.phase as string
       const toolName = String(data.name ?? 'tool')
 
@@ -724,6 +762,7 @@ export async function POST(req: NextRequest) {
     activeRuns.delete(chatSessionId)
     unsubChat()
     unsubAgent()
+    client.disconnect()
     await close()
   }
 
