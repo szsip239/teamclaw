@@ -167,9 +167,15 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
               ))}
             </>
           )}
-          {/* #13: stage reply (streaming) vs final reply (done) */}
-          {message.content && isStreaming && <ChatStageReply text={message.content} />}
-          {message.content && !isStreaming && <ChatTextBlock content={message.content} />}
+          {/* #13: stage reply — tool phase (desc) ⟳ text phase (preamble) ⟳ final */}
+          {isStreaming && !message.content && (() => {
+            const last = message.toolCalls?.at(-1)
+            const desc = typeof last?.toolInput === 'string' ? last.toolInput : ''
+            if (!desc) return null
+            return <ChatStageReply text={desc} />
+          })()}
+          {isStreaming && message.content && <ChatStageReply text={message.content} />}
+          {!isStreaming && message.content && <ChatTextBlock content={message.content} />}
           {imageBlocks.map((block) => (
             <ChatImageBlock
               key={imageBlockDisplayKey(block)}

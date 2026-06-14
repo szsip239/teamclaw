@@ -588,30 +588,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const finalStreaming = get().streamingMessage
       const finalKbSources = finalStreaming?.kbSources ?? []
       if (historySynced) {
-        // History has authoritative data — discard streamingMessage to prevent duplicates
+        // History has authoritative data — discard streamingMessage to prevent duplicates.
+        // Delay nulling streamingMessage by 300ms so ChatStageReply can run its fade-out
+        // transition before the final ChatTextBlock replaces it.
         set((s) => ({
           messages: attachKbSourcesToLatestAssistant(s.messages, finalKbSources),
-          streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
           abortController: null,
         }))
+        setTimeout(() => {
+          useChatStore.setState({ streamingMessage: null })
+        }, 300)
       } else if (finalStreaming) {
         // Sync failed — merge streamingMessage as best-effort fallback
         set((s) => ({
           messages: [...s.messages, finalStreaming],
-          streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
           abortController: null,
         }))
+        setTimeout(() => {
+          useChatStore.setState({ streamingMessage: null })
+        }, 300)
       } else {
         set({
-          streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
           abortController: null,
         })
+        setTimeout(() => {
+          useChatStore.setState({ streamingMessage: null })
+        }, 300)
       }
 
       // 6. Invalidate TanStack caches so isActive flags and history data are fresh.
