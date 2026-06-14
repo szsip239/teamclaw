@@ -167,12 +167,13 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
               ))}
             </>
           )}
-          {/* #13: stage reply — tool phase (desc) ⟳ text phase (preamble) ⟳ final */}
+          {/* #13: stage reply — tool phase (name+desc) ⟳ text phase (preamble) ⟳ final */}
           {isStreaming && !message.content && (() => {
             const last = message.toolCalls?.at(-1)
             const desc = typeof last?.toolInput === 'string' ? last.toolInput : ''
-            if (!desc) return null
-            return <ChatStageReply text={desc} />
+            const name = last?.toolName
+            if (!desc && !name) return null
+            return <ChatStageReply text={desc} toolName={name} />
           })()}
           {isStreaming && message.content && <ChatStageReply text={message.content} />}
           {!isStreaming && message.content && <ChatTextBlock content={message.content} />}

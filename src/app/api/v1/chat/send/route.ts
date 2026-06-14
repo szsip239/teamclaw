@@ -697,7 +697,7 @@ export async function POST(req: NextRequest) {
         if (phase === 'start') {
           activeToolName = toolName
           toolOutputBuf.set(toolName, '')
-          const toolInput = data.args ?? data.meta ?? {}
+          const toolInput = data.meta ?? data.args ?? {}
           capturedToolInputs.push({ toolName, toolInput })
           write({
             type: 'tool_call',
