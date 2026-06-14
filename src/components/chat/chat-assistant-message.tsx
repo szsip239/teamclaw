@@ -8,6 +8,7 @@ import { ChatToolCallBlock } from './chat-tool-call-block'
 import { ChatTextBlock } from './chat-text-block'
 import { ChatErrorBlock } from './chat-error-block'
 import { ChatImageBlock } from './chat-image-block'
+import { ChatStageReply } from './chat-stage-reply'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { imageBlockDisplayKey, uniqueImageBlocks } from '@/lib/chat/image-blocks'
@@ -166,7 +167,9 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
               ))}
             </>
           )}
-          {message.content && <ChatTextBlock content={message.content} />}
+          {/* #13: stage reply (streaming) vs final reply (done) */}
+          {message.content && isStreaming && <ChatStageReply text={message.content} />}
+          {message.content && !isStreaming && <ChatTextBlock content={message.content} />}
           {imageBlocks.map((block) => (
             <ChatImageBlock
               key={imageBlockDisplayKey(block)}
