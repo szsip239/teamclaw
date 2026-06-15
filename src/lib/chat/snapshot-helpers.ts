@@ -12,6 +12,11 @@ import {
 } from '@/lib/chat/image-helpers'
 import { imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
+import { parseSessionMessage } from '@/lib/chat/session-message'
+import {
+  sanitizeOutputArtifactLinks,
+  stripOutputArtifactLinksToLabels,
+} from '@/lib/session-files/artifacts'
 import type { ChatHistoryMessage, ChatHistoryResult } from '@/types/gateway'
 import type { ChatToolCall, ChatContentBlock, ChatMessage } from '@/types/chat'
 import type { GatewayClient } from '@/lib/gateway/client'
@@ -162,8 +167,13 @@ export function buildSnapshotData(
         contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
       })
     } else if (msg.role === 'assistant') {
-      let text = stripFinalTags(extractText(msg.content))
-      let thinking = extractThinking(msg.content)
+      const parsed = parseSessionMessage({
+        messageId: String(orderIndex),
+        messageSeq: orderIndex,
+        message: msg,
+      })
+      let text = sanitizeOutputArtifactLinks(stripFinalTags(extractText(msg.content) || parsed.text))
+      let thinking = parsed.thinking ?? extractThinking(msg.content)
       const cb = extractContentBlocks(msg.content)
 
       if (!text && thinking) {
@@ -172,6 +182,10 @@ export function buildSnapshotData(
           text = split.text
           thinking = split.thinking
         }
+      }
+      if (parsed.stopReason && parsed.stopReason !== 'stop' && parsed.toolCalls?.length && text) {
+        thinking = text + (thinking ? '\n\n' + thinking : '')
+        text = ''
       }
 
       snapshotData.push({
@@ -182,18 +196,19 @@ export function buildSnapshotData(
         content: text,
         contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
         thinking: thinking || null,
-        // toolCalls populated later by toolResult handler below
+        toolCalls: parsed.toolCalls
+          ? (parsed.toolCalls as unknown as Prisma.InputJsonValue)
+          : undefined,
       })
     } else if (msg.role === 'toolResult') {
       const lastSnapshot = snapshotData[snapshotData.length - 1]
       if (lastSnapshot?.role === 'assistant') {
         const existing = (lastSnapshot.toolCalls as unknown as ChatToolCall[] | null) ?? []
-        existing.push({
+        lastSnapshot.toolCalls = completeToolCall(existing, {
           toolName: msg.toolName ?? 'tool',
           toolInput: null,
           toolOutput: extractText(msg.content),
-        })
-        lastSnapshot.toolCalls = existing as unknown as Prisma.InputJsonValue
+        }) as unknown as Prisma.InputJsonValue
       }
     }
   }
@@ -224,6 +239,24 @@ function mergeContentBlocksIntoSnapshots(
     if (imageBlocks?.length) {
       snap.contentBlocks = imageBlocks as unknown as Prisma.InputJsonValue
     }
+  }
+}
+
+function mergeLocalAssistantContentIntoSnapshots(
+  snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[],
+  liveMessages: ChatMessage[],
+): void {
+  let liveIdx = 0
+  for (const snap of snapshotData) {
+    if (liveIdx >= liveMessages.length) break
+    const live = liveMessages[liveIdx]
+    if (snap.role !== live.role) continue
+    liveIdx++
+
+    if (snap.role !== 'assistant') continue
+    const snapContent = String(snap.content ?? '')
+    if (!isLocalArtifactAugmentedContent(live.content, snapContent)) continue
+    snap.content = live.content
   }
 }
 
@@ -273,6 +306,7 @@ export async function archiveSession(
     // during SSE streaming. Without this merge, images are lost on archive.
     if (liveMessages && liveMessages.length > 0 && snapshotData.length > 0) {
       mergeContentBlocksIntoSnapshots(snapshotData, liveMessages)
+      mergeLocalAssistantContentIntoSnapshots(snapshotData, liveMessages)
     }
 
     if (snapshotData.length > 0) {
@@ -364,8 +398,13 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
         createdAt: new Date().toISOString(),
       })
     } else if (msg.role === 'assistant') {
-      let text = stripFinalTags(extractText(msg.content))
-      let thinking = extractThinking(msg.content)
+      const parsed = parseSessionMessage({
+        messageId: randomUUID(),
+        messageSeq: result.length,
+        message: msg,
+      })
+      let text = stripFinalTags(extractText(msg.content) || parsed.text)
+      let thinking = parsed.thinking ?? extractThinking(msg.content)
       const contentBlocks = extractContentBlocks(msg.content)
 
       if (!text && thinking) {
@@ -382,6 +421,14 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
         content: text,
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(thinking ? { thinking } : {}),
+        ...(parsed.toolCalls ? { toolCalls: parsed.toolCalls } : {}),
+        ...(parsed.stopReason
+          ? {
+              messageSeq: parsed.messageSeq,
+              stopReason: parsed.stopReason,
+              isFinal: parsed.isFinal,
+            }
+          : {}),
         createdAt: new Date().toISOString(),
       })
     } else if (msg.role === 'toolResult') {
@@ -392,14 +439,14 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
           toolInput: null,
           toolOutput: extractText(msg.content),
         }
-        last.toolCalls = [...(last.toolCalls ?? []), tc]
+        last.toolCalls = completeToolCall(last.toolCalls, tc)
       }
     }
   }
 
   // Reclassify: assistant messages with tool calls are intermediate narration
   for (const msg of result) {
-    if (msg.role === 'assistant' && msg.toolCalls?.length && msg.content) {
+    if (msg.role === 'assistant' && msg.stopReason == null && msg.toolCalls?.length && msg.content) {
       msg.thinking = msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
       msg.content = ''
     }
@@ -426,8 +473,49 @@ function cloneMessage(message: ChatMessage): ChatMessage {
   }
 }
 
+function replaceLastAssistantMessageContent(
+  messages: ChatMessage[],
+  contentOverride: string | undefined,
+): void {
+  const content = contentOverride ? sanitizeOutputArtifactLinks(contentOverride).trimEnd() : ''
+  if (!content) return
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'assistant') continue
+    message.content = content
+    return
+  }
+}
+
+function containsOutputLink(content: string): boolean {
+  return /\]\(output\/[^)]+\)|(?:^|\s)output\/[^\s)]+/.test(content)
+}
+
+function isLocalArtifactAugmentedContent(localContent: string, gatewayContent: string): boolean {
+  if (localContent === gatewayContent) return false
+
+  const gatewayBase = gatewayContent.trimEnd()
+  if (gatewayBase && localContent.startsWith(gatewayBase)) {
+    const localSuffix = localContent.slice(gatewayBase.length)
+    if (containsOutputLink(localSuffix)) return true
+  } else if (!gatewayBase && containsOutputLink(localContent)) {
+    return true
+  }
+
+  const gatewayLabelBase = stripOutputArtifactLinksToLabels(gatewayContent).trimEnd()
+  if (!gatewayLabelBase || !localContent.startsWith(gatewayLabelBase)) return false
+  return containsOutputLink(localContent.slice(gatewayLabelBase.length))
+}
+
 function messagesMatch(a: ChatMessage, b: ChatMessage): boolean {
-  return a.role === b.role && a.content === b.content
+  if (a.role !== b.role) return false
+  if (a.content === b.content) return true
+  if (a.role !== 'assistant') return false
+  return (
+    isLocalArtifactAugmentedContent(a.content, b.content) ||
+    isLocalArtifactAugmentedContent(b.content, a.content)
+  )
 }
 
 function findIncomingOverlap(
@@ -512,8 +600,35 @@ function mergeContentBlocks(
   return merged.length > 0 ? merged : undefined
 }
 
+function sanitizeAssistantArtifactLinks(messages: ChatMessage[]): void {
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      message.content = sanitizeOutputArtifactLinks(message.content)
+    }
+  }
+}
+
 function hasValue(value: unknown): boolean {
   return value != null && value !== ''
+}
+
+function completeToolCall(
+  toolCalls: ChatToolCall[] | undefined,
+  result: ChatToolCall,
+): ChatToolCall[] {
+  const next = [...(toolCalls ?? [])]
+  for (let i = next.length - 1; i >= 0; i--) {
+    if (next[i].toolName !== result.toolName) continue
+    if (next[i].toolOutput != null) continue
+    next[i] = {
+      ...next[i],
+      toolInput: hasValue(next[i].toolInput) ? next[i].toolInput : result.toolInput,
+      toolOutput: result.toolOutput,
+    }
+    return next
+  }
+  next.push(result)
+  return next
 }
 
 export function mergeToolCalls(
@@ -551,12 +666,15 @@ export function mergeToolCalls(
 function mergeMessagePreservingOldData(oldMessage: ChatMessage, newMessage: ChatMessage): ChatMessage {
   const contentBlocks = mergeContentBlocks(oldMessage.contentBlocks, newMessage.contentBlocks)
   const toolCalls = mergeToolCalls(oldMessage.toolCalls, newMessage.toolCalls)
+  const content = isLocalArtifactAugmentedContent(newMessage.content, oldMessage.content)
+    ? newMessage.content
+    : oldMessage.content || newMessage.content
 
   return {
     ...newMessage,
     id: oldMessage.id,
     createdAt: oldMessage.createdAt,
-    content: oldMessage.content || newMessage.content,
+    content,
     ...(oldMessage.thinking || newMessage.thinking
       ? { thinking: oldMessage.thinking || newMessage.thinking }
       : {}),
@@ -606,12 +724,30 @@ function isSuffixOfLiveMessages(gatewayMessages: ChatMessage[], liveMessages: Ch
   return true
 }
 
+function hasLocalArtifactAugmentedMessages(
+  gatewayMessages: ChatMessage[],
+  liveMessages: ChatMessage[],
+): boolean {
+  if (gatewayMessages.length === 0) return false
+  if (gatewayMessages.length > liveMessages.length) return false
+
+  const start = liveMessages.length - gatewayMessages.length
+  for (let i = 0; i < gatewayMessages.length; i++) {
+    const live = liveMessages[start + i]
+    const gateway = gatewayMessages[i]
+    if (live.role !== 'assistant' || gateway.role !== 'assistant') continue
+    if (isLocalArtifactAugmentedContent(live.content, gateway.content)) return true
+  }
+  return false
+}
+
 export function shouldUseLiveMessagesFallback(
   gatewayMessages: ChatMessage[],
   liveMessages: ChatMessage[],
   sameGatewaySession: boolean,
 ): boolean {
   if (!sameGatewaySession) return false
+  if (hasLocalArtifactAugmentedMessages(gatewayMessages, liveMessages)) return true
   if (liveMessages.length <= gatewayMessages.length) return false
   if (isSuffixOfLiveMessages(gatewayMessages, liveMessages)) return true
 
@@ -682,6 +818,7 @@ export async function saveLiveSnapshot(
   capturedImages?: { imageUrl: string; mimeType?: string }[],
   userAttachments?: { name: string; mimeType: string; content: string }[],
   capturedToolInputs?: { toolName: string; toolInput: unknown }[],
+  assistantContentOverride?: string,
 ): Promise<void> {
   const rawResult = await client.request(
     'chat.history',
@@ -693,6 +830,7 @@ export async function saveLiveSnapshot(
   if (rawMessages.length === 0) return
 
   let liveMessages = transformToLiveMessages(rawMessages)
+  replaceLastAssistantMessageContent(liveMessages, assistantContentOverride)
 
   // Merge user-uploaded image attachments into the last user message's contentBlocks.
   // Gateway chat.history strips user image attachments, so we must re-inject them
@@ -945,6 +1083,8 @@ async function writeLiveMessages(
   gwSessionId: string | undefined,
   archiveMessages: ChatMessage[],
 ): Promise<void> {
+  sanitizeAssistantArtifactLinks(liveMessages)
+  sanitizeAssistantArtifactLinks(archiveMessages)
   dedupeMessageContentBlocks(liveMessages)
   dedupeMessageContentBlocks(archiveMessages)
 

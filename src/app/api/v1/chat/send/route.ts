@@ -18,6 +18,15 @@ import {
   buildExternalWorkspaceSessionLinkPath,
   buildExternalWorkspaceSessionTarget,
 } from '@/lib/session-files/helpers'
+import {
+  appendArtifactLinks,
+  artifactLinksMarkdown,
+  createContainerSessionOutputSnapshot,
+  createExternalSessionOutputSnapshot,
+  normalizeContainerSessionArtifacts,
+  normalizeExternalSessionArtifacts,
+} from '@/lib/session-files/artifacts'
+import type { SessionArtifact, SessionOutputSnapshot } from '@/lib/session-files/artifacts'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import {
   appendLiveMessages,
@@ -353,6 +362,7 @@ export async function POST(req: NextRequest) {
   })
   const existingSession = session
   const chatSessionId = session.id
+  const runStartedAt = new Date()
 
   // --- SSE Stream ---
   const { readable, writable } = new TransformStream()
@@ -363,9 +373,13 @@ export async function POST(req: NextRequest) {
   let lastTextContent = ''
   let lastThinkingContent = ''
   let lastImageCount = 0
+  let finishStarted = false
   const pendingImageReads: Promise<void>[] = []
   // Resolved in the async IIFE below; used by fetchAndEmitImages + tool result handler
   let containerId: string | null = null
+  let instanceWorkspacePath: string | null = null
+  let containerOutputSnapshot: SessionOutputSnapshot | null = null
+  let externalOutputSnapshot: SessionOutputSnapshot | null = null
   // Track the active tool name for command_output routing and buffer per-tool output
   // between item:start and item:end events.
   let activeToolName: string | null = null
@@ -473,8 +487,79 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  async function normalizeAndEmitArtifactLinks(): Promise<string | undefined> {
+    try {
+      let artifacts: SessionArtifact[] = []
+      if (containerId) {
+        try {
+          artifacts = await normalizeContainerSessionArtifacts({
+            containerId,
+            agentId,
+            chatSessionId,
+            runStartedAt,
+            execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
+            outputSnapshot: containerOutputSnapshot,
+          })
+        } catch (err) {
+          console.warn('[session-artifacts] container normalization failed:', (err as Error).message)
+        }
+      }
+      if (artifacts.length === 0 && instanceWorkspacePath) {
+        artifacts = await normalizeExternalSessionArtifacts({
+          workspacePath: instanceWorkspacePath,
+          agentId,
+          chatSessionId,
+          runStartedAt,
+          outputSnapshot: externalOutputSnapshot,
+        })
+      }
+
+      if (artifacts.length === 0) return undefined
+      const augmented = appendArtifactLinks(lastTextContent, artifacts)
+      if (augmented === lastTextContent) return undefined
+      const previous = lastTextContent.trimEnd()
+      const streamContent =
+        previous && augmented.startsWith(previous)
+          ? augmented.slice(previous.length)
+          : previous
+            ? `\n\n${artifactLinksMarkdown(artifacts)}`
+            : augmented
+      if (streamContent.trim()) {
+        write({ type: 'text', content: streamContent })
+        lastTextContent = augmented
+        return augmented
+      }
+    } catch (err) {
+      console.warn('[session-artifacts] normalization failed:', (err as Error).message)
+    }
+    return undefined
+  }
+
+  async function saveSnapshotThenFinish() {
+    if (finishStarted) return
+    finishStarted = true
+    activeRuns.delete(chatSessionId)
+
+    const assistantContentOverride = await normalizeAndEmitArtifactLinks()
+    try {
+      await saveLiveSnapshot(
+        chatSessionId,
+        client!,
+        sessionKey,
+        containerId,
+        capturedImages,
+        userImageAttachments,
+        capturedToolInputs,
+        assistantContentOverride,
+      )
+    } catch (err) {
+      console.error('[live-snapshot] Save failed:', err)
+    }
+    write({ type: 'done' })
+    await cleanup()
+  }
+
   const unsubChat = client.on('chat', (payload: unknown) => {
-    if (closed) return
     const evt = payload as Record<string, unknown> | undefined
     if (!evt) return
     if (evt.runId !== idempotencyKey) return
@@ -542,6 +627,7 @@ export async function POST(req: NextRequest) {
         lastEmitted: lastTextContent,
       })
       if (tdelta.text) write({ type: 'text', content: tdelta.text })
+      lastTextContent = tdelta.nextLast
 
       // Capture any remaining inline image blocks from final message
       const images = extractImagesFromMessage(evt.message)
@@ -558,43 +644,12 @@ export async function POST(req: NextRequest) {
       // Scan chat.history for MEDIA paths in tool results and emit as image events.
       // Must run before 'done' so frontend displays images in the same streaming session.
       fetchAndEmitImages()
-        .then(async () => {
-          // Await saveLiveSnapshot BEFORE sending 'done' so that when the client
-          // calls syncFromHistory (triggered by 'done'), liveMessages in the DB
-          // already contain user-uploaded images and resolved MEDIA images.
-          try {
-            await saveLiveSnapshot(
-              chatSessionId,
-              client!,
-              sessionKey,
-              containerId,
-              capturedImages,
-              userImageAttachments,
-              capturedToolInputs,
-            )
-          } catch (err) {
-            console.error('[live-snapshot] Save failed:', err)
-          }
-          write({ type: 'done' })
-          cleanup()
-        })
-        .catch(async () => {
-          try {
-            await saveLiveSnapshot(
-              chatSessionId,
-              client!,
-              sessionKey,
-              containerId,
-              capturedImages,
-              userImageAttachments,
-              capturedToolInputs,
-            )
-          } catch {
-            /* non-fatal */
-          }
-          write({ type: 'done' })
-          cleanup()
-        })
+        // Await saveLiveSnapshot BEFORE sending 'done' so that when the client
+        // calls syncFromHistory (triggered by 'done'), liveMessages in the DB
+        // already contain user-uploaded images, resolved MEDIA images, and
+        // deterministic output links.
+        .then(saveSnapshotThenFinish)
+        .catch(saveSnapshotThenFinish)
     } else if (state === 'error') {
       if (lifecycleEndTimer) {
         clearTimeout(lifecycleEndTimer)
@@ -624,7 +679,6 @@ export async function POST(req: NextRequest) {
   let lifecycleEndTimer: ReturnType<typeof setTimeout> | null = null
 
   const unsubAgent = client.on('agent', (payload: unknown) => {
-    if (closed) return
     const evt = payload as Record<string, unknown> | undefined
     if (!evt) return
     if (evt.runId !== idempotencyKey) return
@@ -637,26 +691,11 @@ export async function POST(req: NextRequest) {
       const phase = data.phase as string
       if ((phase === 'end' || phase === 'error') && !lifecycleEndTimer) {
         lifecycleEndTimer = setTimeout(async () => {
-          if (closed) return
+          if (finishStarted) return
           console.warn(
             `[chat/send] lifecycle ${phase} received but no chat final after 5s — forcing done (session=${chatSessionId})`,
           )
-          activeRuns.delete(chatSessionId)
-          try {
-            await saveLiveSnapshot(
-              chatSessionId,
-              client!,
-              sessionKey,
-              containerId,
-              capturedImages,
-              userImageAttachments,
-              capturedToolInputs,
-            )
-          } catch {
-            /* non-fatal */
-          }
-          write({ type: 'done' })
-          cleanup()
+          await saveSnapshotThenFinish()
         }, 5_000)
       }
       return
@@ -800,6 +839,7 @@ export async function POST(req: NextRequest) {
           select: { containerId: true, workspacePath: true },
         })
         containerId = instance?.containerId ?? null
+        instanceWorkspacePath = instance?.workspacePath ?? null
         if (instance?.containerId) {
           const inputPath = buildSessionInputPath(agentId, activeSession.id)
 
@@ -823,6 +863,19 @@ export async function POST(req: NextRequest) {
             ])
           } catch {
             // Non-fatal: symlink/mkdir failure doesn't block chat
+          }
+          try {
+            containerOutputSnapshot = await createContainerSessionOutputSnapshot({
+              containerId: instance.containerId,
+              agentId,
+              chatSessionId: activeSession.id,
+              execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
+            })
+          } catch (err) {
+            console.warn(
+              '[session-artifacts] container output snapshot failed:',
+              (err as Error).message,
+            )
           }
 
           let inputFiles: { name: string; path: string; type: string; size: number }[] = []
@@ -873,6 +926,18 @@ export async function POST(req: NextRequest) {
             ])
           } catch {
             // Non-fatal: symlink/mkdir failure doesn't block chat
+          }
+          try {
+            externalOutputSnapshot = await createExternalSessionOutputSnapshot({
+              workspacePath: wp,
+              agentId,
+              chatSessionId: activeSession.id,
+            })
+          } catch (err) {
+            console.warn(
+              '[session-artifacts] external output snapshot failed:',
+              (err as Error).message,
+            )
           }
 
           let inputFiles: { name: string; path: string; type: string; size: number }[] = []

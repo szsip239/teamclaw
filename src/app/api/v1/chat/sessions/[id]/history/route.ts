@@ -18,6 +18,8 @@ import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import { activeRuns } from '@/lib/chat/active-runs'
 import { imageBlockDisplayKey, imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
+import { parseSessionMessage } from '@/lib/chat/session-message'
+import { sanitizeOutputArtifactLinks } from '@/lib/session-files/artifacts'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
   ChatMessage,
@@ -41,6 +43,29 @@ function stripMediaReferences(text: string): string {
     .trim()
 }
 
+function hasValue(value: unknown): boolean {
+  return value != null && value !== ''
+}
+
+function completeToolCall(
+  toolCalls: ChatToolCall[] | undefined,
+  result: ChatToolCall,
+): ChatToolCall[] {
+  const next = [...(toolCalls ?? [])]
+  for (let i = next.length - 1; i >= 0; i--) {
+    if (next[i].toolName !== result.toolName) continue
+    if (next[i].toolOutput != null) continue
+    next[i] = {
+      ...next[i],
+      toolInput: hasValue(next[i].toolInput) ? next[i].toolInput : result.toolInput,
+      toolOutput: result.toolOutput,
+    }
+    return next
+  }
+  next.push(result)
+  return next
+}
+
 function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
   // Use index-based IDs so the same message gets the same ID across polls.
@@ -52,17 +77,25 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   for (const msg of raw) {
     if (msg.role === 'user') {
       const contentBlocks = extractContentBlocks(msg.content)
+      const id = `current-${orderIndex}`
       result.push({
-        id: `current-${orderIndex++}`,
+        id,
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
         createdAt: new Date().toISOString(),
       })
+      orderIndex++
     } else if (msg.role === 'assistant') {
-      const rawText = extractText(msg.content)
-      let text = stripFinalTags(stripMediaReferences(rawText))
-      let thinking = extractThinking(msg.content)
+      const id = `current-${orderIndex}`
+      const parsed = parseSessionMessage({
+        messageId: id,
+        messageSeq: orderIndex,
+        message: msg,
+      })
+      const rawText = extractText(msg.content) || parsed.text
+      let text = sanitizeOutputArtifactLinks(stripFinalTags(stripMediaReferences(rawText)))
+      let thinking = parsed.thinking ?? extractThinking(msg.content)
       const contentBlocks = extractContentBlocks(msg.content)
 
       if (!text && thinking) {
@@ -74,13 +107,22 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
       }
 
       result.push({
-        id: `current-${orderIndex++}`,
+        id,
         role: 'assistant',
         content: text,
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(thinking ? { thinking } : {}),
+        ...(parsed.toolCalls ? { toolCalls: parsed.toolCalls } : {}),
+        ...(parsed.stopReason
+          ? {
+              messageSeq: parsed.messageSeq,
+              stopReason: parsed.stopReason,
+              isFinal: parsed.isFinal,
+            }
+          : {}),
         createdAt: new Date().toISOString(),
       })
+      orderIndex++
     } else if (msg.role === 'toolResult') {
       const last = result[result.length - 1]
       if (last?.role === 'assistant') {
@@ -90,7 +132,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
           toolInput: null,
           toolOutput: outputText,
         }
-        last.toolCalls = [...(last.toolCalls ?? []), tc]
+        last.toolCalls = completeToolCall(last.toolCalls, tc)
       }
     }
   }
@@ -100,7 +142,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   // Move their text content into the thinking field so it renders in the
   // collapsible thinking block instead of as prominent chat text.
   for (const msg of result) {
-    if (msg.role === 'assistant' && msg.toolCalls?.length && msg.content) {
+    if (msg.role === 'assistant' && msg.stopReason == null && msg.toolCalls?.length && msg.content) {
       msg.thinking = msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
       msg.content = ''
     }
@@ -181,7 +223,7 @@ export const GET = withAuth(
       batch.messages.push({
         id: row.id,
         role: row.role as 'user' | 'assistant',
-        content: row.content,
+        content: sanitizeOutputArtifactLinks(row.content),
         ...(row.contentBlocks
           ? { contentBlocks: row.contentBlocks as unknown as ChatContentBlock[] }
           : {}),

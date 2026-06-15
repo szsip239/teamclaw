@@ -11,7 +11,6 @@ import { chatKeys, useNewConversation } from '@/hooks/use-chat'
 import { useT } from '@/stores/language-store'
 import { ChatMessageBubble } from './chat-message-bubble'
 import { ChatAssistantMessage } from './chat-assistant-message'
-import { ChatProcessGroup } from './chat-process-group'
 
 import type { ChatMessage } from '@/types/chat'
 
@@ -24,12 +23,14 @@ function isSeparator(content: string): string | null {
   return null
 }
 
-/** An intermediate assistant message: has thinking/tools but no visible content */
+/** An intermediate assistant message: tool-use turn, or legacy thinking/tool-only row. */
 function isIntermediate(msg: ChatMessage): boolean {
+  if (msg.role !== 'assistant' || msg.error) return false
+  if (typeof msg.isFinal === 'boolean') {
+    return !msg.isFinal && (!!msg.content || !!msg.thinking || (msg.toolCalls?.length ?? 0) > 0)
+  }
   return (
-    msg.role === 'assistant' &&
     !msg.content &&
-    !msg.error &&
     (!!msg.thinking || (msg.toolCalls?.length ?? 0) > 0)
   )
 }
@@ -58,7 +59,12 @@ function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
       }
 
       // If next message is a final assistant with content, merge steps into it
-      if (i < messages.length && messages[i].role === 'assistant' && messages[i].content) {
+      if (
+        i < messages.length &&
+        messages[i].role === 'assistant' &&
+        messages[i].isFinal !== false &&
+        messages[i].content
+      ) {
         items.push({
           type: 'assistant-grouped',
           id: messages[i].id,
@@ -272,6 +278,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
 
   // Group consecutive intermediate messages for compact rendering
   const renderItems = useMemo(() => buildRenderItems(messages), [messages])
+  const hasProcessOnly = renderItems.some((item) => item.type === 'process-only')
 
   // Auto-scroll when near bottom: on new messages or streaming content changes
   const messageCount = messages.length
@@ -304,7 +311,16 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
         {connectionStatus === 'session-lost' && <SessionLostBanner />}
         {renderItems.map((item) => {
           if (item.type === 'process-only') {
-            return <ChatProcessGroup key={item.id} steps={item.steps} />
+            const message = item.steps[item.steps.length - 1]
+            const processSteps = item.steps.slice(0, -1)
+            return (
+              <ChatAssistantMessage
+                key={item.id}
+                message={message}
+                isStreaming={false}
+                processSteps={processSteps}
+              />
+            )
           }
 
           // Get the display message ID for selection tracking
@@ -363,7 +379,7 @@ export function ChatMessageList({ isLoadingHistory }: ChatMessageListProps) {
             </div>
           </div>
         ))}
-        {remoteStreaming && !streamingMessage && (
+        {remoteStreaming && !streamingMessage && !hasProcessOnly && (
           <div className="flex justify-start">
             <div className="flex max-w-[85%] items-start gap-2">
               <div className="bg-muted flex size-7 shrink-0 items-center justify-center rounded-full">
