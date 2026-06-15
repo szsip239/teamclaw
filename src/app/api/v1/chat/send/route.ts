@@ -1,8 +1,10 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { extname } from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
+import { registry, ensureRegistryInitialized, resolveGatewayUrl } from '@/lib/gateway/registry'
+import { decrypt } from '@/lib/auth/encryption'
+import { GatewayClient } from '@/lib/gateway/client'
 import { sendMessageSchema } from '@/lib/validations/chat'
 import { verifyAccessToken } from '@/lib/auth/jwt'
 import { dockerManager } from '@/lib/docker/manager'
@@ -29,6 +31,7 @@ import {
   readImageAsDataUrl,
   readContainerImageAsDataUrl,
 } from '@/lib/chat/image-helpers'
+import { computeTextDelta } from '@/lib/chat/stream-delta'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult } from '@/types/gateway'
@@ -57,6 +60,36 @@ interface ExtractedImage {
   url: string
   mimeType?: string
   alt?: string
+}
+
+interface GatewayAttachment {
+  fileName: string
+  mimeType: string
+  content: string
+}
+
+function attachmentContentKey(att: Pick<GatewayAttachment, 'mimeType' | 'content'>): string {
+  return createHash('sha256')
+    .update(att.mimeType)
+    .update(':')
+    .update(att.content)
+    .digest('hex')
+}
+
+function dedupeAttachments<T extends Pick<GatewayAttachment, 'mimeType' | 'content'>>(
+  attachments: T[],
+): T[] {
+  const seen = new Set<string>()
+  const unique: T[] = []
+
+  for (const att of attachments) {
+    const key = attachmentContentKey(att)
+    if (seen.has(key)) continue
+    unique.push(att)
+    seen.add(key)
+  }
+
+  return unique
 }
 
 function extractImagesFromMessage(message: unknown): ExtractedImage[] {
@@ -245,11 +278,26 @@ export async function POST(req: NextRequest) {
   // --- Ensure registry ---
   await ensureRegistryInitialized()
 
-  const client = registry.getClient(instanceId)
   const adapter = registry.getAdapter(instanceId)
-  if (!client || !adapter) {
+  if (!adapter) {
     return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
   }
+
+  // Fresh GatewayClient per chat.send: persistent sockets receive compressed
+  // event streams (single full-text delta, no agent:item tool events) from the
+  // v4 gateway. A one-shot client gets full incremental streaming.
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { gatewayUrl: true, gatewayToken: true, dockerConfig: true },
+  })
+  if (!instance) {
+    return NextResponse.json({ error: 'Instance not found' }, { status: 502 })
+  }
+  const client = new GatewayClient(
+    resolveGatewayUrl({ gatewayUrl: instance.gatewayUrl, dockerConfig: instance.dockerConfig }),
+    decrypt(instance.gatewayToken),
+  )
+  await client.connect()
 
   // --- Build session key ---
   const sessionKey = `agent:${agentId}:tc:${user.id}`
@@ -443,10 +491,17 @@ export async function POST(req: NextRequest) {
         lastThinkingContent = thinkingContent
       }
 
-      if (textContent && textContent !== lastTextContent) {
-        const newText = textContent.slice(lastTextContent.length)
-        if (newText) write({ type: 'text', content: newText })
-        lastTextContent = textContent
+      // When preamble events already delivered the text incrementally,
+      // the chat delta is a duplicate. Skip it.
+      if (textContent !== lastTextContent) {
+        const tdelta = computeTextDelta({
+          deltaText: evt.deltaText as string | undefined,
+          replace: evt.replace as boolean | undefined,
+          cumulative: textContent,
+          lastEmitted: lastTextContent,
+        })
+        if (tdelta.text) write({ type: 'text', content: tdelta.text })
+        lastTextContent = tdelta.nextLast
       }
 
       // Capture inline image blocks if OpenClaw embeds them in chat events
@@ -479,10 +534,14 @@ export async function POST(req: NextRequest) {
         if (newThinking) write({ type: 'thinking', content: newThinking })
       }
 
-      if (textContent && textContent !== lastTextContent) {
-        const newText = textContent.slice(lastTextContent.length)
-        if (newText) write({ type: 'text', content: newText })
-      }
+      // v4: computeTextDelta handles deltaText/replace/cumulative-slice uniformly
+      const tdelta = computeTextDelta({
+        deltaText: evt.deltaText as string | undefined,
+        replace: evt.replace as boolean | undefined,
+        cumulative: textContent,
+        lastEmitted: lastTextContent,
+      })
+      if (tdelta.text) write({ type: 'text', content: tdelta.text })
 
       // Capture any remaining inline image blocks from final message
       const images = extractImagesFromMessage(evt.message)
@@ -604,17 +663,42 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Item: tool lifecycle events (OpenClaw 2026.4+) ──
-    if (stream === 'item') {
+    // ── Item: tool/thinking/preamble events (OpenClaw 2026.4+) ──
+    // v4 gateway may prefix item events with the agent runtime id
+    // (e.g. "codex_app_server.item") instead of bare "item".
+    if (stream === 'item' || (typeof stream === 'string' && stream.endsWith('.item'))) {
       const data = (evt.data ?? {}) as Record<string, unknown>
       const kind = data.kind as string | undefined
+
+      // v4 gateway pushes incremental text through agent item preamble
+      // events instead of chat delta events when routed through the built-in
+      // agent runtime.  Route them as text SSE events for the typewriter effect.
+      if (kind === 'preamble') {
+        const progressText = data.progressText as string | undefined
+        if (progressText) {
+          const d = computeTextDelta({
+            cumulative: progressText,
+            lastEmitted: lastTextContent,
+          })
+          if (d.text) write({ type: 'text', content: d.text })
+          lastTextContent = d.nextLast
+        }
+        return
+      }
+      // kind=analysis → agent reasoning, skip per user preference (thinking hidden)
+      if (kind === 'analysis') return
+
       const phase = data.phase as string
       const toolName = String(data.name ?? 'tool')
 
-      if (kind === 'tool') {
+      // kind=command is how the v4 gateway sends tool execution events through
+      // the built-in agent runtime (codex-app-server). Direct WS connections get
+      // kind=tool; GatewayClient connections get kind=command with the same shape.
+      if (kind === 'tool' || kind === 'command') {
         if (phase === 'start') {
           activeToolName = toolName
           toolOutputBuf.set(toolName, '')
-          const toolInput = data.args ?? data.meta ?? {}
+          const toolInput = data.meta ?? data.args ?? {}
           capturedToolInputs.push({ toolName, toolInput })
           write({
             type: 'tool_call',
@@ -685,6 +769,7 @@ export async function POST(req: NextRequest) {
     activeRuns.delete(chatSessionId)
     unsubChat()
     unsubAgent()
+    client.disconnect()
     await close()
   }
 
@@ -693,7 +778,7 @@ export async function POST(req: NextRequest) {
   // client gets the SSE connection immediately (no multi-second delay from
   // Docker exec operations like symlink creation, dir listing, and image download).
   ;(async () => {
-    const sessionFileAttachments: { fileName: string; mimeType: string; content: string }[] = []
+    const sessionFileAttachments: GatewayAttachment[] = []
     const SESSION_IMAGE_EXTS: Record<string, string> = {
       '.png': 'image/png',
       '.jpg': 'image/jpeg',
@@ -818,19 +903,19 @@ export async function POST(req: NextRequest) {
       // Non-blocking: skip on any error
     }
 
-    const mappedAttachments = [
+    const mappedAttachments = dedupeAttachments([
       ...(attachments?.map((a) => ({
         fileName: a.name,
         mimeType: a.mimeType,
         content: a.content,
       })) ?? []),
       ...sessionFileAttachments,
-    ]
+    ])
 
     // Capture ONLY 📎 chat attachments for liveMessages persistence (not sidebar input/ files).
     // Session file attachments are sent to the agent via mappedAttachments but should NOT
     // appear as contentBlocks in chat message bubbles.
-    for (const a of attachments ?? []) {
+    for (const a of dedupeAttachments(attachments ?? [])) {
       if (a.mimeType.startsWith('image/')) {
         userImageAttachments.push({ name: a.name, mimeType: a.mimeType, content: a.content })
       }

@@ -17,6 +17,7 @@ import {
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import { activeRuns } from '@/lib/chat/active-runs'
+import { imageBlockDisplayKey, imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
   ChatMessage,
@@ -118,10 +119,29 @@ function replaceInlineImages(messages: ChatMessage[], sessionId: string): void {
     for (const block of msg.contentBlocks) {
       if (block.type === 'image' && block.imageUrl?.startsWith('data:')) {
         const hash = computeImageId(block.imageUrl)
+        block.imageId = hash
         block.imageUrl = `/api/v1/chat/sessions/${sessionId}/images/${hash}`
+      } else if (block.type === 'image' && block.imageUrl && !block.imageId) {
+        const hash = imageIdFromHistoryUrl(block.imageUrl)
+        if (hash) block.imageId = hash
       }
     }
+    msg.contentBlocks = dedupeContentBlocks(msg.contentBlocks)
   }
+}
+
+function dedupeContentBlocks(blocks: ChatContentBlock[]): ChatContentBlock[] {
+  const seen = new Set<string>()
+  const unique: ChatContentBlock[] = []
+
+  for (const block of blocks) {
+    const key = imageBlockDisplayKey(block)
+    if (seen.has(key)) continue
+    unique.push(block)
+    seen.add(key)
+  }
+
+  return unique
 }
 
 // GET /api/v1/chat/sessions/[id]/history — load snapshots + current messages

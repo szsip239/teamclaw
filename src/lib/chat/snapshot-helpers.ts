@@ -3,12 +3,14 @@ import { extname } from 'path'
 import { Prisma } from '@/generated/prisma'
 import { prisma } from '@/lib/db'
 import {
+  computeImageId,
   extractMediaPaths,
   readImageAsDataUrl,
   readContainerImageAsDataUrl,
   stampImageIds,
   MIME_BY_EXT,
 } from '@/lib/chat/image-helpers'
+import { imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import type { ChatHistoryMessage, ChatHistoryResult } from '@/types/gateway'
 import type { ChatToolCall, ChatContentBlock, ChatMessage } from '@/types/chat'
@@ -78,7 +80,7 @@ export function extractContentBlocks(content: ChatHistoryMessage['content']): Ch
       }
     }
   }
-  return blocks.length > 0 ? blocks : undefined
+  return dedupeContentBlocks(blocks)
 }
 
 /**
@@ -455,15 +457,49 @@ function findIncomingOverlap(
 }
 
 function contentBlockKey(block: ChatContentBlock): string {
-  if (block.type === 'image') return `image:${block.imageId ?? block.imageUrl ?? ''}`
+  if (block.type === 'image') {
+    const urlImageId = imageIdFromHistoryUrl(block.imageUrl)
+    const imageId =
+      urlImageId ??
+      block.imageId ??
+      (block.imageUrl?.startsWith('data:') ? computeImageId(block.imageUrl) : undefined)
+    return imageId ? `image:${imageId}` : `image-url:${block.imageUrl ?? ''}`
+  }
   return `text:${block.text ?? ''}`
+}
+
+function dedupeContentBlocks(
+  blocks: ChatContentBlock[] | undefined,
+): ChatContentBlock[] | undefined {
+  const unique: ChatContentBlock[] = []
+  const seen = new Set<string>()
+
+  for (const block of blocks ?? []) {
+    const key = contentBlockKey(block)
+    if (seen.has(key)) continue
+    unique.push({ ...block })
+    seen.add(key)
+  }
+
+  return unique.length > 0 ? unique : undefined
+}
+
+function dedupeMessageContentBlocks(messages: ChatMessage[]): void {
+  for (const message of messages) {
+    const contentBlocks = dedupeContentBlocks(message.contentBlocks)
+    if (contentBlocks) {
+      message.contentBlocks = contentBlocks
+    } else {
+      delete message.contentBlocks
+    }
+  }
 }
 
 function mergeContentBlocks(
   oldBlocks: ChatContentBlock[] | undefined,
   newBlocks: ChatContentBlock[] | undefined,
 ): ChatContentBlock[] | undefined {
-  const merged = cloneContentBlocks(oldBlocks) ?? []
+  const merged = dedupeContentBlocks(oldBlocks) ?? []
   const seen = new Set(merged.map(contentBlockKey))
 
   for (const block of newBlocks ?? []) {
@@ -480,7 +516,7 @@ function hasValue(value: unknown): boolean {
   return value != null && value !== ''
 }
 
-function mergeToolCalls(
+export function mergeToolCalls(
   oldToolCalls: ChatToolCall[] | undefined,
   newToolCalls: ChatToolCall[] | undefined,
 ): ChatToolCall[] | undefined {
@@ -495,15 +531,18 @@ function mergeToolCalls(
 
     if (oldCall && newCall) {
       merged.push({
-        toolName: oldCall.toolName || newCall.toolName,
+        // Prefer new gateway data (authoritative); old enriches with SSE-captured inputs
+        toolName: newCall.toolName || oldCall.toolName,
         toolInput: hasValue(oldCall.toolInput) ? oldCall.toolInput : newCall.toolInput,
-        toolOutput: hasValue(oldCall.toolOutput) ? oldCall.toolOutput : newCall.toolOutput,
+        toolOutput: hasValue(newCall.toolOutput) ? newCall.toolOutput : oldCall.toolOutput,
       })
-    } else if (oldCall) {
-      merged.push({ ...oldCall })
     } else if (newCall) {
       merged.push({ ...newCall })
     }
+    // Drop stale tool calls that exist only in the old message (no matching
+    // new call from the gateway). Without this, tool calls leak from old
+    // messages into new messages during gwSessionId-changed resets, and the
+    // stale entries compound across successive merge cycles.
   }
 
   return merged.length > 0 ? merged : undefined
@@ -661,14 +700,19 @@ export async function saveLiveSnapshot(
   if (userAttachments?.length) {
     for (let i = liveMessages.length - 1; i >= 0; i--) {
       if (liveMessages[i].role === 'user') {
-        const blocks: ChatContentBlock[] = liveMessages[i].contentBlocks ?? []
+        const blocks: ChatContentBlock[] = dedupeContentBlocks(liveMessages[i].contentBlocks) ?? []
+        const seen = new Set(blocks.map(contentBlockKey))
         for (const att of userAttachments) {
           if (!att.mimeType.startsWith('image/')) continue
-          blocks.push({
+          const block: ChatContentBlock = {
             type: 'image',
             imageUrl: `data:${att.mimeType};base64,${att.content}`,
             mimeType: att.mimeType,
-          })
+          }
+          const key = contentBlockKey(block)
+          if (seen.has(key)) continue
+          blocks.push(block)
+          seen.add(key)
         }
         if (blocks.length > 0) liveMessages[i].contentBlocks = blocks
         break
@@ -901,6 +945,9 @@ async function writeLiveMessages(
   gwSessionId: string | undefined,
   archiveMessages: ChatMessage[],
 ): Promise<void> {
+  dedupeMessageContentBlocks(liveMessages)
+  dedupeMessageContentBlocks(archiveMessages)
+
   // Pre-compute imageId on all image blocks so the image endpoint
   // can look up by field match instead of re-hashing on every request.
   stampImageIds(liveMessages)
@@ -939,6 +986,7 @@ export async function appendLiveMessages(
       ? (session.liveMessages as unknown as ChatMessage[])
       : []
     const liveMessages = [...existingLive.map(cloneMessage), ...messages.map(cloneMessage)]
+    dedupeMessageContentBlocks(liveMessages)
     stampImageIds(liveMessages)
     await prisma.chatSession.update({
       where: { id: chatSessionId },

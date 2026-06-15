@@ -216,7 +216,22 @@ export const ChatChartBlock = memo(function ChatChartBlock({ optionJson }: ChatC
       const sanitized = sanitizeOption(parsed) as Record<string, unknown>
       return { option: sanitized, error: null }
     } catch {
-      return { option: null, error: 'chat.chartJsonInvalid' as const }
+      // LLMs often output literal newlines inside JSON string values
+      // (e.g. ECharts tooltip formatters). JSON forbids unescaped control
+      // characters.  Repair all bare control chars inside quoted strings once
+      // before reporting the error.  Avoids negative lookbehind (?<!\\) for
+      // Safari compatibility.
+      try {
+        const repaired = optionJson.replace(
+          /"([^"\\]*(\\.[^"\\]*)*)"/g,
+          (match: string) => match.replace(/\n/g, '\\n').replace(/\t/g, '\\t'),
+        )
+        const parsed = JSON.parse(repaired)
+        const sanitized = sanitizeOption(parsed) as Record<string, unknown>
+        return { option: sanitized, error: null }
+      } catch {
+        return { option: null, error: 'chat.chartJsonInvalid' as const }
+      }
     }
 
   }, [optionJson])

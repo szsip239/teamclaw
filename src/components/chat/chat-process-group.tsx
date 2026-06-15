@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Bot, Brain, Wrench, ChevronRight } from "lucide-react"
+import { Bot, Wrench, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT } from "@/stores/language-store"
 import type { ChatMessage, ChatToolCall } from "@/types/chat"
@@ -31,27 +31,26 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
   const [expanded, setExpanded] = useState(false)
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
 
-  const { thinkingCount, toolEntries, flatSteps } = useMemo(() => {
-    let thinking = 0
+  const { toolEntries, flatSteps } = useMemo(() => {
     const tools = new Map<string, number>()
     const flat: ProcessStep[] = []
 
     for (const step of steps) {
-      if (step.thinking) {
-        thinking++
-        flat.push({ type: "thinking", thinking: step.thinking })
-      }
+      // #13: thinking is hidden — don't add thinking flat steps.
+      // Tool calls on the SAME message must still be processed.
       for (const tc of step.toolCalls ?? []) {
         tools.set(tc.toolName, (tools.get(tc.toolName) ?? 0) + 1)
         flat.push({ type: "tool", toolCall: tc })
       }
     }
     return {
-      thinkingCount: thinking,
       toolEntries: [...tools.entries()],
       flatSteps: flat,
     }
   }, [steps])
+
+  // No tools to show → render nothing
+  if (flatSteps.length === 0) return null
 
   const summaryBar = (
     <button
@@ -59,14 +58,6 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
       className="flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-border/50 bg-muted/30 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50"
       onClick={() => setExpanded(!expanded)}
     >
-      {thinkingCount > 0 && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-          <Brain className="size-2.5" />
-          {thinkingCount > 1
-            ? t("chat.thinkingN", { n: String(thinkingCount) })
-            : t("chat.thinking")}
-        </span>
-      )}
       {toolEntries.map(([name, count]) => (
         <span
           key={name}
@@ -94,35 +85,8 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
     <div className="mt-1.5 space-y-px border-l-2 border-border/40 ml-1">
       {flatSteps.map((step, i) => {
         const isExpanded = expandedIdx === i
-        if (step.type === "thinking") {
-          return (
-            <div key={i}>
-              <button
-                type="button"
-                className="flex w-full items-start gap-1.5 rounded-r px-2.5 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/40"
-                onClick={() => setExpandedIdx(isExpanded ? null : i)}
-              >
-                <Brain className="mt-0.5 size-2.5 shrink-0 opacity-60" />
-                <span className="line-clamp-1 flex-1 break-all">
-                  {step.thinking!.slice(0, 120)}
-                  {step.thinking!.length > 120 ? "…" : ""}
-                </span>
-                <ChevronRight
-                  className={cn(
-                    "mt-0.5 size-2.5 shrink-0 opacity-40 transition-transform",
-                    isExpanded && "rotate-90",
-                  )}
-                />
-              </button>
-              {isExpanded && (
-                <div className="ml-6 mr-2 mb-1 max-h-48 overflow-y-auto rounded bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground/80 whitespace-pre-wrap">
-                  {step.thinking}
-                </div>
-              )}
-            </div>
-          )
-        }
-        // tool call
+        // thinking steps are filtered out above — only tool calls remain
+
         const tc = step.toolCall!
         return (
           <div key={i}>
