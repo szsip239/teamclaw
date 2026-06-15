@@ -85,35 +85,8 @@ export function ChatProcessGroup({ steps, inline }: ChatProcessGroupProps) {
     <div className="mt-1.5 space-y-px border-l-2 border-border/40 ml-1">
       {flatSteps.map((step, i) => {
         const isExpanded = expandedIdx === i
-        if (step.type === "thinking") {
-          return (
-            <div key={i}>
-              <button
-                type="button"
-                className="flex w-full items-start gap-1.5 rounded-r px-2.5 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/40"
-                onClick={() => setExpandedIdx(isExpanded ? null : i)}
-              >
-                <Brain className="mt-0.5 size-2.5 shrink-0 opacity-60" />
-                <span className="line-clamp-1 flex-1 break-all">
-                  {step.thinking!.slice(0, 120)}
-                  {step.thinking!.length > 120 ? "…" : ""}
-                </span>
-                <ChevronRight
-                  className={cn(
-                    "mt-0.5 size-2.5 shrink-0 opacity-40 transition-transform",
-                    isExpanded && "rotate-90",
-                  )}
-                />
-              </button>
-              {isExpanded && (
-                <div className="ml-6 mr-2 mb-1 max-h-48 overflow-y-auto rounded bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground/80 whitespace-pre-wrap">
-                  {step.thinking}
-                </div>
-              )}
-            </div>
-          )
-        }
-        // tool call
+        // thinking steps are filtered out above — only tool calls remain
+
         const tc = step.toolCall!
         return (
           <div key={i}>
