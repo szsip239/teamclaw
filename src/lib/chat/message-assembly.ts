@@ -56,3 +56,16 @@ export function assembleFromResponse(data: ChatHistoryResponse): ChatMessage[] {
     data.isActive,
   )
 }
+
+export function latestUserTurnHasFinalAssistant(
+  messages: Pick<ChatMessage, 'role' | 'content' | 'isFinal'>[],
+): boolean {
+  const lastUserIdx = messages.findLastIndex((message) => message.role === 'user')
+  if (lastUserIdx === -1) return false
+
+  return messages.slice(lastUserIdx + 1).some((message) => {
+    if (message.role !== 'assistant') return false
+    if (message.isFinal === true) return true
+    return message.isFinal !== false && !!message.content
+  })
+}

@@ -188,6 +188,9 @@ export interface ChatHistoryMessage {
     type: string
     text?: string
     thinking?: string
+    id?: string
+    name?: string
+    arguments?: unknown
     // Image block fields (OpenClaw returns images in content blocks)
     source?: { type: string; media_type?: string; data?: string }
     url?: string

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { streamChat } from '@/lib/chat-stream'
-import { assembleFromResponse } from '@/lib/chat/message-assembly'
+import { assembleFromResponse, latestUserTurnHasFinalAssistant } from '@/lib/chat/message-assembly'
 import { attachKbSourcesToLatestAssistant } from '@/lib/chat/kb-sources'
 import type {
   ChatAgentInfo,
@@ -141,7 +141,7 @@ async function reconcileQueuedFromHistory(activeSessionId: string) {
 
     // Lightweight extraction — avoid full assembleFromResponse for polling.
     // We only need user message contents and whether assistants follow them.
-    const historyMsgs: { role: string; content: string }[] = []
+    const historyMsgs: Pick<ChatMessage, 'role' | 'content' | 'isFinal'>[] = []
     for (const batch of data.snapshots ?? []) {
       for (const m of batch.messages) historyMsgs.push(m)
     }
@@ -162,13 +162,8 @@ async function reconcileQueuedFromHistory(activeSessionId: string) {
     }
     // Fallback: queuedMessages empty but pendingQueuedRuns > 0
     if (responsesArrived === 0 && queuedMessages.length === 0 && pendingQueuedRuns > 0) {
-      const lastUserIdx = [...historyMsgs].reverse().findIndex((m) => m.role === 'user')
-      if (lastUserIdx !== -1) {
-        const absIdx = historyMsgs.length - 1 - lastUserIdx
-        if (historyMsgs.slice(absIdx + 1).some((m) => m.role === 'assistant' && m.content)) {
-          responsesArrived = pendingQueuedRuns
-        }
-      }
+      const latestTurnComplete = latestUserTurnHasFinalAssistant(historyMsgs)
+      if (latestTurnComplete) responsesArrived = pendingQueuedRuns
     }
     const updates: Partial<ChatState> = {}
     if (displayRemaining.length !== queuedMessages.length) {
@@ -290,6 +285,8 @@ async function syncFromHistory(
 
       set({ messages: assembled })
 
+      const latestTurnComplete = latestUserTurnHasFinalAssistant(assembled)
+
       // Reconcile queued messages (two separate concerns):
       // 1. Display: remove from queuedMessages when user msg appears in history
       // 2. Polling: decrement pendingQueuedRuns when the RESPONSE arrives
@@ -311,13 +308,7 @@ async function syncFromHistory(
         }
         // Fallback: queuedMessages already cleared but pendingQueuedRuns > 0
         if (responsesArrived === 0 && queuedMessages.length === 0 && pendingQueuedRuns > 0) {
-          const lastUserIdx = assembled.findLastIndex((m) => m.role === 'user')
-          if (
-            lastUserIdx !== -1 &&
-            assembled.slice(lastUserIdx + 1).some((m) => m.role === 'assistant' && m.content)
-          ) {
-            responsesArrived = pendingQueuedRuns
-          }
+          if (latestTurnComplete) responsesArrived = pendingQueuedRuns
         }
         const updates: Partial<ChatState> = {}
         if (displayRemaining.length !== queuedMessages.length) {
@@ -332,6 +323,7 @@ async function syncFromHistory(
         }
         if (Object.keys(updates).length > 0) set(updates)
       }
+      return true
     }
     return false // empty assembled — gateway hasn't caught up yet
   } catch {
@@ -576,14 +568,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } finally {
       clearInterval(progressTimer)
 
-      const hasQueued = get().pendingQueuedRuns > 0
-
       // 5. Sync with full history FIRST (primary path — contains complete data with tool calls).
       // Only merge streamingMessage as a fallback if sync fails (gateway unreachable / empty).
       let historySynced = false
       if (capturedSessionId && get().activeSessionId) {
         historySynced = await syncFromHistory(capturedSessionId, set)
       }
+
+      const hasQueued =
+        get().pendingQueuedRuns > 0 &&
+        !latestUserTurnHasFinalAssistant(get().messages)
 
       const finalStreaming = get().streamingMessage
       const finalKbSources = finalStreaming?.kbSources ?? []

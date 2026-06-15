@@ -81,6 +81,9 @@ export interface ChatMessage {
   contentBlocks?: ChatContentBlock[] // structured content blocks (images, etc.)
   thinking?: string
   toolCalls?: ChatToolCall[]
+  messageSeq?: number
+  stopReason?: string
+  isFinal?: boolean
   error?: string
   createdAt: string
   attachments?: ChatAttachment[] // user-uploaded attachments

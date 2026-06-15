@@ -47,6 +47,7 @@ import {
   mergeToolCalls,
   saveLiveSnapshot,
   shouldUseLiveMessagesFallback,
+  transformToLiveMessages,
 } from './snapshot-helpers'
 
 function chatMessage(
@@ -173,6 +174,47 @@ describe('live snapshot append-only merge', () => {
     expect(shouldUseLiveMessagesFallback(cached, cached, true)).toBe(false)
   })
 
+  it('falls back to liveMessages when only local artifact links are missing from gateway history', () => {
+    const gateway = [
+      chatMessage('user', 'create a report'),
+      chatMessage('assistant', '文件已创建完成。'),
+    ]
+    const cached = [
+      chatMessage('user', 'create a report'),
+      chatMessage('assistant', '文件已创建完成。\n\n[report.html](output/report.html)'),
+    ]
+
+    expect(shouldUseLiveMessagesFallback(gateway, cached, true)).toBe(true)
+
+    const merged = mergeLiveMessagesAppendOnly(cached, gateway)
+    expect(merged).toHaveLength(2)
+    expect(merged[1].content).toBe(
+      '文件已创建完成。\n\n[report.html](output/report.html)',
+    )
+  })
+
+  it('falls back when a stale gateway artifact link was replaced by a normalized link', () => {
+    const gateway = [
+      chatMessage('user', 'create a report'),
+      chatMessage('assistant', '页面已生成：[worldcup.html](output/worldcup.html)'),
+    ]
+    const cached = [
+      chatMessage('user', 'create a report'),
+      chatMessage(
+        'assistant',
+        '页面已生成：worldcup.html\n\n[worldcup-2.html](output/worldcup-2.html)',
+      ),
+    ]
+
+    expect(shouldUseLiveMessagesFallback(gateway, cached, true)).toBe(true)
+
+    const merged = mergeLiveMessagesAppendOnly(cached, gateway)
+    expect(merged).toHaveLength(2)
+    expect(merged[1].content).toBe(
+      '页面已生成：worldcup.html\n\n[worldcup-2.html](output/worldcup-2.html)',
+    )
+  })
+
   it('fetches live snapshots with the unified 500 history limit', async () => {
     const client = {
       request: vi.fn().mockResolvedValue({
@@ -230,6 +272,41 @@ describe('live snapshot append-only merge', () => {
     )
   })
 
+  it('persists deterministic artifact links on the last assistant live message', async () => {
+    const client = {
+      request: vi.fn().mockResolvedValue({
+        sessionId: 'gw-1',
+        messages: [
+          user('create a report'),
+          assistant('文件已创建完成。'),
+        ],
+      }),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      gwSessionId: 'gw-1',
+      liveMessages: [],
+    })
+
+    await saveLiveSnapshot(
+      'chat-1',
+      client as never,
+      'agent:a:tc:u',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      '文件已创建完成。\n\n[report.html](output/report.html)',
+    )
+
+    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const liveMessages = updateArg.data.liveMessages as ChatMessage[]
+
+    expect(liveMessages.at(-1)?.content).toBe(
+      '文件已创建完成。\n\n[report.html](output/report.html)',
+    )
+  })
+
   it('archives sessions with the unified 500 history limit', async () => {
     const client = {
       request: vi.fn()
@@ -248,6 +325,36 @@ describe('live snapshot append-only merge', () => {
     expect(client.request).toHaveBeenCalledWith(
       'chat.history',
       { sessionKey: 'agent:agent-a:tc:user-1', limit: 500 },
+    )
+  })
+
+  it('preserves locally appended assistant artifact links when archiving snapshots', async () => {
+    const client = {
+      request: vi.fn()
+        .mockResolvedValueOnce({
+          sessionId: 'gw-1',
+          messages: [
+            user('create a report'),
+            assistant('文件已创建完成。'),
+          ],
+        })
+        .mockResolvedValueOnce({}),
+      on: vi.fn(),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      liveMessages: [
+        chatMessage('user', 'create a report'),
+        chatMessage('assistant', '文件已创建完成。\n\n[report.html](output/report.html)'),
+      ],
+    })
+    mocks.prisma.chatSession.update.mockResolvedValue({})
+
+    await archiveSession('chat-1', 'instance-1', 'agent-a', 'user-1', client as never)
+
+    const createArg = mocks.prisma.chatMessageSnapshot.createMany.mock.calls[0][0]
+    expect(createArg.data[1].content).toBe(
+      '文件已创建完成。\n\n[report.html](output/report.html)',
     )
   })
 
@@ -331,5 +438,31 @@ describe('mergeToolCalls', () => {
     )
     expect(result![0].toolName).toBe('exec')
     expect(result![0].toolOutput).toBe('ok')
+  })
+})
+
+describe('transformToLiveMessages', () => {
+  it('preserves v4 toolUse assistant text as staged display text', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '正在查看目录' },
+          { type: 'toolCall', name: 'exec', arguments: { command: 'ls' } },
+        ],
+        stopReason: 'toolUse',
+      },
+    ])
+
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      content: '正在查看目录',
+      stopReason: 'toolUse',
+      isFinal: false,
+    })
+    expect(messages[0].thinking).toBeUndefined()
+    expect(messages[0].toolCalls).toEqual([
+      { toolName: 'exec', toolInput: { command: 'ls' } },
+    ])
   })
 })

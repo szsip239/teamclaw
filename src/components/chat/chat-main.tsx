@@ -8,7 +8,10 @@ import { ChatHeader } from './chat-header'
 import { ChatMessageList } from './chat-message-list'
 import { ChatInput } from './chat-input'
 import { ChatWelcome } from './chat-welcome'
-import { assembleHistoryMessages } from '@/lib/chat/message-assembly'
+import {
+  assembleHistoryMessages,
+  latestUserTurnHasFinalAssistant,
+} from '@/lib/chat/message-assembly'
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
@@ -84,6 +87,22 @@ export function ChatMain() {
 
     if (!historyData || !dataUpdatedAt) return
 
+    const assembled = assembleHistoryMessages(
+      historyData.snapshots,
+      historyData.currentMessages,
+      historyData.isActive,
+    )
+    const latestTurnComplete = latestUserTurnHasFinalAssistant(assembled)
+    const store = useChatStore.getState()
+    const historyUserContents = new Set(
+      assembled.filter((m) => m.role === 'user').map((m) => m.content),
+    )
+    const queuedMessagesRepresented = store.queuedMessages.every((q) =>
+      historyUserContents.has(q.content),
+    )
+    const pendingRunsStillActive =
+      store.pendingQueuedRuns > 0 && !(latestTurnComplete && queuedMessagesRepresented)
+
     const alreadyLoaded =
       loadedRef.current?.sessionId === matchingSession.id &&
       loadedRef.current?.updatedAt === dataUpdatedAt &&
@@ -100,27 +119,20 @@ export function ChatMain() {
       wasStreamingRef.current = false
     }
     const justFinishedStreaming = wasStreamingRef.current
-    const hasPendingRuns = useChatStore.getState().pendingQueuedRuns > 0
-    setRemoteStreaming((!!historyData?.isRunning && !justFinishedStreaming) || hasPendingRuns)
+    setRemoteStreaming(
+      (!!historyData?.isRunning && !justFinishedStreaming && !latestTurnComplete) ||
+        pendingRunsStillActive,
+    )
 
     if (!alreadyLoaded) {
       loadedRef.current = { sessionId: matchingSession.id, updatedAt: dataUpdatedAt }
-      const assembled = assembleHistoryMessages(
-        historyData.snapshots,
-        historyData.currentMessages,
-        historyData.isActive,
-      )
       // Don't overwrite existing messages with empty history — can happen when the
       // history fetch races ahead of gateway processing the first chat.send request.
       if (assembled.length > 0 || messagesLength === 0) {
         setMessages(assembled)
 
         // Reconcile queued messages (two concerns):
-        const store = useChatStore.getState()
         if (store.queuedMessages.length > 0 || store.pendingQueuedRuns > 0) {
-          const historyUserContents = new Set(
-            assembled.filter((m) => m.role === 'user').map((m) => m.content),
-          )
           // 1. Display: hide bubble once user msg appears in history
           const displayRemaining = store.queuedMessages.filter(
             (q) => !historyUserContents.has(q.content),
@@ -141,13 +153,7 @@ export function ChatMain() {
             store.queuedMessages.length === 0 &&
             store.pendingQueuedRuns > 0
           ) {
-            const lastUserIdx = assembled.findLastIndex((m) => m.role === 'user')
-            if (
-              lastUserIdx !== -1 &&
-              assembled.slice(lastUserIdx + 1).some((m) => m.role === 'assistant' && m.content)
-            ) {
-              responsesArrived = store.pendingQueuedRuns // clear all
-            }
+            if (latestTurnComplete) responsesArrived = store.pendingQueuedRuns
           }
           const updates: Record<string, unknown> = {}
           if (displayRemaining.length !== store.queuedMessages.length) {
@@ -159,6 +165,9 @@ export function ChatMain() {
             if (newPending === 0 && !historyData.isRunning) {
               setRemoteStreaming(false)
             }
+          } else if (latestTurnComplete && queuedMessagesRepresented) {
+            updates.pendingQueuedRuns = 0
+            setRemoteStreaming(false)
           }
           if (Object.keys(updates).length > 0) {
             useChatStore.setState(updates)

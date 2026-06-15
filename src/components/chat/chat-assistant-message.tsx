@@ -3,8 +3,6 @@
 import { Bot, ChevronDown, FileText } from 'lucide-react'
 import type { ChatMessage, KbSourceRef } from '@/types/chat'
 import { ChatProcessGroup } from './chat-process-group'
-import { ChatThinkingBlock } from './chat-thinking-block'
-import { ChatToolCallBlock } from './chat-tool-call-block'
 import { ChatTextBlock } from './chat-text-block'
 import { ChatErrorBlock } from './chat-error-block'
 import { ChatImageBlock } from './chat-image-block'
@@ -13,6 +11,7 @@ import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { imageBlockDisplayKey, uniqueImageBlocks } from '@/lib/chat/image-blocks'
 import { selectVisibleKbSources } from '@/lib/chat/kb-sources'
+import { selectAssistantUiDisplay } from '@/lib/chat/chat-ui-display'
 import { useState } from 'react'
 
 interface ChatAssistantMessageProps {
@@ -149,6 +148,7 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
       ? [message]
       : null
   const imageBlocks = uniqueImageBlocks(message.contentBlocks)
+  const display = selectAssistantUiDisplay(message, { isStreaming, processSteps })
 
   return (
     <div className="flex justify-start">
@@ -159,25 +159,11 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           {allSteps ? (
             <ChatProcessGroup steps={allSteps} inline />
-          ) : (
-            <>
-              {/* #13: thinking hidden — removed ChatThinkingBlock */}
-              {message.toolCalls?.map((tc, i) => (
-                <ChatToolCallBlock key={i} toolCall={tc} />
-              ))}
-            </>
+          ) : null}
+          {display.stagedText && (
+            <ChatStageReply text={display.stagedText} toolName={display.stagedToolName} />
           )}
-          {/* Stage reply: tool description → streaming text → final ChatTextBlock */}
-          {isStreaming && !message.content && (() => {
-            const last = message.toolCalls?.at(-1)
-            const desc = typeof last?.toolInput === 'string' ? last.toolInput : ''
-            const name = last?.toolName
-            if (!desc && !name) return null
-            return <ChatStageReply text={desc} toolName={name} />
-          })()}
-          {/* #13: stage reply during streaming → ChatTextBlock after done (history only) */}
-          {isStreaming && message.content && <ChatStageReply text={message.content} />}
-          {message.content && !isStreaming && <ChatTextBlock content={message.content} />}
+          {display.finalText && <ChatTextBlock content={display.finalText} />}
           {imageBlocks.map((block) => (
             <ChatImageBlock
               key={imageBlockDisplayKey(block)}
@@ -185,14 +171,14 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
               alt={block.alt}
             />
           ))}
-          {isStreaming && !message.content && (
+          {isStreaming && !display.stagedText && !display.finalText && (
             <div className="flex items-center gap-1 py-2">
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:0ms]" />
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:150ms]" />
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:300ms]" />
             </div>
           )}
-          {isStreaming && message.content && (
+          {isStreaming && display.stagedText && (
             <span className="bg-foreground inline-block size-2 animate-pulse rounded-sm" />
           )}
           {message.error && <ChatErrorBlock error={message.error} />}

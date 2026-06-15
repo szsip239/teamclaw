@@ -1,3 +1,5 @@
+import type { ChatToolCall } from '@/types/chat'
+
 /**
  * Select what to render for a v4 chat turn group, per issue #13:
  *   - thinking: dropped (never rendered)
@@ -10,12 +12,12 @@
  */
 export interface DisplayTurn {
   text: string
-  toolCalls?: { toolName: string; toolInput: unknown }[]
+  toolCalls?: ChatToolCall[]
   isFinal: boolean
 }
 
 export interface ChatDisplay {
-  toolCalls: { toolName: string; toolInput: unknown }[]
+  toolCalls: ChatToolCall[]
   /** Latest in-progress reply (null once the final reply exists). */
   stagedText: string | null
   /** Final reply text (null while still running). */
