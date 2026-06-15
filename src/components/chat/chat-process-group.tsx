@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Bot, Brain, Wrench, ChevronRight } from "lucide-react"
+import { Bot, Wrench, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT } from "@/stores/language-store"
 import type { ChatMessage, ChatToolCall } from "@/types/chat"

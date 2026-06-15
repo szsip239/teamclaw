@@ -54,26 +54,6 @@ export const ChatTextBlock = memo(function ChatTextBlock({
         urlTransform={(url) => url}
         components={{
           // Rewrite output/ links to session file download API
-          a({ href, children, ...props }) {
-            const h = String(href ?? '')
-            if (h.startsWith('output/') && activeSessionId) {
-              const apiUrl = `/api/v1/chat/sessions/${activeSessionId}/files/${h}`
-              return (
-                <a
-                  href={apiUrl}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-primary underline hover:no-underline"
-                  {...props}
-                >
-                  <Download className="size-3" />
-                  {children}
-                </a>
-              )
-            }
-            return <a href={h} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
-          },
           // --- Code blocks ---
           pre({ children }) {
             return <div className="my-2">{children}</div>
@@ -138,6 +118,18 @@ export const ChatTextBlock = memo(function ChatTextBlock({
           },
           // --- Links ---
           a({ href, children }) {
+            // Agent output files: rewrite output/ links to session download API
+            if (typeof href === 'string' && href.startsWith('output/') && activeSessionId) {
+              const apiUrl = `/api/v1/chat/sessions/${activeSessionId}/files/${href}`
+              return (
+                <a href={apiUrl} download target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 underline decoration-blue-600/30 dark:decoration-blue-400/30 hover:decoration-blue-600 dark:hover:decoration-blue-400 cursor-pointer"
+                >
+                  <Download className="size-3" />
+                  {children}
+                </a>
+              )
+            }
             const intercepted = !!href && !!shouldIntercept?.(href)
             return (
               <a

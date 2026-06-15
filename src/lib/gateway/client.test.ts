@@ -13,11 +13,10 @@ describe('gateway connect handshake', () => {
     expect(params.role).toBe('operator')
   })
 
-  // Regression lock: this is the exact connection posture the v4 spike proved
-  // can authenticate against the 6.6 gateway (control-ui backend client on the
-  // dangerouslyDisableDeviceAuth trust path). Changing any of these silently
-  // breaks the handshake, so pin them.
-  it('preserves the connection posture verified by the v4 spike', () => {
+  // Regression lock: the control-ui backend client + scopes below are the
+  // exact handshake that authenticates against the v4 gateway.  Changing
+  // any of these fields silently breaks the connect — keep them pinned.
+  it('preserves the v4 handshake posture required by the gateway', () => {
     const params = buildConnectParams('tok-xyz')
     expect(params.client.id).toBe('openclaw-control-ui')
     expect(params.client.mode).toBe('backend')

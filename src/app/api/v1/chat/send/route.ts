@@ -676,11 +676,12 @@ export async function POST(req: NextRequest) {
       if (kind === 'preamble') {
         const progressText = data.progressText as string | undefined
         if (progressText) {
-          const trimmed = progressText.slice(lastTextContent.length)
-          if (trimmed) {
-            lastTextContent = progressText
-            write({ type: 'text', content: trimmed })
-          }
+          const d = computeTextDelta({
+            cumulative: progressText,
+            lastEmitted: lastTextContent,
+          })
+          if (d.text) write({ type: 'text', content: d.text })
+          lastTextContent = d.nextLast
         }
         return
       }

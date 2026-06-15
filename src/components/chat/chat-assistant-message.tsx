@@ -167,7 +167,7 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
               ))}
             </>
           )}
-          {/* #13: stage reply — tool phase (name+desc) ⟳ text phase (preamble) ⟳ final */}
+          {/* Stage reply: tool description → streaming text → final ChatTextBlock */}
           {isStreaming && !message.content && (() => {
             const last = message.toolCalls?.at(-1)
             const desc = typeof last?.toolInput === 'string' ? last.toolInput : ''
