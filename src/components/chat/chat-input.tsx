@@ -123,11 +123,15 @@ export function ChatInput() {
         const base64 = dataUrl.split(',')[1]
         setPendingFiles((prev) => {
           if (prev.length >= 5) return prev
+          const mimeType = file.type || 'application/octet-stream'
+          if (prev.some((pending) => pending.mimeType === mimeType && pending.content === base64)) {
+            return prev
+          }
           return [
             ...prev,
             {
               name: file.name,
-              mimeType: file.type || 'application/octet-stream',
+              mimeType,
               size: file.size,
               content: base64,
               dataUrl,

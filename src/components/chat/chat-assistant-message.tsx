@@ -8,8 +8,10 @@ import { ChatToolCallBlock } from './chat-tool-call-block'
 import { ChatTextBlock } from './chat-text-block'
 import { ChatErrorBlock } from './chat-error-block'
 import { ChatImageBlock } from './chat-image-block'
+import { ChatStageReply } from './chat-stage-reply'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
+import { imageBlockDisplayKey, uniqueImageBlocks } from '@/lib/chat/image-blocks'
 import { selectVisibleKbSources } from '@/lib/chat/kb-sources'
 import { useState } from 'react'
 
@@ -146,6 +148,7 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
     : useCompactOwn
       ? [message]
       : null
+  const imageBlocks = uniqueImageBlocks(message.contentBlocks)
 
   return (
     <div className="flex justify-start">
@@ -158,18 +161,30 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
             <ChatProcessGroup steps={allSteps} inline />
           ) : (
             <>
-              {message.thinking && <ChatThinkingBlock content={message.thinking} />}
+              {/* #13: thinking hidden — removed ChatThinkingBlock */}
               {message.toolCalls?.map((tc, i) => (
                 <ChatToolCallBlock key={i} toolCall={tc} />
               ))}
             </>
           )}
-          {message.content && <ChatTextBlock content={message.content} />}
-          {message.contentBlocks?.map((block, i) =>
-            block.type === 'image' && block.imageUrl ? (
-              <ChatImageBlock key={i} imageUrl={block.imageUrl} alt={block.alt} />
-            ) : null,
-          )}
+          {/* Stage reply: tool description → streaming text → final ChatTextBlock */}
+          {isStreaming && !message.content && (() => {
+            const last = message.toolCalls?.at(-1)
+            const desc = typeof last?.toolInput === 'string' ? last.toolInput : ''
+            const name = last?.toolName
+            if (!desc && !name) return null
+            return <ChatStageReply text={desc} toolName={name} />
+          })()}
+          {/* #13: stage reply during streaming → ChatTextBlock after done (history only) */}
+          {isStreaming && message.content && <ChatStageReply text={message.content} />}
+          {message.content && !isStreaming && <ChatTextBlock content={message.content} />}
+          {imageBlocks.map((block) => (
+            <ChatImageBlock
+              key={imageBlockDisplayKey(block)}
+              imageUrl={block.imageUrl!}
+              alt={block.alt}
+            />
+          ))}
           {isStreaming && !message.content && (
             <div className="flex items-center gap-1 py-2">
               <span className="bg-foreground/60 size-1.5 animate-bounce rounded-full [animation-delay:0ms]" />
