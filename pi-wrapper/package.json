@@ -1,0 +1,15 @@
+{
+  "name": "@teamclaw/pi-wrapper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TeamClaw pi runtime WebSocket gateway adapter",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "ws": "^8.20.1"
+  }
+}
