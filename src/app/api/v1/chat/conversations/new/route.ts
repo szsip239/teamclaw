@@ -6,6 +6,7 @@ import { withAuth, withPermission } from '@/lib/middleware/auth'
 import { archiveSession } from '@/lib/chat/snapshot-helpers'
 import {
   buildChatRuntimeSessionKey,
+  fromDbChatRuntime,
   instanceSupportsPiRuntime,
   toDbChatRuntime,
 } from '@/lib/chat/runtime'
@@ -73,23 +74,23 @@ export const POST = withAuth(
         { status: 503 },
       )
     }
-    // Find current active session
-    const activeSession = await prisma.chatSession.findFirst({
-      where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
+    // Starting a visible conversation resets all active runtime sessions for this agent.
+    const activeSessions = await prisma.chatSession.findMany({
+      where: { userId: user.id, instanceId, agentId, isActive: true },
     })
 
-    if (activeSession) {
-      // Archive the active session using shared helper
-      const lease = await getRuntimeGatewayClient(instanceId, runtime).catch(() => null)
+    for (const activeSession of activeSessions) {
+      const sessionRuntime = fromDbChatRuntime(activeSession.runtime)
+      const lease = await getRuntimeGatewayClient(instanceId, sessionRuntime).catch(() => null)
 
       if (!lease) {
         await markSessionInactive(activeSession.id)
       } else {
         try {
           await archiveSession(activeSession.id, instanceId, agentId, user.id, lease.client, {
-            runtime,
-            triggerMemoryDump: runtime === 'openclaw',
-            waitForNewCompletion: runtime === 'openclaw',
+            runtime: sessionRuntime,
+            triggerMemoryDump: sessionRuntime === 'openclaw',
+            waitForNewCompletion: sessionRuntime === 'openclaw',
           })
         } finally {
           lease.release()

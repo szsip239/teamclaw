@@ -21,6 +21,7 @@ import { parseSessionMessage } from '@/lib/chat/session-message'
 import { sanitizeOutputArtifactLinks } from '@/lib/session-files/artifacts'
 import { buildChatRuntimeSessionKey, fromDbChatRuntime } from '@/lib/chat/runtime'
 import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
+import { withRuntimeMessageMetadata } from '@/lib/chat/history-runtime-messages'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
   ChatMessage,
@@ -343,13 +344,11 @@ export const GET = withAuth(
             const baseTime = new Date(
               runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
             ).getTime()
-            sessionMessages = sessionMessages.map((message, index) => ({
-              ...message,
-              id: `${runtimeSession.id}:${message.id}`,
+            sessionMessages = withRuntimeMessageMetadata(sessionMessages, {
               sourceSessionId: runtimeSession.id,
               runtime,
-              createdAt: new Date(baseTime + index).toISOString(),
-            }))
+              baseTimeMs: baseTime,
+            })
             replaceInlineImagesBySource(sessionMessages, runtimeSession.id)
             currentMessages.push(...sessionMessages)
 
@@ -370,13 +369,12 @@ export const GET = withAuth(
                 const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
                 if (Array.isArray(cached)) {
                   currentMessages.push(
-                    ...cached.map((message, index) => ({
-                      ...message,
-                      id: `${runtimeSession.id}:live:${message.id}`,
+                    ...withRuntimeMessageMetadata(cached, {
                       sourceSessionId: runtimeSession.id,
                       runtime,
-                      createdAt: new Date(baseTime + index).toISOString(),
-                    })),
+                      baseTimeMs: baseTime,
+                      idPrefix: 'live:',
+                    }),
                   )
                 }
               }
@@ -392,16 +390,14 @@ export const GET = withAuth(
             const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
             if (Array.isArray(cached)) {
               currentMessages.push(
-                ...cached.map((message, index) => ({
-                  ...message,
-                  id: `${runtimeSession.id}:live:${message.id}`,
+                ...withRuntimeMessageMetadata(cached, {
                   sourceSessionId: runtimeSession.id,
                   runtime: fromDbChatRuntime(runtimeSession.runtime),
-                  createdAt: new Date(
-                    new Date(runtimeSession.lastMessageAt ?? runtimeSession.updatedAt).getTime() +
-                      index,
-                  ).toISOString(),
-                })),
+                  baseTimeMs: new Date(
+                    runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
+                  ).getTime(),
+                  idPrefix: 'live:',
+                }),
               )
             }
           }
@@ -414,16 +410,12 @@ export const GET = withAuth(
           const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
           if (Array.isArray(cached)) {
             currentMessages.push(
-              ...cached.map((message, index) => ({
-                ...message,
-                id: `${runtimeSession.id}:live:${message.id}`,
+              ...withRuntimeMessageMetadata(cached, {
                 sourceSessionId: runtimeSession.id,
                 runtime: fromDbChatRuntime(runtimeSession.runtime),
-                createdAt: new Date(
-                  new Date(runtimeSession.lastMessageAt ?? runtimeSession.updatedAt).getTime() +
-                    index,
-                ).toISOString(),
-              })),
+                baseTimeMs: new Date(runtimeSession.lastMessageAt ?? runtimeSession.updatedAt).getTime(),
+                idPrefix: 'live:',
+              }),
             )
           }
         }

@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import { Download, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/stores/chat-store'
+import { normalizeChatMarkdown } from '@/lib/chat/markdown'
 
 function ChartLoadingSkeleton() {
   return (
@@ -49,7 +50,7 @@ export const ChatTextBlock = memo(function ChatTextBlock({
   // newlines so bullets and table cells render correctly.
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const downloadSessionId = sessionId ?? activeSessionId
-  const cleaned = content.replace(/<br\s*\/?>/gi, '\n')
+  const cleaned = normalizeChatMarkdown(content.replace(/<br\s*\/?>/gi, '\n'))
   return (
     <div className="text-sm leading-relaxed prose-chat overflow-x-auto min-w-0">
       <ReactMarkdown
