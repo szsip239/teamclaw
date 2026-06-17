@@ -32,14 +32,15 @@ import {
   appendLiveMessages,
   archiveSession,
   saveLiveSnapshot,
-  extractContentBlocks,
 } from '@/lib/chat/snapshot-helpers'
 import {
   buildChatRuntimeSessionKey,
+  fromDbChatRuntime,
   instanceSupportsPiRuntime,
   toDbChatRuntime,
-  type ChatRuntime,
 } from '@/lib/chat/runtime'
+import { getRuntimeGatewayClient, markSessionInactive } from '@/lib/chat/runtime-gateway'
+import { buildPiChatSendParams, resolvePiGatewayUrl } from '@/lib/chat/pi-runtime-gateway'
 import {
   MIME_BY_EXT,
   extractMediaPaths,
@@ -50,7 +51,8 @@ import { computeTextDelta } from '@/lib/chat/stream-delta'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
 import type { ChatHistoryResult } from '@/types/gateway'
-import { Prisma } from '@/generated/prisma'
+
+const PI_CONNECTION_LOST_ERROR = 'Pi agent connection lost'
 
 function encodeSSE(event: ChatStreamEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`
@@ -84,11 +86,7 @@ interface GatewayAttachment {
 }
 
 function attachmentContentKey(att: Pick<GatewayAttachment, 'mimeType' | 'content'>): string {
-  return createHash('sha256')
-    .update(att.mimeType)
-    .update(':')
-    .update(att.content)
-    .digest('hex')
+  return createHash('sha256').update(att.mimeType).update(':').update(att.content).digest('hex')
 }
 
 function dedupeAttachments<T extends Pick<GatewayAttachment, 'mimeType' | 'content'>>(
@@ -160,31 +158,28 @@ async function switchActiveSession(
   userId: string,
   instanceId: string,
   agentId: string,
-  runtime: ChatRuntime,
   targetSessionId: string,
-  sessionKey: string,
 ) {
-  const dbRuntime = toDbChatRuntime(runtime)
   const activeSession = await prisma.chatSession.findFirst({
-    where: { userId, instanceId, agentId, runtime: dbRuntime, isActive: true },
+    where: { userId, instanceId, agentId, isActive: true },
   })
 
   if (activeSession && activeSession.id !== targetSessionId) {
-    await ensureRegistryInitialized()
-    // TODO(pi): archiveSession still uses the OpenClaw registry client; pi archive
-    // support belongs with the pi-wrapper history implementation.
-    const client = registry.getClient(instanceId)
+    const activeRuntime = fromDbChatRuntime(activeSession.runtime)
+    const lease = await getRuntimeGatewayClient(instanceId, activeRuntime).catch(() => null)
 
-    if (client) {
-      await archiveSession(activeSession.id, instanceId, agentId, userId, client, {
-        triggerMemoryDump: true,
-        waitForNewCompletion: true,
-      })
+    if (!lease) {
+      await markSessionInactive(activeSession.id)
     } else {
-      await prisma.chatSession.update({
-        where: { id: activeSession.id },
-        data: { isActive: false, liveMessages: Prisma.DbNull },
-      })
+      try {
+        await archiveSession(activeSession.id, instanceId, agentId, userId, lease.client, {
+          runtime: activeRuntime,
+          triggerMemoryDump: activeRuntime === 'openclaw',
+          waitForNewCompletion: activeRuntime === 'openclaw',
+        })
+      } finally {
+        lease.release()
+      }
     }
   }
 
@@ -244,8 +239,14 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { instanceId, agentId, runtime, message, sessionId: targetSessionId, attachments } =
-    parsed.data
+  const {
+    instanceId,
+    agentId,
+    runtime,
+    message,
+    sessionId: targetSessionId,
+    attachments,
+  } = parsed.data
   const dbRuntime = toDbChatRuntime(runtime)
 
   // --- Permission check ---
@@ -301,7 +302,7 @@ export async function POST(req: NextRequest) {
   // v4 gateway. A one-shot client gets full incremental streaming.
   const instance = await prisma.instance.findUnique({
     where: { id: instanceId },
-    select: { gatewayUrl: true, gatewayToken: true, dockerConfig: true },
+    select: { gatewayUrl: true, gatewayToken: true, dockerConfig: true, containerName: true },
   })
   if (!instance) {
     return NextResponse.json({ error: 'Instance not found' }, { status: 502 })
@@ -313,19 +314,30 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       )
     }
-    return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
   }
 
   // --- Ensure registry ---
   await ensureRegistryInitialized()
 
   const adapter = registry.getAdapter(instanceId)
-  if (!adapter) {
+  const registryClient = registry.getClient(instanceId)
+  if (!adapter || !registryClient) {
     return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
   }
 
+  let piCwd: string | null = null
+  if (runtime === 'pi') {
+    const agent = await adapter.getAgent(registryClient, agentId)
+    if (!agent.workspace) {
+      return NextResponse.json({ error: 'Agent workspace is not available' }, { status: 502 })
+    }
+    piCwd = agent.workspace
+  }
+
   const client = new GatewayClient(
-    resolveGatewayUrl({ gatewayUrl: instance.gatewayUrl, dockerConfig: instance.dockerConfig }),
+    runtime === 'pi'
+      ? resolvePiGatewayUrl(instance)
+      : resolveGatewayUrl({ gatewayUrl: instance.gatewayUrl, dockerConfig: instance.dockerConfig }),
     decrypt(instance.gatewayToken),
   )
   await client.connect()
@@ -334,33 +346,70 @@ export async function POST(req: NextRequest) {
   const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
   const idempotencyKey = randomUUID()
 
+  // --- Resolve visible conversation group if targeting an existing conversation ---
+  let conversationGroupId: string | null = null
+
   // --- Handle session switching if targeting a specific (possibly inactive) session ---
   if (targetSessionId) {
-    const targetSession = await prisma.chatSession.findUnique({
-      where: { id: targetSessionId },
+    const targetSession = await prisma.chatSession.findFirst({
+      where: {
+        userId: user.id,
+        instanceId,
+        agentId,
+        OR: [
+          { id: targetSessionId },
+          { conversationGroupId: targetSessionId },
+        ],
+      },
     })
-    if (
-      targetSession &&
-      targetSession.userId === user.id &&
-      targetSession.instanceId === instanceId &&
-      targetSession.agentId === agentId &&
-      targetSession.runtime === dbRuntime &&
-      !targetSession.isActive
-    ) {
-      await switchActiveSession(user.id, instanceId, agentId, runtime, targetSessionId, sessionKey)
+    if (targetSession) {
+      conversationGroupId = targetSession.conversationGroupId ?? targetSession.id
+      const targetRuntimeSession =
+        targetSession.runtime === dbRuntime
+          ? targetSession
+          : await prisma.chatSession.findFirst({
+              where: {
+                userId: user.id,
+                instanceId,
+                agentId,
+                runtime: dbRuntime,
+                OR: [
+                  { id: conversationGroupId },
+                  { conversationGroupId },
+                ],
+              },
+            })
+      if (targetRuntimeSession && !targetRuntimeSession.isActive) {
+        await switchActiveSession(user.id, instanceId, agentId, targetRuntimeSession.id)
+      }
     }
   }
 
   // --- Find or create ChatSession (atomic to prevent race conditions) ---
   const session = await prisma.$transaction(async (tx) => {
-    const existing = await tx.chatSession.findFirst({
-      where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
-    })
+    const existing = conversationGroupId
+      ? await tx.chatSession.findFirst({
+          where: {
+            userId: user.id,
+            instanceId,
+            agentId,
+            runtime: dbRuntime,
+            OR: [
+              { id: conversationGroupId },
+              { conversationGroupId },
+            ],
+          },
+        })
+      : await tx.chatSession.findFirst({
+          where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
+        })
     if (existing) {
       await tx.chatSession.update({
         where: { id: existing.id },
         data: {
           sessionId: sessionKey,
+          conversationGroupId: conversationGroupId ?? existing.conversationGroupId ?? existing.id,
+          isActive: true,
           lastMessageAt: new Date(),
           messageCount: { increment: 1 },
           // Set title from first user message if not yet set (e.g. session
@@ -377,6 +426,7 @@ export async function POST(req: NextRequest) {
         agentId,
         sessionId: sessionKey,
         runtime: dbRuntime,
+        conversationGroupId: conversationGroupId ?? randomUUID(),
         lastMessageAt: new Date(),
         messageCount: 1,
         isActive: true,
@@ -386,6 +436,7 @@ export async function POST(req: NextRequest) {
   })
   const existingSession = session
   const chatSessionId = session.id
+  const visibleConversationId = session.conversationGroupId ?? session.id
   const runStartedAt = new Date()
 
   // --- SSE Stream ---
@@ -430,7 +481,7 @@ export async function POST(req: NextRequest) {
   activeRuns.add(chatSessionId)
 
   // Send session ID as the first event so the frontend can track this session
-  write({ type: 'session', sessionId: chatSessionId })
+  write({ type: 'session', sessionId: visibleConversationId })
 
   // SSE heartbeat: keep connection alive during long tool-use runs.
   // OpenClaw broadcasts tool events via stream=item + stream=command_output (2026.4+),
@@ -525,7 +576,10 @@ export async function POST(req: NextRequest) {
             outputSnapshot: containerOutputSnapshot,
           })
         } catch (err) {
-          console.warn('[session-artifacts] container normalization failed:', (err as Error).message)
+          console.warn(
+            '[session-artifacts] container normalization failed:',
+            (err as Error).message,
+          )
         }
       }
       if (artifacts.length === 0 && instanceWorkspacePath) {
@@ -836,6 +890,15 @@ export async function POST(req: NextRequest) {
     await close()
   }
 
+  if (runtime === 'pi') {
+    client.onUnexpectedDisconnect = () => {
+      if (finishStarted || closed) return
+      activeRuns.delete(chatSessionId)
+      write({ type: 'error', error: PI_CONNECTION_LOST_ERROR })
+      void cleanup()
+    }
+  }
+
   // --- Auto-attach session images + send message (runs in background) ---
   // Start async work WITHOUT blocking the SSE response. This ensures the
   // client gets the SSE connection immediately (no multi-second delay from
@@ -1022,21 +1085,37 @@ export async function POST(req: NextRequest) {
         mimeType: a.mimeType,
       }))
       try {
-        await appendLiveMessages(chatSessionId, [{
-          id: randomUUID(),
-          role: 'user',
-          content: message,
-          contentBlocks: imageBlocks,
-          createdAt: new Date().toISOString(),
-        }])
+        await appendLiveMessages(chatSessionId, [
+          {
+            id: randomUUID(),
+            role: 'user',
+            content: message,
+            contentBlocks: imageBlocks,
+            createdAt: new Date().toISOString(),
+          },
+        ])
       } catch {
         // Non-fatal: saveLiveSnapshot will handle it at run end
       }
     }
 
-    await adapter.sendMessage(client, sessionKey, message, idempotencyKey, {
-      attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
-    })
+    if (runtime === 'pi') {
+      if (!piCwd) throw new Error('Agent workspace is not available')
+      await client.request(
+        'chat.send',
+        buildPiChatSendParams({
+          sessionKey,
+          message,
+          idempotencyKey,
+          cwd: piCwd,
+          attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
+        }),
+      )
+    } else {
+      await adapter.sendMessage(client, sessionKey, message, idempotencyKey, {
+        attachments: mappedAttachments.length > 0 ? mappedAttachments : undefined,
+      })
+    }
     // Signal client that gateway has received the message — safe to start
     // progress polling for any tool events that may have been missed.
     write({ type: 'confirmed' })

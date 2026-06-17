@@ -34,3 +34,10 @@ describe('chat store runtime wiring', () => {
     expect(source).toContain('runtime: selectedRuntime')
   })
 })
+
+describe('chat store stream errors', () => {
+  it('maps pi connection loss to a translated message', () => {
+    expect(source).toContain('chat.piConnectionLost')
+    expect(source).toContain('Pi agent connection lost')
+  })
+})

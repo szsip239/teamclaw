@@ -17,6 +17,12 @@ import {
   buildProviderEntries,
   resolveOpenClawProviderId,
 } from '@/lib/config-editor/provider-sync'
+import {
+  buildOpenClawGatewayCommandWithPiWrapper,
+  buildPiWrapperBind,
+  derivePiHostPort,
+  PI_WRAPPER_CONTAINER_PORT,
+} from '@/lib/docker/pi-wrapper'
 import { auditLog } from '@/lib/audit'
 import type { InstanceStatus, Prisma } from '@/generated/prisma'
 
@@ -211,7 +217,7 @@ export const POST = withAuth(
     'instances:manage',
     withValidation(createInstanceSchema, async (req, ctx) => {
       const { user, body } = ctx as { user: NonNullable<typeof ctx.user>; body: typeof ctx.body }
-      const { name, description } = body
+      const { name } = body
       const mode = body.mode || 'docker'
 
       // Eagerly initialize registry so it doesn't block the connection test later
@@ -345,6 +351,7 @@ async function createDockerInstance(
 
   // 6. Find next available host port
   const hostPort = await findNextAvailablePort()
+  const hostPiPort = derivePiHostPort(hostPort)
 
   // 6b. Patch allowedOrigins with hostPort so the browser Control UI can connect
   try {
@@ -378,10 +385,13 @@ async function createDockerInstance(
       extraBinds: [
         `${workspaceHostPath}:${workspaceHostPath}`,
         '/var/run/docker.sock:/var/run/docker.sock',
+        buildPiWrapperBind(),
       ],
       portBindings: {
         [`${GATEWAY_PORT}`]: String(hostPort),
+        [`${PI_WRAPPER_CONTAINER_PORT}`]: String(hostPiPort),
       },
+      command: buildOpenClawGatewayCommandWithPiWrapper(),
       env: {
         // Docker bridge networks don't reliably forward mDNS multicast
         // (224.0.0.251:5353), causing the bonjour plugin's CIAO probe to
@@ -417,7 +427,7 @@ async function createDockerInstance(
         containerId,
         containerName,
         imageName,
-        dockerConfig: { ...body.docker, hostPort } as Prisma.InputJsonValue,
+        dockerConfig: { ...body.docker, hostPort, hostPiPort } as Prisma.InputJsonValue,
         status: 'ERROR',
         createdById: user.id,
       },
@@ -471,7 +481,7 @@ async function createDockerInstance(
       containerId,
       containerName,
       imageName,
-      dockerConfig: { ...body.docker, hostPort } as Prisma.InputJsonValue,
+      dockerConfig: { ...body.docker, hostPort, hostPiPort } as Prisma.InputJsonValue,
       status: 'INITIALIZING',
       createdById: user.id,
     },

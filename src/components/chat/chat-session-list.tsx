@@ -120,7 +120,7 @@ export function ChatSessionList() {
                 )}
               </div>
               <p className="text-muted-foreground truncate text-[10px]">
-                {resolveAgentName(session)} &middot; {runtimeLabel(session.runtime, t)}
+                {resolveAgentName(session)} &middot; {runtimeLabel(session, t)}
                 &middot; {session.instanceName}
                 {session.lastMessageAt && (
                   <> &middot; {formatRelative(session.lastMessageAt, t)}</>
@@ -154,8 +154,11 @@ function formatRelative(isoStr: string, t: (key: import("@/locales/zh-CN").Trans
 }
 
 function runtimeLabel(
-  runtime: ChatSessionResponse['runtime'],
+  session: ChatSessionResponse,
   t: (key: import("@/locales/zh-CN").TranslationKey, params?: Record<string, string | number>) => string,
 ): string {
-  return runtime === 'pi' ? t('chat.runtimePi') : t('chat.runtimeOpenclaw')
+  const runtimes = session.runtimes?.length ? session.runtimes : [session.runtime]
+  return runtimes
+    .map((runtime) => (runtime === 'pi' ? t('chat.runtimePi') : t('chat.runtimeOpenclaw')))
+    .join(' + ')
 }

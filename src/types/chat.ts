@@ -49,9 +49,12 @@ export interface ChatAttachment {
 }
 
 export interface ChatSessionResponse {
-  id: string
+  id: string // visible conversation id; grouped sessions use conversationGroupId
+  conversationGroupId?: string
   sessionId: string // OpenClaw session key (e.g. "agent:<agentId>:tc:<userId>")
   runtime: ChatRuntime
+  runtimes?: ChatRuntime[]
+  sessionIdsByRuntime?: Partial<Record<ChatRuntime, string>>
   instanceId: string
   instanceName: string
   agentId: string
@@ -79,6 +82,7 @@ export interface ChatHistoryResponse {
 
 export interface ChatMessage {
   id: string
+  sourceSessionId?: string
   role: 'user' | 'assistant'
   content: string // plain text (backward compatible)
   contentBlocks?: ChatContentBlock[] // structured content blocks (images, etc.)

@@ -23,11 +23,15 @@ describe('chat send post-run cleanup', () => {
 })
 
 describe('chat send runtime guardrails', () => {
-  it('keeps runtime-specific sessions separated and blocks pi before implementation', () => {
+  it('keeps runtime-specific sessions separated and routes pi to pi-wrapper', () => {
     expect(source).toContain('buildChatRuntimeSessionKey(runtime, agentId, user.id)')
     expect(source).toContain('runtime: dbRuntime, isActive: true')
-    expect(source).toContain("targetSession.runtime === dbRuntime")
+    expect(source).toContain('targetSession.runtime === dbRuntime')
     expect(source).toContain("runtime === 'pi'")
-    expect(source).toContain('Pi runtime is not implemented yet')
+    expect(source).toContain('resolvePiGatewayUrl')
+    expect(source).toContain('buildPiChatSendParams')
+    expect(source).toContain('onUnexpectedDisconnect')
+    expect(source).toContain('Pi agent connection lost')
+    expect(source).not.toContain('Pi runtime is not implemented yet')
   })
 })

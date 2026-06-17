@@ -1,6 +1,7 @@
 export interface SessionFileEntry {
   name: string
   path: string
+  sourceSessionId?: string
   type: 'file' | 'directory'
   size: number
 }

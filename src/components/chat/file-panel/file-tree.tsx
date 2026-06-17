@@ -5,6 +5,7 @@ import type { SessionFileEntry } from "@/types/session-files"
 import type { SessionFileZone } from "@/stores/file-panel-store"
 import { useFilePanelStore } from "@/stores/file-panel-store"
 import { useSessionFiles, useDeleteSessionFile, useMkdirSession } from "@/hooks/use-session-files"
+import { buildSessionFileUrl } from "@/lib/session-files/urls"
 import { useT } from "@/stores/language-store"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -47,7 +48,7 @@ export function FileTree({ zone, sessionId }: FileTreeProps) {
 
   const handleDownload = useCallback(
     (entry: SessionFileEntry) => {
-      const url = `/api/v1/chat/sessions/${sessionId}/files/${zone}/${entry.path}`
+      const url = buildSessionFileUrl(sessionId, zone, entry)
       const a = document.createElement("a")
       a.href = url
       a.download = entry.name
@@ -75,7 +76,7 @@ export function FileTree({ zone, sessionId }: FileTreeProps) {
       }
     )
     setDeleteTarget(null)
-  }, [deleteTarget, deleteMutation, zone, t, setSelectedFile])
+  }, [deleteTarget, deleteMutation, t, setSelectedFile])
 
   const handleNewFolder = useCallback((parentDir?: string) => {
     setNewFolderParent(parentDir ?? "")

@@ -5,6 +5,32 @@ import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { dockerManager } from '@/lib/docker/manager'
 import { buildSessionBasePath } from '@/lib/session-files/helpers'
+import type { ChatSession } from '@/generated/prisma'
+
+async function cleanupSessionFiles(session: Pick<ChatSession, 'agentId' | 'id' | 'instanceId'>) {
+  try {
+    const instance = await prisma.instance.findUnique({
+      where: { id: session.instanceId },
+      select: { containerId: true },
+    })
+    if (instance?.containerId) {
+      const sessionDir = buildSessionBasePath(session.agentId, session.id)
+      await dockerManager.removeContainerDir(instance.containerId, sessionDir)
+    }
+  } catch {
+    // Container might be stopped — not fatal
+  }
+}
+
+async function deleteConversationGroup(sessions: ChatSession[]) {
+  for (const session of sessions) {
+    await cleanupSessionFiles(session)
+  }
+
+  await prisma.chatSession.deleteMany({
+    where: { id: { in: sessions.map((session) => session.id) } },
+  })
+}
 
 // DELETE /api/v1/chat/sessions/[id] — delete a chat session
 export const DELETE = withAuth(
@@ -19,11 +45,34 @@ export const DELETE = withAuth(
     })
 
     if (!session) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+      const groupSessions = await prisma.chatSession.findMany({
+        where: { userId: ctx.user.id, conversationGroupId: id },
+      })
+      if (groupSessions.length === 0) {
+        return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+      }
+
+      await deleteConversationGroup(groupSessions)
+      return new NextResponse(null, { status: 204 })
     }
 
     if (session.userId !== ctx.user.id) {
       return NextResponse.json({ error: 'No access to delete this session' }, { status: 403 })
+    }
+
+    const conversationGroupId = session.conversationGroupId ?? session.id
+    const groupSessions = await prisma.chatSession.findMany({
+      where: {
+        userId: ctx.user.id,
+        OR: [
+          { id: conversationGroupId },
+          { conversationGroupId },
+        ],
+      },
+    })
+    if (groupSessions.length > 1) {
+      await deleteConversationGroup(groupSessions)
+      return new NextResponse(null, { status: 204 })
     }
 
     // Only interact with the gateway if THIS session is the active one.
@@ -56,18 +105,7 @@ export const DELETE = withAuth(
     }
 
     // Clean up session files in the container (best-effort)
-    try {
-      const instance = await prisma.instance.findUnique({
-        where: { id: session.instanceId },
-        select: { containerId: true },
-      })
-      if (instance?.containerId) {
-        const sessionDir = buildSessionBasePath(session.agentId, session.id)
-        await dockerManager.removeContainerDir(instance.containerId, sessionDir)
-      }
-    } catch {
-      // Container might be stopped — not fatal
-    }
+    await cleanupSessionFiles(session)
 
     await prisma.chatSession.delete({ where: { id } })
 

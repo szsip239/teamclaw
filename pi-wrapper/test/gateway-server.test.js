@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import WebSocket from 'ws'
 import { createPiGatewayServer } from '../src/gateway-server.js'
+import { ensureModelsConfig } from '../src/config-store.js'
 import { PiRuntime } from '../src/pi-runtime.js'
 import { SessionStore } from '../src/session-store.js'
 
@@ -189,6 +190,37 @@ test('config.patch writes pi models.json atomically and refreshes registry', asy
     assert.equal(parsed.providers.anthropic.api, 'anthropic-messages')
     assert.equal(parsed.agents, undefined)
     assert.equal(typeof result.hash, 'string')
+    assert.equal(result.raw, raw)
+  } finally {
+    await rm(agentDir, { recursive: true, force: true })
+  }
+})
+
+test('models config is seeded from OpenClaw providers when pi config is missing', async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'teamclaw-pi-wrapper-'))
+
+  try {
+    await writeFile(join(agentDir, 'openclaw.json'), JSON.stringify({
+      models: {
+        providers: {
+          deepseek: {
+            api: 'anthropic-messages',
+            apiKey: 'secret-key',
+            baseUrl: 'https://api.deepseek.com/anthropic',
+            models: [{ id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' }],
+          },
+        },
+      },
+    }))
+
+    const result = await ensureModelsConfig(agentDir)
+
+    assert.equal(result.config.providers.deepseek.apiKey, 'secret-key')
+    assert.equal(result.config.providers.deepseek.api, 'anthropic-messages')
+
+    const raw = await readFile(join(agentDir, 'models.json'), 'utf8')
+    const parsed = JSON.parse(raw)
+    assert.equal(parsed.providers.deepseek.baseUrl, 'https://api.deepseek.com/anthropic')
     assert.equal(result.raw, raw)
   } finally {
     await rm(agentDir, { recursive: true, force: true })

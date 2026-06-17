@@ -1,15 +1,15 @@
+import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { Prisma } from '@/generated/prisma'
 import { withAuth, withPermission } from '@/lib/middleware/auth'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { archiveSession } from '@/lib/chat/snapshot-helpers'
 import {
   buildChatRuntimeSessionKey,
   instanceSupportsPiRuntime,
   toDbChatRuntime,
 } from '@/lib/chat/runtime'
+import { getRuntimeGatewayClient, markSessionInactive } from '@/lib/chat/runtime-gateway'
 
 const bodySchema = z.object({
   instanceId: z.string().min(1),
@@ -73,10 +73,6 @@ export const POST = withAuth(
         { status: 503 },
       )
     }
-    if (runtime === 'pi') {
-      return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
-    }
-
     // Find current active session
     const activeSession = await prisma.chatSession.findFirst({
       where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
@@ -84,28 +80,33 @@ export const POST = withAuth(
 
     if (activeSession) {
       // Archive the active session using shared helper
-      await ensureRegistryInitialized()
-      const client = registry.getClient(instanceId)
+      const lease = await getRuntimeGatewayClient(instanceId, runtime).catch(() => null)
 
-      if (client) {
-        await archiveSession(activeSession.id, instanceId, agentId, user.id, client, { triggerMemoryDump: true, waitForNewCompletion: true })
+      if (!lease) {
+        await markSessionInactive(activeSession.id)
       } else {
-        // No client — just mark inactive + clear liveMessages
-        await prisma.chatSession.update({
-          where: { id: activeSession.id },
-          data: { isActive: false, liveMessages: Prisma.DbNull },
-        })
+        try {
+          await archiveSession(activeSession.id, instanceId, agentId, user.id, lease.client, {
+            runtime,
+            triggerMemoryDump: runtime === 'openclaw',
+            waitForNewCompletion: runtime === 'openclaw',
+          })
+        } finally {
+          lease.release()
+        }
       }
     }
 
     // Create new active session
     const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
+    const conversationGroupId = randomUUID()
     const newSession = await prisma.chatSession.create({
       data: {
         userId: user.id,
         instanceId,
         agentId,
         runtime: dbRuntime,
+        conversationGroupId,
         sessionId: sessionKey,
         isActive: true,
       },
@@ -114,9 +115,12 @@ export const POST = withAuth(
 
     return NextResponse.json({
       session: {
-        id: newSession.id,
+        id: conversationGroupId,
+        conversationGroupId,
         sessionId: newSession.sessionId,
         runtime,
+        runtimes: [runtime],
+        sessionIdsByRuntime: { [runtime]: newSession.id },
         instanceId: newSession.instanceId,
         instanceName: newSession.instance.name,
         agentId: newSession.agentId,

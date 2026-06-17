@@ -15,7 +15,6 @@ import {
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
-  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const setMessages = useChatStore((s) => s.setMessages)
   const setConnectionStatus = useChatStore((s) => s.setConnectionStatus)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -31,8 +30,7 @@ export function ChatMain() {
   const isSelectedSession = (session: NonNullable<typeof sessions>[number]) =>
     !!selectedAgent &&
     session.instanceId === selectedAgent.instanceId &&
-    session.agentId === selectedAgent.agentId &&
-    session.runtime === selectedRuntime
+    session.agentId === selectedAgent.agentId
   const activeMatchingSession = activeSessionId
     ? sessions?.find((s) => s.id === activeSessionId && isSelectedSession(s))
     : null
@@ -188,7 +186,6 @@ export function ChatMain() {
     messagesLength,
     dataUpdatedAt,
     isStreaming,
-    selectedRuntime,
   ])
 
   if (!selectedAgent) {

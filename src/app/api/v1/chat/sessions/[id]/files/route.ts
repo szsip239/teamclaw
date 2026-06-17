@@ -6,6 +6,37 @@ import { resolveSessionFilePath, resolveExternalSessionFilePath } from '@/lib/se
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import type { SessionFileZone } from '@/lib/session-files/helpers'
 import type { SessionFileListResponse, SessionFileEntry } from '@/types/session-files'
+import type { ChatSession } from '@/generated/prisma'
+
+type ResolveReadableSessionsResult =
+  | { sessions: ChatSession[] }
+  | { error: NextResponse }
+
+async function resolveReadableSessions(
+  id: string,
+  userId: string,
+): Promise<ResolveReadableSessionsResult> {
+  const session = await prisma.chatSession.findUnique({ where: { id } })
+  if (session && session.userId !== userId) {
+    return { error: NextResponse.json({ error: 'No access to this session' }, { status: 403 }) }
+  }
+
+  const conversationGroupId = session?.conversationGroupId ?? session?.id ?? id
+  const sessions = await prisma.chatSession.findMany({
+    where: {
+      userId,
+      OR: [
+        { id: conversationGroupId },
+        { conversationGroupId },
+      ],
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  if (sessions.length > 0) return { sessions }
+  if (session) return { sessions: [session] }
+  return { error: NextResponse.json({ error: 'Session not found' }, { status: 404 }) }
+}
 
 // GET /api/v1/chat/sessions/[id]/files — list files in a session zone
 export const GET = withAuth(
@@ -14,16 +45,6 @@ export const GET = withAuth(
     if (!id) {
       return NextResponse.json({ error: 'Missing session ID' }, { status: 400 })
     }
-
-    const session = await prisma.chatSession.findUnique({ where: { id } })
-    if (!session) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-    }
-    if (session.userId !== ctx.user.id) {
-      return NextResponse.json({ error: 'No access to this session' }, { status: 403 })
-    }
-
-    const instance = await prisma.instance.findUnique({ where: { id: session.instanceId } })
 
     const url = new URL(req.url)
     const zone = (url.searchParams.get('zone') || 'input') as SessionFileZone
@@ -37,18 +58,52 @@ export const GET = withAuth(
       return NextResponse.json({ error: 'Invalid directory path' }, { status: 400 })
     }
 
+    const resolved = await resolveReadableSessions(id, ctx.user.id)
+    if ('error' in resolved) return resolved.error
+
+    const sessions = zone === 'output' ? resolved.sessions : resolved.sessions.slice(0, 1)
+    const primarySession = sessions[0]
+    if (!primarySession) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    }
+
+    const instance = await prisma.instance.findUnique({ where: { id: primarySession.instanceId } })
+
     let entries: SessionFileEntry[]
     try {
       if (instance?.containerId) {
-        const resolvedPath = resolveSessionFilePath(
-          session.agentId, session.id, zone, dir || undefined,
-        )
-        entries = await dockerManager.listContainerDir(instance.containerId, resolvedPath)
+        entries = (
+          await Promise.all(sessions.map(async (session) => {
+            const resolvedPath = resolveSessionFilePath(
+              session.agentId, session.id, zone, dir || undefined,
+            )
+            const sessionEntries = await dockerManager.listContainerDir(
+              instance.containerId!,
+              resolvedPath,
+            )
+            return sessionEntries.map((entry) => ({
+              ...entry,
+              sourceSessionId: session.id,
+            }))
+          }))
+        ).flat()
       } else if (instance?.workspacePath) {
-        const hostPath = resolveExternalSessionFilePath(
-          instance.workspacePath, session.agentId, session.id, zone, dir || undefined,
-        )
-        entries = await hostFileOps.listDir(hostPath, instance.workspacePath)
+        entries = (
+          await Promise.all(sessions.map(async (session) => {
+            const hostPath = resolveExternalSessionFilePath(
+              instance.workspacePath!,
+              session.agentId,
+              session.id,
+              zone,
+              dir || undefined,
+            )
+            const sessionEntries = await hostFileOps.listDir(hostPath, instance.workspacePath!)
+            return sessionEntries.map((entry) => ({
+              ...entry,
+              sourceSessionId: session.id,
+            }))
+          }))
+        ).flat()
       } else {
         return NextResponse.json({ error: 'Instance not ready' }, { status: 400 })
       }

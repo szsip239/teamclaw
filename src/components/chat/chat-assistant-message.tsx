@@ -129,26 +129,32 @@ function KbSourceSection({ sources }: { sources: KbSourceRef[] }) {
   )
 }
 
-export function ChatAssistantMessage({ message, isStreaming, processSteps }: ChatAssistantMessageProps) {
+export function ChatAssistantMessage({
+  message,
+  isStreaming,
+  processSteps,
+}: ChatAssistantMessageProps) {
+  const t = useT()
   // Completed messages use their own sources; streaming messages use live sources.
   const liveKbSources = useChatStore((s) => s.kbSources)
   const kbSources = selectVisibleKbSources(message, isStreaming, liveKbSources)
   // Determine if this message's own thinking/tools should use compact layout.
   // Always compact when there are thinking or tool calls — even when content
   // was reclassified to thinking mid-stream (e.g. after a tool_call event).
-  const ownThinkingToolCount =
-    (message.thinking ? 1 : 0) + (message.toolCalls?.length ?? 0)
+  const ownThinkingToolCount = (message.thinking ? 1 : 0) + (message.toolCalls?.length ?? 0)
   const useCompactOwn = ownThinkingToolCount >= 1
 
   // Merge: if processSteps exist, combine them with this message's own thinking/tools
   // into a single compact process group.
-  const allSteps = processSteps && processSteps.length > 0
-    ? [...processSteps, ...(ownThinkingToolCount > 0 ? [message] : [])]
-    : useCompactOwn
-      ? [message]
-      : null
+  const allSteps =
+    processSteps && processSteps.length > 0
+      ? [...processSteps, ...(ownThinkingToolCount > 0 ? [message] : [])]
+      : useCompactOwn
+        ? [message]
+        : null
   const imageBlocks = uniqueImageBlocks(message.contentBlocks)
   const display = selectAssistantUiDisplay(message, { isStreaming, processSteps })
+  const runtimeLabel = message.runtime === 'pi' ? t('chat.runtimePi') : t('chat.runtimeOpenclaw')
 
   return (
     <div className="flex justify-start">
@@ -157,13 +163,16 @@ export function ChatAssistantMessage({ message, isStreaming, processSteps }: Cha
           <Bot className="size-3.5" />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          {allSteps ? (
-            <ChatProcessGroup steps={allSteps} inline />
-          ) : null}
+          <span className="w-fit rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            [{runtimeLabel}]
+          </span>
+          {allSteps ? <ChatProcessGroup steps={allSteps} inline /> : null}
           {display.stagedText && (
             <ChatStageReply text={display.stagedText} toolName={display.stagedToolName} />
           )}
-          {display.finalText && <ChatTextBlock content={display.finalText} />}
+          {display.finalText && (
+            <ChatTextBlock content={display.finalText} sessionId={message.sourceSessionId} />
+          )}
           {imageBlocks.map((block) => (
             <ChatImageBlock
               key={imageBlockDisplayKey(block)}

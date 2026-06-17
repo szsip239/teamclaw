@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useFilePanelStore } from "@/stores/file-panel-store"
 import { useDeleteSessionFile } from "@/hooks/use-session-files"
+import { buildSessionFileUrl } from "@/lib/session-files/urls"
 import { useT } from "@/stores/language-store"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -16,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Download, Trash2, File, FileText, Image } from "lucide-react"
+import { Download, Trash2, File, FileText, Image as ImageIcon } from "lucide-react"
 import { toast } from "sonner"
 
 interface FileDetailProps {
@@ -47,23 +48,31 @@ export function FileDetail({ sessionId }: FileDetailProps) {
   const setSelectedFile = useFilePanelStore((s) => s.setSelectedFile)
   const deleteMutation = useDeleteSessionFile(sessionId)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [textContent, setTextContent] = useState<string | null>(null)
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{
+    imageUrl: string | null
+    key: string | null
+    textContent: string | null
+  }>({ imageUrl: null, key: null, textContent: null })
 
   const entry = selectedFile?.entry
   const zone = selectedFile?.zone
   const ext = entry ? getExt(entry.name) : ""
   const isImage = IMAGE_EXTS.has(ext)
   const isText = TEXT_EXTS.has(ext)
+  const selectedFileKey =
+    entry && zone && entry.type === "file"
+      ? `${sessionId}:${zone}:${entry.sourceSessionId ?? ""}:${entry.path}`
+      : null
+  const textContent = preview.key === selectedFileKey ? preview.textContent : null
+  const imageUrl = preview.key === selectedFileKey ? preview.imageUrl : null
 
   // Fetch preview content when selection changes
   useEffect(() => {
-    setTextContent(null)
-    setImageUrl(null)
+    if (!entry || !zone || entry.type === "directory" || !selectedFileKey) return
 
-    if (!entry || entry.type === "directory") return
-
-    const url = `/api/v1/chat/sessions/${sessionId}/files/${zone}/${entry.path}`
+    const url = buildSessionFileUrl(sessionId, zone, entry)
+    let cancelled = false
+    let objectUrl: string | null = null
 
     if (isImage) {
       // Build blob URL for image preview
@@ -73,14 +82,16 @@ export function FileDetail({ sessionId }: FileDetailProps) {
           return res.blob()
         })
         .then((blob) => {
-          const blobUrl = URL.createObjectURL(blob)
-          setImageUrl(blobUrl)
+          if (cancelled) return
+          objectUrl = URL.createObjectURL(blob)
+          setPreview({ imageUrl: objectUrl, key: selectedFileKey, textContent: null })
         })
         .catch(() => {
           // Silently fail preview
         })
       return () => {
-        // Clean up will happen on next effect run
+        cancelled = true
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
       }
     }
 
@@ -92,30 +103,32 @@ export function FileDetail({ sessionId }: FileDetailProps) {
           return res.text()
         })
         .then((text) => {
+          if (cancelled) return
           // Show first 200 lines
           const lines = text.split("\n")
-          setTextContent(
-            lines.length > 200
+          setPreview({
+            imageUrl: null,
+            key: selectedFileKey,
+            textContent: lines.length > 200
               ? lines.slice(0, 200).join("\n") + "\n..."
-              : text
-          )
+              : text,
+          })
         })
         .catch(() => {
           // Silently fail preview
         })
+      return () => {
+        cancelled = true
+      }
     }
-  }, [entry, zone, sessionId, isImage, isText])
-
-  // Clean up blob URLs
-  useEffect(() => {
     return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl)
+      cancelled = true
     }
-  }, [imageUrl])
+  }, [entry, zone, sessionId, isImage, isText, selectedFileKey])
 
   const handleDownload = useCallback(() => {
     if (!entry || !zone) return
-    const url = `/api/v1/chat/sessions/${sessionId}/files/${zone}/${entry.path}`
+    const url = buildSessionFileUrl(sessionId, zone, entry)
     const a = document.createElement("a")
     a.href = url
     a.download = entry.name
@@ -153,7 +166,7 @@ export function FileDetail({ sessionId }: FileDetailProps) {
       <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
         <div className="flex items-center gap-2 min-w-0">
           {isImage ? (
-            <Image className="size-4 shrink-0 text-muted-foreground" />
+            <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
           ) : isText ? (
             <FileText className="size-4 shrink-0 text-muted-foreground" />
           ) : (

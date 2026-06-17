@@ -5,6 +5,10 @@ export function modelsJsonPath(agentDir) {
   return join(agentDir, 'models.json')
 }
 
+export function openClawJsonPath(agentDir) {
+  return join(agentDir, 'openclaw.json')
+}
+
 export async function readModelsConfig(agentDir) {
   const path = modelsJsonPath(agentDir)
   try {
@@ -16,6 +20,16 @@ export async function readModelsConfig(agentDir) {
     }
     throw err
   }
+}
+
+export async function ensureModelsConfig(agentDir) {
+  const current = await readModelsConfig(agentDir)
+  if (current.raw) return current
+
+  const seeded = await readOpenClawModelsConfig(agentDir)
+  if (!seeded) return current
+
+  return writeModelsConfig(agentDir, seeded.config)
 }
 
 export async function writeModelsConfig(agentDir, config) {
@@ -32,6 +46,28 @@ export async function patchModelsConfig(agentDir, patch) {
   const current = await readModelsConfig(agentDir)
   const nextConfig = mergeConfig(current.config, normalizePatch(patch))
   return writeModelsConfig(agentDir, nextConfig)
+}
+
+async function readOpenClawModelsConfig(agentDir) {
+  const path = openClawJsonPath(agentDir)
+  try {
+    const raw = await readFile(path, 'utf8')
+    const config = normalizeOpenClawConfig(JSON.parse(raw))
+    if (!config) return null
+    return { path, raw: `${JSON.stringify(config, null, 2)}\n`, config }
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null
+    throw err
+  }
+}
+
+function normalizeOpenClawConfig(config) {
+  if (!config || typeof config !== 'object') return null
+  const models = config.models
+  if (!models || typeof models !== 'object') return null
+  const providers = models.providers
+  if (!providers || typeof providers !== 'object' || Array.isArray(providers)) return null
+  return { providers }
 }
 
 function normalizePatch(patch) {

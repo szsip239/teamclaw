@@ -82,10 +82,6 @@ function assistant(content: string): ChatHistoryMessage {
   return { role: 'assistant', content }
 }
 
-function toolResult(toolName: string, content: string): ChatHistoryMessage {
-  return { role: 'toolResult', toolName, content }
-}
-
 describe('live snapshot append-only merge', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -188,9 +184,7 @@ describe('live snapshot append-only merge', () => {
 
     const merged = mergeLiveMessagesAppendOnly(cached, gateway)
     expect(merged).toHaveLength(2)
-    expect(merged[1].content).toBe(
-      '文件已创建完成。\n\n[report.html](output/report.html)',
-    )
+    expect(merged[1].content).toBe('文件已创建完成。\n\n[report.html](output/report.html)')
   })
 
   it('falls back when a stale gateway artifact link was replaced by a normalized link', () => {
@@ -242,10 +236,7 @@ describe('live snapshot append-only merge', () => {
     const client = {
       request: vi.fn().mockResolvedValue({
         sessionId: 'gw-1',
-        messages: [
-          userWithImage('see this', 'image/png', imageData),
-          assistant('ok'),
-        ],
+        messages: [userWithImage('see this', 'image/png', imageData), assistant('ok')],
       }),
     }
 
@@ -254,32 +245,22 @@ describe('live snapshot append-only merge', () => {
       liveMessages: [],
     })
 
-    await saveLiveSnapshot(
-      'chat-1',
-      client as never,
-      'agent:a:tc:u',
-      null,
-      undefined,
-      [{ name: 'image.png', mimeType: 'image/png', content: imageData }],
-    )
+    await saveLiveSnapshot('chat-1', client as never, 'agent:a:tc:u', null, undefined, [
+      { name: 'image.png', mimeType: 'image/png', content: imageData },
+    ])
 
     const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
     const liveMessages = updateArg.data.liveMessages as ChatMessage[]
 
     expect(liveMessages[0].contentBlocks).toHaveLength(1)
-    expect(liveMessages[0].contentBlocks?.[0].imageUrl).toBe(
-      'data:image/png;base64,same-image',
-    )
+    expect(liveMessages[0].contentBlocks?.[0].imageUrl).toBe('data:image/png;base64,same-image')
   })
 
   it('persists deterministic artifact links on the last assistant live message', async () => {
     const client = {
       request: vi.fn().mockResolvedValue({
         sessionId: 'gw-1',
-        messages: [
-          user('create a report'),
-          assistant('文件已创建完成。'),
-        ],
+        messages: [user('create a report'), assistant('文件已创建完成。')],
       }),
     }
 
@@ -309,7 +290,8 @@ describe('live snapshot append-only merge', () => {
 
   it('archives sessions with the unified 500 history limit', async () => {
     const client = {
-      request: vi.fn()
+      request: vi
+        .fn()
         .mockResolvedValueOnce({ sessionId: 'gw-1', messages: [] })
         .mockResolvedValueOnce({}),
       on: vi.fn(),
@@ -322,21 +304,43 @@ describe('live snapshot append-only merge', () => {
 
     await archiveSession('chat-1', 'instance-1', 'agent-a', 'user-1', client as never)
 
-    expect(client.request).toHaveBeenCalledWith(
-      'chat.history',
-      { sessionKey: 'agent:agent-a:tc:user-1', limit: 500 },
-    )
+    expect(client.request).toHaveBeenCalledWith('chat.history', {
+      sessionKey: 'agent:agent-a:tc:user-1',
+      limit: 500,
+    })
+  })
+
+  it('archives pi sessions with the pi runtime session key', async () => {
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValueOnce({ sessionId: 'gw-1', messages: [] })
+        .mockResolvedValueOnce({}),
+      on: vi.fn(),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      liveMessages: [],
+    })
+    mocks.prisma.chatSession.update.mockResolvedValue({})
+
+    await archiveSession('chat-1', 'instance-1', 'agent-a', 'user-1', client as never, {
+      runtime: 'pi',
+    })
+
+    expect(client.request).toHaveBeenCalledWith('chat.history', {
+      sessionKey: 'agent:pi:agent-a:tc:user-1',
+      limit: 500,
+    })
   })
 
   it('preserves locally appended assistant artifact links when archiving snapshots', async () => {
     const client = {
-      request: vi.fn()
+      request: vi
+        .fn()
         .mockResolvedValueOnce({
           sessionId: 'gw-1',
-          messages: [
-            user('create a report'),
-            assistant('文件已创建完成。'),
-          ],
+          messages: [user('create a report'), assistant('文件已创建完成。')],
         })
         .mockResolvedValueOnce({}),
       on: vi.fn(),
@@ -353,9 +357,7 @@ describe('live snapshot append-only merge', () => {
     await archiveSession('chat-1', 'instance-1', 'agent-a', 'user-1', client as never)
 
     const createArg = mocks.prisma.chatMessageSnapshot.createMany.mock.calls[0][0]
-    expect(createArg.data[1].content).toBe(
-      '文件已创建完成。\n\n[report.html](output/report.html)',
-    )
+    expect(createArg.data[1].content).toBe('文件已创建完成。\n\n[report.html](output/report.html)')
   })
 
   it('serializes live message appends for the same chat session', async () => {
@@ -461,8 +463,6 @@ describe('transformToLiveMessages', () => {
       isFinal: false,
     })
     expect(messages[0].thinking).toBeUndefined()
-    expect(messages[0].toolCalls).toEqual([
-      { toolName: 'exec', toolInput: { command: 'ls' } },
-    ])
+    expect(messages[0].toolCalls).toEqual([{ toolName: 'exec', toolInput: { command: 'ls' } }])
   })
 })

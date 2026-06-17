@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { readModelsConfig, patchModelsConfig } from './config-store.js'
+import { ensureModelsConfig, patchModelsConfig } from './config-store.js'
 import { gatewayMessagesFromSessionEntries, toGatewayHistoryMessage } from './message-utils.js'
 
 export function getDefaultAgentDir(home = process.env.HOME) {
@@ -35,7 +35,7 @@ export class PiRuntime {
   }
 
   async getConfig() {
-    const { path, raw, config } = await readModelsConfig(this.agentDir)
+    const { path, raw, config } = await ensureModelsConfig(this.agentDir)
     return { path, raw, hash: hashRawConfig(raw), config }
   }
 
@@ -58,8 +58,9 @@ async function createRealPiSession({ sessionKey, cwd, agentDir, runtime }) {
   const effectiveCwd = cwd || process.cwd()
   const sessionDir = join(agentDir, 'teamclaw-sessions', encodeSessionKey(sessionKey))
   const authStorage = AuthStorage.create(join(agentDir, 'auth.json'))
+  await ensureModelsConfig(agentDir)
   const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, 'models.json'))
-  const { config } = await readModelsConfig(agentDir)
+  const { config } = await ensureModelsConfig(agentDir)
   applyRuntimeApiKeys(authStorage, config)
   modelRegistry.refresh()
   runtime.authStorage = authStorage
