@@ -70,7 +70,7 @@ export const POST = withAuth(
     if (runtime === 'pi' && !instanceSupportsPiRuntime(instance.dockerConfig)) {
       return NextResponse.json(
         { error: 'Pi runtime is not enabled for this instance' },
-        { status: 400 },
+        { status: 503 },
       )
     }
     if (runtime === 'pi') {

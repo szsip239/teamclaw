@@ -171,6 +171,8 @@ async function switchActiveSession(
 
   if (activeSession && activeSession.id !== targetSessionId) {
     await ensureRegistryInitialized()
+    // TODO(pi): archiveSession still uses the OpenClaw registry client; pi archive
+    // support belongs with the pi-wrapper history implementation.
     const client = registry.getClient(instanceId)
 
     if (client) {
@@ -308,7 +310,7 @@ export async function POST(req: NextRequest) {
     if (!instanceSupportsPiRuntime(instance.dockerConfig)) {
       return NextResponse.json(
         { error: 'Pi runtime is not enabled for this instance' },
-        { status: 400 },
+        { status: 503 },
       )
     }
     return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })

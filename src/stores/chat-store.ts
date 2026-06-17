@@ -1,7 +1,10 @@
 import { create } from 'zustand'
+import { toast } from 'sonner'
 import { streamChat } from '@/lib/chat-stream'
 import { assembleFromResponse, latestUserTurnHasFinalAssistant } from '@/lib/chat/message-assembly'
 import { attachKbSourcesToLatestAssistant } from '@/lib/chat/kb-sources'
+import { ensureChatRuntimeForAgent } from '@/lib/chat/runtime-options'
+import { translate } from '@/stores/language-store'
 import type {
   ChatAgentInfo,
   ChatMessage,
@@ -11,11 +14,14 @@ import type {
   ChatContentBlock,
   KbSourceRef,
 } from '@/types/chat'
+import type { ChatRuntime } from '@/lib/chat/runtime'
 
 interface ChatState {
   // Selected agent
   selectedAgent: ChatAgentInfo | null
   setSelectedAgent: (agent: ChatAgentInfo | null) => void
+  selectedRuntime: ChatRuntime
+  setSelectedRuntime: (runtime: ChatRuntime) => void
 
   // Active session tracking
   activeSessionId: string | null
@@ -37,7 +43,7 @@ interface ChatState {
   pendingQueuedRuns: number
 
   // Streaming mutations (operate on streamingMessage, not messages[])
-  addUserMessage: (content: string, attachments?: ChatAttachment[]) => void
+  addUserMessage: (content: string, attachments?: ChatAttachment[], runtime?: ChatRuntime) => void
   appendAssistantContent: (content: string) => void
   appendAssistantImage: (imageUrl: string, mimeType?: string, alt?: string) => void
   appendThinking: (content: string) => void
@@ -59,6 +65,7 @@ interface ChatState {
   sendMessage: (
     instanceId: string,
     agentId: string,
+    runtime: ChatRuntime,
     message: string,
     sessionId?: string,
     attachments?: {
@@ -72,6 +79,7 @@ interface ChatState {
 
   // Queue a message while agent is running (fire-and-forget to gateway)
   queueMessage: (
+    runtime: ChatRuntime,
     message: string,
     attachments?: {
       name: string
@@ -337,10 +345,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setSelectedAgent: (agent) =>
     set((s) => ({
       selectedAgent: agent,
+      selectedRuntime: ensureChatRuntimeForAgent(agent, s.selectedRuntime),
       ...(agent && agent !== s.selectedAgent && s.exportMode
         ? { exportMode: false, selectedExportIds: [] }
         : {}),
     })),
+  selectedRuntime: 'openclaw',
+  setSelectedRuntime: (runtime) => {
+    const current = get()
+    const nextRuntime = ensureChatRuntimeForAgent(current.selectedAgent, runtime)
+    if (current.isStreaming && current.selectedRuntime !== nextRuntime) {
+      current.abortChat()
+    }
+    set({ selectedRuntime: nextRuntime })
+  },
 
   activeSessionId: null,
   setActiveSessionId: (id) => set({ activeSessionId: id }),
@@ -352,11 +370,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setMessages: (messages) => set({ messages }),
 
-  addUserMessage: (content, attachments) => {
+  addUserMessage: (content, attachments, runtime) => {
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content,
+      runtime,
       createdAt: new Date().toISOString(),
       ...(attachments?.length ? { attachments } : {}),
     }
@@ -448,7 +467,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   remoteStreaming: false,
   setRemoteStreaming: (v) => set({ remoteStreaming: v }),
 
-  sendMessage: async (instanceId, agentId, message, sessionId, attachments) => {
+  sendMessage: async (instanceId, agentId, runtime, message, sessionId, attachments) => {
     const { addUserMessage } = get()
     // Capture session ID at start — may be updated by the 'session' SSE event
     // when the API creates a new session (activeSessionId was null)
@@ -461,13 +480,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       size: a.size,
       dataUrl: a.dataUrl,
     }))
-    addUserMessage(message, uiAttachments)
+    addUserMessage(message, uiAttachments, runtime)
 
     // 2. Create assistant placeholder as streamingMessage (not in messages[])
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
+      runtime,
       createdAt: new Date().toISOString(),
     }
     set({ streamingMessage: assistantMsg, kbSources: [] })
@@ -511,7 +531,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }))
 
       for await (const event of streamChat(
-        { instanceId, agentId, message, sessionId, attachments: streamAttachments },
+        { instanceId, agentId, runtime, message, sessionId, attachments: streamAttachments },
         controller.signal,
       )) {
         switch (event.type) {
@@ -563,7 +583,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        get().setAssistantError((err as Error).message || 'Failed to send message')
+        const errorMessage = (err as Error).message || 'Failed to send message'
+        get().setAssistantError(errorMessage)
+        toast.error(runtime === 'pi' ? translate('chat.piUnavailable') : errorMessage)
       }
     } finally {
       clearInterval(progressTimer)
@@ -623,7 +645,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  queueMessage: (message, attachments) => {
+  queueMessage: (runtime, message, attachments) => {
     const { selectedAgent } = get()
     if (!selectedAgent) return
 
@@ -638,6 +660,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id: crypto.randomUUID(),
       role: 'user',
       content: message,
+      runtime,
       createdAt: new Date().toISOString(),
       ...(uiAttachments ? { attachments: uiAttachments } : {}),
     }
@@ -658,6 +681,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       body: JSON.stringify({
         instanceId: selectedAgent.instanceId,
         agentId: selectedAgent.agentId,
+        runtime,
         message,
         ...(queueAttachments?.length ? { attachments: queueAttachments } : {}),
       }),
@@ -666,7 +690,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   abortChat: () => {
-    const { abortController, selectedAgent } = get()
+    const { abortController, selectedAgent, selectedRuntime } = get()
     // 1. Immediately abort the SSE fetch for instant UI feedback
     if (abortController) abortController.abort()
     // 2. Fire-and-forget: tell the gateway to abort the agent run
@@ -677,6 +701,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         body: JSON.stringify({
           instanceId: selectedAgent.instanceId,
           agentId: selectedAgent.agentId,
+          runtime: selectedRuntime,
         }),
         credentials: 'include',
       }).catch(() => {})

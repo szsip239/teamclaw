@@ -177,6 +177,7 @@ export interface HealthStatus {
 export interface ChatOptions {
   skills?: string[]
   model?: string
+  runtime?: string
   attachments?: { fileName: string; mimeType: string; content: string }[]
 }
 
