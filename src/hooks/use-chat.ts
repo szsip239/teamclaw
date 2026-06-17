@@ -105,13 +105,23 @@ export function useClearContext() {
 
 export function useNewConversation() {
   const qc = useQueryClient()
-  return useMutation({
+  return useMutation<
+    { session: ChatSessionResponse },
+    Error,
+    { instanceId: string; agentId: string; runtime?: ChatRuntime }
+  >({
     mutationFn: (body: { instanceId: string; agentId: string; runtime?: ChatRuntime }) =>
       api.post<{ session: ChatSessionResponse }>(
         "/api/v1/chat/conversations/new",
         body,
       ),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      qc.setQueryData<{ sessions: ChatSessionResponse[] }>(chatKeys.sessions(), (old) => ({
+        sessions: [
+          data.session,
+          ...(old?.sessions ?? []).filter((session) => session.id !== data.session.id),
+        ],
+      }))
       qc.invalidateQueries({ queryKey: chatKeys.sessions() })
     },
   })
