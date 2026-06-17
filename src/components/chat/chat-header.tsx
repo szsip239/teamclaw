@@ -5,6 +5,13 @@ import { PanelLeftClose, PanelLeft, RotateCcw, Bot, Loader2, Download, X } from 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -14,15 +21,19 @@ import {
 } from "@/components/ui/dialog"
 import { useChatStore } from "@/stores/chat-store"
 import { useClearContext } from "@/hooks/use-chat"
+import { agentSupportsChatRuntime } from "@/lib/chat/runtime-options"
 import { useT } from "@/stores/language-store"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
 import { buildExportHtml, MAX_EXPORT_MESSAGES } from "@/lib/chat/export-utils"
+import type { ChatRuntime } from "@/lib/chat/runtime"
 
 export function ChatHeader() {
   const t = useT()
   const isMobile = useIsMobile()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
+  const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sidebarOpen = useChatStore((s) => s.sidebarOpen)
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen)
@@ -35,6 +46,7 @@ export function ChatHeader() {
   const messages = useChatStore((s) => s.messages)
   const selectedExportIds = useChatStore((s) => s.selectedExportIds)
   const overLimit = selectedExportIds.length > MAX_EXPORT_MESSAGES
+  const piAvailable = agentSupportsChatRuntime(selectedAgent, 'pi')
 
   function handleToggleSidebar() {
     if (isMobile) {
@@ -126,6 +138,24 @@ export function ChatHeader() {
             <span className={`text-sm font-medium ${isMobile ? "max-w-[120px] truncate" : ""}`}>
               {selectedAgent.agentName}
             </span>
+            <Select
+              value={selectedRuntime}
+              onValueChange={(value) => setSelectedRuntime(value as ChatRuntime)}
+            >
+              <SelectTrigger
+                size="sm"
+                className={`${isMobile ? "w-[84px]" : "w-[116px]"} h-7 px-2 text-xs`}
+                title={t('chat.runtimeLabel')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                <SelectItem value="openclaw">{t('chat.runtimeOpenclaw')}</SelectItem>
+                <SelectItem value="pi" disabled={!piAvailable}>
+                  {piAvailable ? t('chat.runtimePi') : t('chat.piUnavailable')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
             {!isMobile && (
               <Badge variant="outline" className="text-xs">
                 {selectedAgent.instanceName}

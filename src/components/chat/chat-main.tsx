@@ -15,6 +15,7 @@ import {
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const setMessages = useChatStore((s) => s.setMessages)
   const setConnectionStatus = useChatStore((s) => s.setConnectionStatus)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -27,18 +28,20 @@ export function ChatMain() {
   // Find existing session for the selected agent.
   // Prefer active session, fall back to the most recent inactive one (e.g. after gateway restart).
   const { data: sessions } = useChatSessions()
+  const isSelectedSession = (session: NonNullable<typeof sessions>[number]) =>
+    !!selectedAgent &&
+    session.instanceId === selectedAgent.instanceId &&
+    session.agentId === selectedAgent.agentId &&
+    session.runtime === selectedRuntime
+  const activeMatchingSession = activeSessionId
+    ? sessions?.find((s) => s.id === activeSessionId && isSelectedSession(s))
+    : null
+  const fallbackMatchingSession =
+    sessions?.find((s) => isSelectedSession(s) && s.isActive) ??
+    sessions?.find((s) => isSelectedSession(s)) ??
+    null
   const matchingSession = selectedAgent
-    ? ((activeSessionId
-        ? sessions?.find((s) => s.id === activeSessionId)
-        : (sessions?.find(
-            (s) =>
-              s.instanceId === selectedAgent.instanceId &&
-              s.agentId === selectedAgent.agentId &&
-              s.isActive,
-          ) ??
-          sessions?.find(
-            (s) => s.instanceId === selectedAgent.instanceId && s.agentId === selectedAgent.agentId,
-          ))) ?? null)
+    ? (activeMatchingSession ?? fallbackMatchingSession)
     : null
 
   // Fetch history when we have a matching session
@@ -57,7 +60,7 @@ export function ChatMain() {
 
   // Set activeSessionId when we find a matching session
   useEffect(() => {
-    if (matchingSession && !activeSessionId) {
+    if (matchingSession && activeSessionId !== matchingSession.id) {
       setActiveSessionId(matchingSession.id)
     }
   }, [matchingSession, activeSessionId, setActiveSessionId])
@@ -185,6 +188,7 @@ export function ChatMain() {
     messagesLength,
     dataUpdatedAt,
     isStreaming,
+    selectedRuntime,
   ])
 
   if (!selectedAgent) {

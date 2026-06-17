@@ -24,6 +24,7 @@ export interface ChatAgentInfo {
   agentId: string
   agentName: string
   status: string
+  availableRuntimes?: ChatRuntime[]
   model?: string
   category?: AgentCategory
   hasContainer?: boolean

@@ -30,6 +30,7 @@ export function ChatInput() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const remoteStreaming = useChatStore((s) => s.remoteStreaming)
   const abortChat = useChatStore((s) => s.abortChat)
@@ -51,11 +52,12 @@ export function ChatInput() {
 
     if (isStreaming || remoteStreaming) {
       // Agent is running — queue the message (gateway handles serialization)
-      queueMessage(message, attachments)
+      queueMessage(selectedRuntime, message, attachments)
     } else {
       sendMessage(
         selectedAgent.instanceId,
         selectedAgent.agentId,
+        selectedRuntime,
         message,
         activeSessionId ?? undefined,
         attachments,
@@ -74,6 +76,7 @@ export function ChatInput() {
     input,
     pendingFiles,
     selectedAgent,
+    selectedRuntime,
     isStreaming,
     remoteStreaming,
     sendMessage,
@@ -240,6 +243,12 @@ export function ChatInput() {
             >
               <FolderOpen className="size-4" />
             </Button>
+          )}
+
+          {selectedRuntime === 'pi' && (
+            <span className="text-muted-foreground bg-muted/60 flex h-6 shrink-0 items-center rounded px-1.5 text-[11px] font-medium">
+              [{t('chat.runtimePi')}]
+            </span>
           )}
 
           <Textarea

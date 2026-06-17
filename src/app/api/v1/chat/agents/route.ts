@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { withAuth, withPermission } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { autoRegisterAgents, isAgentVisible } from '@/lib/agents/helpers'
+import { instanceSupportsPiRuntime } from '@/lib/chat/runtime'
 import type { ChatAgentInfo } from '@/types/chat'
 import type { AgentCategory } from '@/types/agent'
 
@@ -40,10 +41,13 @@ export const GET = withAuth(
     // Fetch instance name map
     const instances = await prisma.instance.findMany({
       where: { id: { in: instanceIds } },
-      select: { id: true, name: true, containerId: true, workspacePath: true },
+      select: { id: true, name: true, containerId: true, workspacePath: true, dockerConfig: true },
     })
     const nameMap = new Map(instances.map((i) => [i.id, i.name]))
     const fileAccessMap = new Map(instances.map((i) => [i.id, !!(i.containerId || i.workspacePath)]))
+    const piRuntimeMap = new Map(
+      instances.map((i) => [i.id, instanceSupportsPiRuntime(i.dockerConfig)]),
+    )
 
     await Promise.allSettled(
       instanceIds.map(async (instanceId) => {
@@ -79,6 +83,9 @@ export const GET = withAuth(
               agentId: agent.id,
               agentName: agent.name || agent.id,
               status: agent.status || 'active',
+              availableRuntimes: piRuntimeMap.get(instanceId)
+                ? ['openclaw', 'pi']
+                : ['openclaw'],
               model: agent.model,
               category: (meta?.category as AgentCategory) ?? 'DEFAULT',
               hasContainer: fileAccessMap.get(instanceId) ?? false,

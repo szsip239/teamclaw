@@ -19,3 +19,18 @@ describe('chat store history sync', () => {
     expect(returnTrueIndex).toBeLessThan(emptyHistoryReturnIndex)
   })
 })
+
+describe('chat store runtime wiring', () => {
+  it('keeps selected runtime in state and aborts before switching during streaming', () => {
+    expect(source).toContain('selectedRuntime: ChatRuntime')
+    expect(source).toContain('setSelectedRuntime: (runtime) => {')
+    expect(source).toContain('current.abortChat()')
+    expect(source).toContain('set({ selectedRuntime: nextRuntime })')
+  })
+
+  it('passes runtime through send, queue, and abort requests', () => {
+    expect(source).toContain('{ instanceId, agentId, runtime, message, sessionId')
+    expect(source).toContain('runtime,\n        message,')
+    expect(source).toContain('runtime: selectedRuntime')
+  })
+})

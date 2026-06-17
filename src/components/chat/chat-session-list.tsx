@@ -8,6 +8,7 @@ import { useChatStore } from "@/stores/chat-store"
 import { useT } from "@/stores/language-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { getAvailableChatRuntimes } from "@/lib/chat/runtime-options"
 import type { ChatSessionResponse } from "@/types/chat"
 
 export function ChatSessionList() {
@@ -16,6 +17,7 @@ export function ChatSessionList() {
   const { data: sessions, isLoading } = useChatSessions()
   const deleteMutation = useDeleteChatSession()
   const setSelectedAgent = useChatStore((s) => s.setSelectedAgent)
+  const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const setActiveSessionId = useChatStore((s) => s.setActiveSessionId)
@@ -30,6 +32,13 @@ export function ChatSessionList() {
   }
 
   function handleSelect(session: ChatSessionResponse) {
+    const agent = agents?.find(
+      (a) => a.instanceId === session.instanceId && a.agentId === session.agentId,
+    )
+    const availableRuntimes = getAvailableChatRuntimes(agent)
+    if (!availableRuntimes.includes(session.runtime)) {
+      availableRuntimes.push(session.runtime)
+    }
     clearMessages()
     qc.invalidateQueries({ queryKey: chatKeys.history(session.id) })
     setActiveSessionId(session.id)
@@ -39,7 +48,12 @@ export function ChatSessionList() {
       agentId: session.agentId,
       agentName: resolveAgentName(session),
       status: "active",
+      availableRuntimes,
+      hasContainer: agent?.hasContainer,
+      category: agent?.category,
+      model: agent?.model,
     })
+    setSelectedRuntime(session.runtime)
   }
 
   function handleDelete(id: string, e: React.MouseEvent) {
@@ -106,7 +120,8 @@ export function ChatSessionList() {
                 )}
               </div>
               <p className="text-muted-foreground truncate text-[10px]">
-                {resolveAgentName(session)} &middot; {session.instanceName}
+                {resolveAgentName(session)} &middot; {runtimeLabel(session.runtime, t)}
+                &middot; {session.instanceName}
                 {session.lastMessageAt && (
                   <> &middot; {formatRelative(session.lastMessageAt, t)}</>
                 )}
@@ -136,4 +151,11 @@ function formatRelative(isoStr: string, t: (key: import("@/locales/zh-CN").Trans
   if (hours < 24) return t('time.hoursAgo', { n: hours })
   const days = Math.floor(hours / 24)
   return t('time.daysAgo', { n: days })
+}
+
+function runtimeLabel(
+  runtime: ChatSessionResponse['runtime'],
+  t: (key: import("@/locales/zh-CN").TranslationKey, params?: Record<string, string | number>) => string,
+): string {
+  return runtime === 'pi' ? t('chat.runtimePi') : t('chat.runtimeOpenclaw')
 }
