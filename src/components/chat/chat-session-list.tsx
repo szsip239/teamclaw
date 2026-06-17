@@ -9,6 +9,7 @@ import { useT } from "@/stores/language-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { getAvailableChatRuntimes } from "@/lib/chat/runtime-options"
+import { sortChatSessionsForDisplay } from "@/lib/chat/session-sort"
 import type { ChatSessionResponse } from "@/types/chat"
 
 export function ChatSessionList() {
@@ -85,13 +86,7 @@ export function ChatSessionList() {
     )
   }
 
-  // Active sessions first, then by most recent
-  const sorted = [...sessions].sort((a, b) => {
-    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
-    const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
-    const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
-    return tb - ta
-  })
+  const sorted = sortChatSessionsForDisplay(sessions)
 
   return (
     <div className="flex flex-col gap-0.5">
