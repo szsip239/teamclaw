@@ -1,9 +1,11 @@
 import type { ChatStreamEvent } from '@/types/chat'
+import type { ChatRuntime } from '@/lib/chat/runtime'
 
 export async function* streamChat(
   body: {
     instanceId: string
     agentId: string
+    runtime?: ChatRuntime
     message: string
     sessionId?: string
     attachments?: { name: string; content: string; mimeType: string }[]
