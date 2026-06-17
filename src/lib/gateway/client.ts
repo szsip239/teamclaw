@@ -1,10 +1,6 @@
 import { randomUUID } from 'crypto'
 import WebSocket from 'ws'
-import type {
-  GatewayMessage,
-  GatewayResponse,
-  GatewayEvent,
-} from '@/types/gateway'
+import type { GatewayMessage, GatewayResponse, GatewayEvent } from '@/types/gateway'
 
 // v4: OpenClaw 6.6 gateway requires protocol v4 (MIN_CLIENT_PROTOCOL_VERSION=4);
 // v3 clients are rejected with close code 1002. All connected instances must be
@@ -70,6 +66,7 @@ export class GatewayClient {
   public serverVersion: string | null = null
 
   onStatusChange?: (status: 'connecting' | 'connected' | 'disconnected' | 'error') => void
+  onUnexpectedDisconnect?: () => void
   onPermanentDisconnect?: () => void
 
   constructor(url: string, token: string) {
@@ -121,6 +118,7 @@ export class GatewayClient {
       })
 
       this.ws.on('close', () => {
+        const wasConnected = this.connected
         this.clearConnectTimer()
         this.connected = false
         this.stopTickWatch()
@@ -136,6 +134,9 @@ export class GatewayClient {
         }
 
         if (!this.intentionalDisconnect) {
+          if (wasConnected) {
+            this.onUnexpectedDisconnect?.()
+          }
           this.handleReconnect()
         }
       })
@@ -236,9 +237,7 @@ export class GatewayClient {
 
       this.pending.set(id, { resolve, reject, timer })
 
-      this.ws.send(
-        JSON.stringify({ type: 'req', id, method, params }),
-      )
+      this.ws.send(JSON.stringify({ type: 'req', id, method, params }))
     })
   }
 
@@ -320,9 +319,7 @@ export class GatewayClient {
         }
 
         // Extract tick interval from server policy
-        const policy = payload?.policy as
-          | Record<string, unknown>
-          | undefined
+        const policy = payload?.policy as Record<string, unknown> | undefined
         if (typeof policy?.tickIntervalMs === 'number') {
           this.tickIntervalMs = policy.tickIntervalMs
         }

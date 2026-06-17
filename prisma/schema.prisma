@@ -226,6 +226,7 @@ model ChatSession {
   instance      Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   agentId       String
   runtime       ChatRuntime @default(OPENCLAW)
+  conversationGroupId String?
   sessionId     String    // OpenClaw session key, format: agent:<agentId>:tc:<userId>
   gwSessionId   String?   // OpenClaw internal session ID from chat.history — changes on session reset
   title         String?
@@ -239,6 +240,7 @@ model ChatSession {
 
   @@index([userId, instanceId, agentId])
   @@index([userId, instanceId, agentId, runtime])
+  @@index([conversationGroupId])
   @@index([userId])
 }
 

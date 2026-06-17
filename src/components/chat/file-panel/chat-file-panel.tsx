@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useCallback } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import { useChatSessions } from "@/hooks/use-chat"
 import { useChatStore } from "@/stores/chat-store"
 import { useFilePanelStore } from "@/stores/file-panel-store"
 import { useT } from "@/stores/language-store"
 import { sessionFileKeys, useFileWatch } from "@/hooks/use-session-files"
+import { resolveFilePanelSessionIds } from "@/lib/session-files/panel-scope"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -17,9 +19,17 @@ import { FileDetail } from "./file-detail"
 export function ChatFilePanel({ className }: { className?: string }) {
   const t = useT()
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const reset = useFilePanelStore((s) => s.reset)
   const qc = useQueryClient()
+  const { data: sessions } = useChatSessions()
+  const activeSession = activeSessionId
+    ? sessions?.find((session) => session.id === activeSessionId)
+    : undefined
+  const fileSessionIds = activeSessionId
+    ? resolveFilePanelSessionIds({ activeSession, activeSessionId, selectedRuntime })
+    : null
 
   // Reset file panel state when session changes
   useEffect(() => {
@@ -36,20 +46,20 @@ export function ChatFilePanel({ className }: { className?: string }) {
   }, [isStreaming, qc])
 
   // Layer 2: SSE watch for background file changes
-  useFileWatch(activeSessionId)
+  useFileWatch(fileSessionIds?.watchSessionId ?? null)
 
   const handleDownloadAll = useCallback(() => {
-    if (!activeSessionId) return
-    const url = `/api/v1/chat/sessions/${activeSessionId}/files/download-all`
+    if (!fileSessionIds) return
+    const url = `/api/v1/chat/sessions/${fileSessionIds.outputSessionId}/files/download-all`
     const a = document.createElement("a")
     a.href = url
     a.download = "output-files.tar.gz"
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-  }, [activeSessionId])
+  }, [fileSessionIds])
 
-  if (!activeSessionId) return null
+  if (!fileSessionIds) return null
 
   return (
     <div className={cn("flex flex-col bg-background", className)}>
@@ -70,8 +80,8 @@ export function ChatFilePanel({ className }: { className?: string }) {
               {t("filePanel.input")}
             </span>
           </div>
-          <FileUploadZone sessionId={activeSessionId}>
-            <FileTree zone="input" sessionId={activeSessionId} />
+          <FileUploadZone sessionId={fileSessionIds.inputSessionId}>
+            <FileTree zone="input" sessionId={fileSessionIds.inputSessionId} />
           </FileUploadZone>
         </div>
 
@@ -83,7 +93,7 @@ export function ChatFilePanel({ className }: { className?: string }) {
             </span>
           </div>
           <div className="flex flex-col flex-1 min-h-0">
-            <FileTree zone="output" sessionId={activeSessionId} />
+            <FileTree zone="output" sessionId={fileSessionIds.outputSessionId} />
           </div>
           <div className="flex items-center gap-1 p-1 border-t">
             <Button
@@ -102,7 +112,7 @@ export function ChatFilePanel({ className }: { className?: string }) {
       <Separator />
 
       {/* Lower area: file detail / preview */}
-      <FileDetail sessionId={activeSessionId} />
+      <FileDetail sessionId={fileSessionIds.detailSessionId} />
     </div>
   )
 }

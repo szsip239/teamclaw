@@ -16,6 +16,12 @@ import type {
 } from '@/types/chat'
 import type { ChatRuntime } from '@/lib/chat/runtime'
 
+const PI_CONNECTION_LOST_ERROR = 'Pi agent connection lost'
+
+function displayStreamError(error: string): string {
+  return error === PI_CONNECTION_LOST_ERROR ? translate('chat.piConnectionLost') : error
+}
+
 interface ChatState {
   // Selected agent
   selectedAgent: ChatAgentInfo | null
@@ -575,7 +581,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }))
             break
           case 'error':
-            get().setAssistantError(event.error)
+            get().setAssistantError(displayStreamError(event.error))
             break
           case 'done':
             break
@@ -584,8 +590,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         const errorMessage = (err as Error).message || 'Failed to send message'
-        get().setAssistantError(errorMessage)
-        toast.error(runtime === 'pi' ? translate('chat.piUnavailable') : errorMessage)
+        const displayError = displayStreamError(errorMessage)
+        get().setAssistantError(displayError)
+        toast.error(runtime === 'pi' ? translate('chat.piUnavailable') : displayError)
       }
     } finally {
       clearInterval(progressTimer)
@@ -598,8 +605,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const hasQueued =
-        get().pendingQueuedRuns > 0 &&
-        !latestUserTurnHasFinalAssistant(get().messages)
+        get().pendingQueuedRuns > 0 && !latestUserTurnHasFinalAssistant(get().messages)
 
       const finalStreaming = get().streamingMessage
       const finalKbSources = finalStreaming?.kbSources ?? []
@@ -757,7 +763,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const eligible = s.messages
         .filter((m) => {
           if (m.content.startsWith('__separator__:')) return false
-          if (m.role === 'assistant' && !m.content && !m.error && (m.thinking || (m.toolCalls?.length ?? 0) > 0)) return false
+          if (
+            m.role === 'assistant' &&
+            !m.content &&
+            !m.error &&
+            (m.thinking || (m.toolCalls?.length ?? 0) > 0)
+          )
+            return false
           return true
         })
         .map((m) => m.id)

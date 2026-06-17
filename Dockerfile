@@ -42,7 +42,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 -G nodejs nextjs
+    adduser --system --uid 1001 -G nodejs nextjs && \
+    addgroup nextjs root
 
 # Install clawhub CLI for skill pull functionality
 RUN npm install -g clawhub@latest 2>/dev/null || true

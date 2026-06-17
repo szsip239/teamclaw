@@ -56,6 +56,66 @@ function stripAnsi(str: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '') // stray control chars (keep \t \n \r)
 }
 
+export type ContainerDirEntry = {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+}
+
+export function parseContainerDirListing(output: string): ContainerDirEntry[] {
+  const entries: ContainerDirEntry[] = []
+
+  for (const line of output.split('\n')) {
+    if (!line.trim() || line.startsWith('total ')) continue
+
+    // GNU find -printf format: "type size relPath" (type: f=file, d=directory)
+    const findMatch = line.match(/^([fd])\s+(\d+)\s+(.+)$/)
+    if (findMatch) {
+      const [, typeChar, sizeStr, relPath] = findMatch
+      if (!relPath || relPath === '.' || relPath === '..') continue
+      const name = relPath.split('/').pop() ?? relPath
+      entries.push({
+        name,
+        path: relPath,
+        type: typeChar === 'd' ? 'directory' : 'file',
+        size: parseInt(sizeStr, 10),
+      })
+      continue
+    }
+
+    // BusyBox fallback from `ls -la`: permissions links owner group size month day time/year name
+    const lsMatch = line.match(/^([dl-])[rwx-]{9}\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\d+\s+(?:\d{2}:\d{2}|\d{4})\s+(.+)$/)
+    if (lsMatch) {
+      const [, typeChar, sizeStr, relPath] = lsMatch
+      if (!relPath || relPath === '.' || relPath === '..') continue
+      const name = relPath.split('/').pop() ?? relPath
+      entries.push({
+        name,
+        path: relPath,
+        type: typeChar === 'd' ? 'directory' : 'file',
+        size: parseInt(sizeStr, 10),
+      })
+    }
+  }
+
+  // Deduplicate by type:name — if find returns nested entries (e.g. cached
+  // results from before -maxdepth 1 fix), keep only the shallowest path.
+  const seen = new Map<string, ContainerDirEntry>()
+  for (const entry of entries) {
+    const key = `${entry.type}:${entry.name}`
+    const existing = seen.get(key)
+    if (!existing || entry.path.length < existing.path.length) {
+      seen.set(key, entry)
+    }
+  }
+
+  return [...seen.values()].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
 const globalForDocker = globalThis as unknown as { dockerManager: DockerManager }
 
 export class DockerManager {
@@ -117,6 +177,7 @@ export class DockerManager {
     const container = await this.docker.createContainer({
       name: options.name,
       Image: options.imageName,
+      Cmd: options.command,
       Env: env,
       ExposedPorts: exposedPorts,
       HostConfig: {
@@ -440,7 +501,7 @@ export class DockerManager {
   async listContainerDir(
     containerId: string,
     dirPath: string,
-  ): Promise<{ name: string; path: string; type: 'file' | 'directory'; size: number }[]> {
+  ): Promise<ContainerDirEntry[]> {
     if (!isContainerPathSafe(dirPath)) {
       throw new Error(`Unsafe container directory path: ${dirPath}`)
     }
@@ -471,39 +532,7 @@ export class DockerManager {
 
     if (!output) return []
 
-    const entries: { name: string; path: string; type: 'file' | 'directory'; size: number }[] = []
-    for (const line of output.split('\n')) {
-      if (!line.trim()) continue
-      // find -printf format: "type size relPath"  (type: f=file, d=directory, relPath from %P)
-      const match = line.match(/^([fd])\s+(\d+)\s+(.+)$/)
-      if (match) {
-        const [, typeChar, sizeStr, relPath] = match
-        if (!relPath || relPath === '.' || relPath === '..') continue
-        const name = relPath.split('/').pop() ?? relPath
-        entries.push({
-          name,
-          path: relPath,
-          type: typeChar === 'd' ? 'directory' : 'file',
-          size: parseInt(sizeStr, 10),
-        })
-      }
-    }
-
-    // Deduplicate by type:name — if find returns nested entries (e.g. cached
-    // results from before -maxdepth 1 fix), keep only the shallowest path.
-    const seen = new Map<string, (typeof entries)[0]>()
-    for (const entry of entries) {
-      const key = `${entry.type}:${entry.name}`
-      const existing = seen.get(key)
-      if (!existing || entry.path.length < existing.path.length) {
-        seen.set(key, entry)
-      }
-    }
-
-    return [...seen.values()].sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
+    return parseContainerDirListing(output)
   }
 
   /** Run an arbitrary command inside a container (fire-and-forget style). */

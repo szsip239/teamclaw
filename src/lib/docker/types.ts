@@ -2,6 +2,7 @@ export interface ContainerCreateOptions {
   name: string
   imageName: string
   env?: Record<string, string>
+  command?: string[]
   portBindings?: Record<string, string> // "18789/tcp" → "18789"
   volumes?: Record<string, string> // host path → container path
   extraBinds?: string[] // additional bind mounts in "host:container" format (for when volumes would have duplicate keys)

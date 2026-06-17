@@ -7,7 +7,10 @@ import {
   buildProviderEntryFromResource,
   resolveOpenClawProviderId,
   sanitizeProviderPatch,
+  type ProviderEntry,
 } from '@/lib/config-editor/provider-sync'
+import { buildPiModelsPatch } from '@/lib/config-editor/pi-models-translator'
+import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import type { ResourceConfig, ModelDefinition } from '@/types/resource'
 
@@ -63,6 +66,37 @@ interface PushOutcome {
   instanceId: string
   ok: boolean
   error?: string
+  piOk?: boolean
+  piError?: string
+}
+
+async function pushPiModelsConfig(params: {
+  instanceId: string
+  providerId: string
+  providerEntry: ProviderEntry
+}): Promise<Pick<PushOutcome, 'piOk' | 'piError'>> {
+  let lease: Awaited<ReturnType<typeof getRuntimeGatewayClient>> | null = null
+  try {
+    lease = await getRuntimeGatewayClient(params.instanceId, 'pi')
+    if (!lease) return {}
+
+    await lease.client.request(
+      'config.patch',
+      buildPiModelsPatch(params.providerId, params.providerEntry) as unknown as Record<string, unknown>,
+    )
+    return { piOk: true }
+  } catch (err) {
+    const message = (err as Error).message ?? 'unknown'
+    if (message.includes('Pi runtime is not enabled')) return {}
+
+    console.warn(
+      `[resource-push] Pi model sync failed for instance ${params.instanceId}:`,
+      message,
+    )
+    return { piOk: false, piError: message }
+  } finally {
+    lease?.release()
+  }
 }
 
 export const POST = withAuth(
@@ -140,7 +174,12 @@ export const POST = withAuth(
               raw: JSON.stringify(sanitized),
               baseHash: cur.hash,
             })
-            return { instanceId, ok: true }
+            const piResult = await pushPiModelsConfig({
+              instanceId,
+              providerId: openClawProviderId,
+              providerEntry,
+            })
+            return { instanceId, ok: true, ...piResult }
           } catch (err) {
             return {
               instanceId,

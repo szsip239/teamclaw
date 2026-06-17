@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
+import { registry } from '@/lib/gateway/registry'
 import { activeRuns } from '@/lib/chat/active-runs'
 import { saveLiveSnapshot } from '@/lib/chat/snapshot-helpers'
 import { buildChatRuntimeSessionKey, toDbChatRuntime } from '@/lib/chat/runtime'
+import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
 import { z } from 'zod'
 
 const abortSchema = z.object({
@@ -25,21 +26,26 @@ export const POST = withAuth(
       const { instanceId, agentId, runtime } = body
       const dbRuntime = toDbChatRuntime(runtime)
       const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
-      if (runtime === 'pi') {
-        return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
-      }
 
-      // Ensure gateway is connected
-      await ensureRegistryInitialized()
-      const client = registry.getClient(instanceId)
-      const adapter = registry.getAdapter(instanceId)
-      if (!client || !adapter) {
+      const lease = await getRuntimeGatewayClient(instanceId, runtime).catch((err) => {
+        console.warn('[chat/abort] Runtime client unavailable:', (err as Error).message)
+        return null
+      })
+      if (!lease) {
         return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
       }
 
       // Send chat.abort to the OpenClaw gateway
       try {
-        await adapter.abortChat(client, sessionKey)
+        if (runtime === 'pi') {
+          await lease.client.request('chat.abort', { sessionKey })
+        } else {
+          const adapter = registry.getAdapter(instanceId)
+          if (!adapter) {
+            return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
+          }
+          await adapter.abortChat(lease.client, sessionKey)
+        }
       } catch (err) {
         // Log but don't fail — the run may have already finished
         console.warn('[chat/abort] Gateway abort failed:', (err as Error).message)
@@ -59,12 +65,13 @@ export const POST = withAuth(
             where: { id: instanceId },
             select: { containerId: true },
           })
-          await saveLiveSnapshot(session.id, client, sessionKey, instance?.containerId)
+          await saveLiveSnapshot(session.id, lease.client, sessionKey, instance?.containerId)
         } catch {
           // Non-fatal: snapshot might fail if run was very short
         }
       }
 
+      lease.release()
       return NextResponse.json({ status: 'aborted' })
     }),
   ),
