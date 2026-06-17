@@ -85,7 +85,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
-        createdAt: new Date().toISOString(),
+        createdAt: '',
       })
       orderIndex++
     } else if (msg.role === 'assistant') {
@@ -122,7 +122,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
               isFinal: parsed.isFinal,
             }
           : {}),
-        createdAt: new Date().toISOString(),
+        createdAt: '',
       })
       orderIndex++
     } else if (msg.role === 'toolResult') {
@@ -332,7 +332,12 @@ export const GET = withAuth(
               runtimeSession.gwSessionId === historyResult.sessionId
 
             let sessionMessages: ChatMessage[]
-            if (cachedLive && shouldUseLiveMessagesFallback(msgs, cachedLive, sameGatewaySession)) {
+            if (cachedLive && sameGatewaySession) {
+              sessionMessages = mergeLiveMessagesAppendOnly(cachedLive, msgs)
+            } else if (
+              cachedLive &&
+              shouldUseLiveMessagesFallback(msgs, cachedLive, sameGatewaySession)
+            ) {
               sessionMessages = mergeLiveMessagesAppendOnly(cachedLive, msgs)
             } else {
               if (cachedLive) {

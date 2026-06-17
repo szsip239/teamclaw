@@ -170,6 +170,25 @@ describe('live snapshot append-only merge', () => {
     expect(shouldUseLiveMessagesFallback(cached, cached, true)).toBe(false)
   })
 
+  it('preserves live timestamps when gateway history is the same length', () => {
+    const cached = [
+      chatMessage('user', 'hi', { createdAt: '2026-06-17T15:19:16.995Z' }),
+      chatMessage('assistant', 'hello', { createdAt: '2026-06-17T15:19:16.995Z' }),
+    ]
+    const gateway = [
+      chatMessage('user', 'hi', { id: 'gateway-user', createdAt: '' }),
+      chatMessage('assistant', 'hello', { id: 'gateway-assistant', createdAt: '' }),
+    ]
+
+    const merged = mergeLiveMessagesAppendOnly(cached, gateway)
+
+    expect(merged).toHaveLength(2)
+    expect(merged.map((message) => message.createdAt)).toEqual([
+      '2026-06-17T15:19:16.995Z',
+      '2026-06-17T15:19:16.995Z',
+    ])
+  })
+
   it('falls back to liveMessages when only local artifact links are missing from gateway history', () => {
     const gateway = [
       chatMessage('user', 'create a report'),
