@@ -5,10 +5,16 @@ import { Prisma } from '@/generated/prisma'
 import { withAuth, withPermission } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { archiveSession } from '@/lib/chat/snapshot-helpers'
+import {
+  buildChatRuntimeSessionKey,
+  instanceSupportsPiRuntime,
+  toDbChatRuntime,
+} from '@/lib/chat/runtime'
 
 const bodySchema = z.object({
   instanceId: z.string().min(1),
   agentId: z.string().min(1),
+  runtime: z.enum(['openclaw', 'pi']).default('openclaw'),
 })
 
 // POST /api/v1/chat/conversations/new — archive current session and create a new one
@@ -29,7 +35,8 @@ export const POST = withAuth(
       )
     }
 
-    const { instanceId, agentId } = parsed.data
+    const { instanceId, agentId, runtime } = parsed.data
+    const dbRuntime = toDbChatRuntime(runtime)
 
     // Permission check
     if (user.role !== 'SYSTEM_ADMIN') {
@@ -53,9 +60,26 @@ export const POST = withAuth(
       }
     }
 
+    const instance = await prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { dockerConfig: true },
+    })
+    if (!instance) {
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
+    }
+    if (runtime === 'pi' && !instanceSupportsPiRuntime(instance.dockerConfig)) {
+      return NextResponse.json(
+        { error: 'Pi runtime is not enabled for this instance' },
+        { status: 400 },
+      )
+    }
+    if (runtime === 'pi') {
+      return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
+    }
+
     // Find current active session
     const activeSession = await prisma.chatSession.findFirst({
-      where: { userId: user.id, instanceId, agentId, isActive: true },
+      where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
     })
 
     if (activeSession) {
@@ -75,12 +99,13 @@ export const POST = withAuth(
     }
 
     // Create new active session
-    const sessionKey = `agent:${agentId}:tc:${user.id}`
+    const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
     const newSession = await prisma.chatSession.create({
       data: {
         userId: user.id,
         instanceId,
         agentId,
+        runtime: dbRuntime,
         sessionId: sessionKey,
         isActive: true,
       },
@@ -91,6 +116,7 @@ export const POST = withAuth(
       session: {
         id: newSession.id,
         sessionId: newSession.sessionId,
+        runtime,
         instanceId: newSession.instanceId,
         instanceName: newSession.instance.name,
         agentId: newSession.agentId,

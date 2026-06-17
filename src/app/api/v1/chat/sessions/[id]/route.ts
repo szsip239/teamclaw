@@ -80,6 +80,7 @@ export const DELETE = withAuth(
           userId: session.userId,
           instanceId: session.instanceId,
           agentId: session.agentId,
+          runtime: session.runtime,
           sessionId: session.sessionId,
           isActive: true,
         },

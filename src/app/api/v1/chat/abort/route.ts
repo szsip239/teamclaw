@@ -4,11 +4,13 @@ import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { activeRuns } from '@/lib/chat/active-runs'
 import { saveLiveSnapshot } from '@/lib/chat/snapshot-helpers'
+import { buildChatRuntimeSessionKey, toDbChatRuntime } from '@/lib/chat/runtime'
 import { z } from 'zod'
 
 const abortSchema = z.object({
   instanceId: z.string().min(1),
   agentId: z.string().min(1),
+  runtime: z.enum(['openclaw', 'pi']).default('openclaw'),
 })
 
 // POST /api/v1/chat/abort — Abort the active agent run for this user+agent
@@ -20,8 +22,12 @@ export const POST = withAuth(
         user: NonNullable<typeof ctx.user>
         body: z.infer<typeof abortSchema>
       }
-      const { instanceId, agentId } = body
-      const sessionKey = `agent:${agentId}:tc:${user.id}`
+      const { instanceId, agentId, runtime } = body
+      const dbRuntime = toDbChatRuntime(runtime)
+      const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
+      if (runtime === 'pi') {
+        return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
+      }
 
       // Ensure gateway is connected
       await ensureRegistryInitialized()
@@ -41,7 +47,7 @@ export const POST = withAuth(
 
       // Clean up activeRuns for the session
       const session = await prisma.chatSession.findFirst({
-        where: { userId: user.id, instanceId, agentId, isActive: true },
+        where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
         select: { id: true },
       })
       if (session) {

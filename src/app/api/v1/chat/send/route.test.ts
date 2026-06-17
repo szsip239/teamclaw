@@ -21,3 +21,13 @@ describe('chat send post-run cleanup', () => {
     expect(source).toContain('if (finishStarted) return')
   })
 })
+
+describe('chat send runtime guardrails', () => {
+  it('keeps runtime-specific sessions separated and blocks pi before implementation', () => {
+    expect(source).toContain('buildChatRuntimeSessionKey(runtime, agentId, user.id)')
+    expect(source).toContain('runtime: dbRuntime, isActive: true')
+    expect(source).toContain("targetSession.runtime === dbRuntime")
+    expect(source).toContain("runtime === 'pi'")
+    expect(source).toContain('Pi runtime is not implemented yet')
+  })
+})

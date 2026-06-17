@@ -3,11 +3,13 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, withValidation } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
+import { buildChatRuntimeSessionKey, toDbChatRuntime } from '@/lib/chat/runtime'
 import { z } from 'zod'
 
 const queueSchema = z.object({
   instanceId: z.string().min(1),
   agentId: z.string().min(1),
+  runtime: z.enum(['openclaw', 'pi']).default('openclaw'),
   message: z.string().min(1),
   attachments: z
     .array(
@@ -31,8 +33,12 @@ export const POST = withAuth(
         user: NonNullable<typeof ctx.user>
         body: z.infer<typeof queueSchema>
       }
-      const { instanceId, agentId, message, attachments } = body
-      const sessionKey = `agent:${agentId}:tc:${user.id}`
+      const { instanceId, agentId, runtime, message, attachments } = body
+      const dbRuntime = toDbChatRuntime(runtime)
+      const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
+      if (runtime === 'pi') {
+        return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
+      }
 
       await ensureRegistryInitialized()
       const client = registry.getClient(instanceId)
@@ -43,7 +49,7 @@ export const POST = withAuth(
 
       // Update session lastMessageAt + messageCount
       await prisma.chatSession.updateMany({
-        where: { userId: user.id, instanceId, agentId, isActive: true },
+        where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
         data: { lastMessageAt: new Date(), messageCount: { increment: 1 } },
       })
 

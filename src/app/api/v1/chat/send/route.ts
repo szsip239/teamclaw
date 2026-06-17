@@ -35,6 +35,12 @@ import {
   extractContentBlocks,
 } from '@/lib/chat/snapshot-helpers'
 import {
+  buildChatRuntimeSessionKey,
+  instanceSupportsPiRuntime,
+  toDbChatRuntime,
+  type ChatRuntime,
+} from '@/lib/chat/runtime'
+import {
   MIME_BY_EXT,
   extractMediaPaths,
   readImageAsDataUrl,
@@ -154,11 +160,13 @@ async function switchActiveSession(
   userId: string,
   instanceId: string,
   agentId: string,
+  runtime: ChatRuntime,
   targetSessionId: string,
   sessionKey: string,
 ) {
+  const dbRuntime = toDbChatRuntime(runtime)
   const activeSession = await prisma.chatSession.findFirst({
-    where: { userId, instanceId, agentId, isActive: true },
+    where: { userId, instanceId, agentId, runtime: dbRuntime, isActive: true },
   })
 
   if (activeSession && activeSession.id !== targetSessionId) {
@@ -234,7 +242,9 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { instanceId, agentId, message, sessionId: targetSessionId, attachments } = parsed.data
+  const { instanceId, agentId, runtime, message, sessionId: targetSessionId, attachments } =
+    parsed.data
+  const dbRuntime = toDbChatRuntime(runtime)
 
   // --- Permission check ---
   if (userRole !== 'SYSTEM_ADMIN') {
@@ -284,14 +294,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // --- Ensure registry ---
-  await ensureRegistryInitialized()
-
-  const adapter = registry.getAdapter(instanceId)
-  if (!adapter) {
-    return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
-  }
-
   // Fresh GatewayClient per chat.send: persistent sockets receive compressed
   // event streams (single full-text delta, no agent:item tool events) from the
   // v4 gateway. A one-shot client gets full incremental streaming.
@@ -302,6 +304,24 @@ export async function POST(req: NextRequest) {
   if (!instance) {
     return NextResponse.json({ error: 'Instance not found' }, { status: 502 })
   }
+  if (runtime === 'pi') {
+    if (!instanceSupportsPiRuntime(instance.dockerConfig)) {
+      return NextResponse.json(
+        { error: 'Pi runtime is not enabled for this instance' },
+        { status: 400 },
+      )
+    }
+    return NextResponse.json({ error: 'Pi runtime is not implemented yet' }, { status: 501 })
+  }
+
+  // --- Ensure registry ---
+  await ensureRegistryInitialized()
+
+  const adapter = registry.getAdapter(instanceId)
+  if (!adapter) {
+    return NextResponse.json({ error: 'Instance not connected' }, { status: 502 })
+  }
+
   const client = new GatewayClient(
     resolveGatewayUrl({ gatewayUrl: instance.gatewayUrl, dockerConfig: instance.dockerConfig }),
     decrypt(instance.gatewayToken),
@@ -309,7 +329,7 @@ export async function POST(req: NextRequest) {
   await client.connect()
 
   // --- Build session key ---
-  const sessionKey = `agent:${agentId}:tc:${user.id}`
+  const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
   const idempotencyKey = randomUUID()
 
   // --- Handle session switching if targeting a specific (possibly inactive) session ---
@@ -322,16 +342,17 @@ export async function POST(req: NextRequest) {
       targetSession.userId === user.id &&
       targetSession.instanceId === instanceId &&
       targetSession.agentId === agentId &&
+      targetSession.runtime === dbRuntime &&
       !targetSession.isActive
     ) {
-      await switchActiveSession(user.id, instanceId, agentId, targetSessionId, sessionKey)
+      await switchActiveSession(user.id, instanceId, agentId, runtime, targetSessionId, sessionKey)
     }
   }
 
   // --- Find or create ChatSession (atomic to prevent race conditions) ---
   const session = await prisma.$transaction(async (tx) => {
     const existing = await tx.chatSession.findFirst({
-      where: { userId: user.id, instanceId, agentId, isActive: true },
+      where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
     })
     if (existing) {
       await tx.chatSession.update({
@@ -353,6 +374,7 @@ export async function POST(req: NextRequest) {
         instanceId,
         agentId,
         sessionId: sessionKey,
+        runtime: dbRuntime,
         lastMessageAt: new Date(),
         messageCount: 1,
         isActive: true,
@@ -831,7 +853,7 @@ export async function POST(req: NextRequest) {
       const activeSession =
         existingSession ??
         (await prisma.chatSession.findFirst({
-          where: { userId: user.id, instanceId, agentId, isActive: true },
+          where: { userId: user.id, instanceId, agentId, runtime: dbRuntime, isActive: true },
         }))
       if (activeSession) {
         const instance = await prisma.instance.findUnique({
