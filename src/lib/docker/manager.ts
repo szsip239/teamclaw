@@ -63,6 +63,32 @@ export type ContainerDirEntry = {
   size: number
 }
 
+type DockerPortBinding = { HostPort: string; HostIp?: string }
+
+export function buildDockerPortBindings(bindings: ContainerCreateOptions['portBindings']): {
+  portBindings: Record<string, DockerPortBinding[]>
+  exposedPorts: Record<string, Record<string, never>>
+} {
+  const portBindings: Record<string, DockerPortBinding[]> = {}
+  const exposedPorts: Record<string, Record<string, never>> = {}
+  if (!bindings) return { portBindings, exposedPorts }
+
+  for (const [containerPort, binding] of Object.entries(bindings)) {
+    const portKey = containerPort.includes('/') ? containerPort : `${containerPort}/tcp`
+    const hostBinding =
+      typeof binding === 'string'
+        ? { HostPort: binding }
+        : {
+            HostPort: binding.hostPort,
+            ...(binding.hostIp ? { HostIp: binding.hostIp } : {}),
+          }
+    portBindings[portKey] = [hostBinding]
+    exposedPorts[portKey] = {}
+  }
+
+  return { portBindings, exposedPorts }
+}
+
 export function parseContainerDirListing(output: string): ContainerDirEntry[] {
   const entries: ContainerDirEntry[] = []
 
@@ -143,15 +169,7 @@ export class DockerManager {
   async createContainer(options: ContainerCreateOptions): Promise<string> {
     await this.ensureNetwork(options.networkName || NETWORK_NAME)
 
-    const portBindings: Record<string, { HostPort: string }[]> = {}
-    const exposedPorts: Record<string, Record<string, never>> = {}
-    if (options.portBindings) {
-      for (const [containerPort, hostPort] of Object.entries(options.portBindings)) {
-        const portKey = containerPort.includes('/') ? containerPort : `${containerPort}/tcp`
-        portBindings[portKey] = [{ HostPort: hostPort }]
-        exposedPorts[portKey] = {}
-      }
-    }
+    const { portBindings, exposedPorts } = buildDockerPortBindings(options.portBindings)
 
     const binds: string[] = []
     if (options.volumes) {

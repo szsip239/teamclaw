@@ -389,7 +389,10 @@ async function createDockerInstance(
       ],
       portBindings: {
         [`${GATEWAY_PORT}`]: String(hostPort),
-        [`${PI_WRAPPER_CONTAINER_PORT}`]: String(hostPiPort),
+        [`${PI_WRAPPER_CONTAINER_PORT}`]: {
+          hostIp: '127.0.0.1',
+          hostPort: String(hostPiPort),
+        },
       },
       command: buildOpenClawGatewayCommandWithPiWrapper(),
       env: {

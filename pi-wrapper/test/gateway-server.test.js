@@ -9,8 +9,26 @@ import { ensureModelsConfig } from '../src/config-store.js'
 import { PiRuntime } from '../src/pi-runtime.js'
 import { SessionStore } from '../src/session-store.js'
 
+const TEST_AUTH_TOKEN = 'test-token'
+
+function createGatewayServer(options = {}) {
+  return createPiGatewayServer({
+    authToken: TEST_AUTH_TOKEN,
+    ...options,
+  })
+}
+
+function connectParams(params = {}) {
+  return {
+    minProtocol: 4,
+    maxProtocol: 4,
+    auth: { token: TEST_AUTH_TOKEN },
+    ...params,
+  }
+}
+
 test('handshakes with OpenClaw gateway v4 frames and ticks', async () => {
-  const server = createPiGatewayServer({
+  const server = createGatewayServer({
     runtime: createFakeRuntime(),
     tickIntervalMs: 20,
     sweepIntervalMs: 1_000,
@@ -19,12 +37,10 @@ test('handshakes with OpenClaw gateway v4 frames and ticks', async () => {
   const client = await connectClient(address.port)
 
   try {
-    const hello = await client.request('connect', {
-      minProtocol: 4,
-      maxProtocol: 4,
+    const hello = await client.request('connect', connectParams({
       role: 'operator',
       scopes: ['operator.read'],
-    })
+    }))
     assert.equal(hello.type, 'hello-ok')
     assert.equal(hello.protocol, 4)
     assert.equal(hello.server.version, 'pi-1.0')
@@ -41,12 +57,12 @@ test('handshakes with OpenClaw gateway v4 frames and ticks', async () => {
 
 test('streams fake pi chat events as TeamClaw gateway chat and agent events', async () => {
   const runtime = createFakeRuntime()
-  const server = createPiGatewayServer({ runtime, tickIntervalMs: 10 })
+  const server = createGatewayServer({ runtime, tickIntervalMs: 10 })
   const address = await server.listen(0, '127.0.0.1')
   const client = await connectClient(address.port)
 
   try {
-    await client.request('connect', { minProtocol: 4, maxProtocol: 4 })
+    await client.request('connect', connectParams())
     const response = await client.request('chat.send', {
       sessionKey: 'agent:pi:telecom:tc:user-1',
       idempotencyKey: 'run-1',
@@ -138,12 +154,12 @@ test('streams fake pi chat events as TeamClaw gateway chat and agent events', as
 })
 
 test('rejects non-pi session keys fail-closed', async () => {
-  const server = createPiGatewayServer({ runtime: createFakeRuntime() })
+  const server = createGatewayServer({ runtime: createFakeRuntime() })
   const address = await server.listen(0, '127.0.0.1')
   const client = await connectClient(address.port)
 
   try {
-    await client.request('connect', { minProtocol: 4, maxProtocol: 4 })
+    await client.request('connect', connectParams())
     await assert.rejects(
       () => client.request('chat.send', {
         sessionKey: 'agent:telecom:tc:user-1',
@@ -151,6 +167,46 @@ test('rejects non-pi session keys fail-closed', async () => {
       }),
       /sessionKey must match/,
     )
+  } finally {
+    client.close()
+    await server.close()
+  }
+})
+
+test('rejects unauthenticated pi-wrapper RPC requests', async () => {
+  const server = createGatewayServer({ runtime: createFakeRuntime() })
+  const address = await server.listen(0, '127.0.0.1')
+  const client = await connectClient(address.port)
+
+  try {
+    await assert.rejects(
+      () => client.request('chat.history', {
+        sessionKey: 'agent:pi:telecom:tc:user-1',
+      }),
+      /Connect first/,
+    )
+  } finally {
+    client.close()
+    await server.close()
+  }
+})
+
+test('rejects missing or invalid pi-wrapper connect tokens', async () => {
+  const server = createGatewayServer({ runtime: createFakeRuntime() })
+  const address = await server.listen(0, '127.0.0.1')
+  const client = await connectClient(address.port)
+
+  try {
+    await assert.rejects(
+      () => client.request('connect', { minProtocol: 4, maxProtocol: 4 }),
+      /Invalid auth token/,
+    )
+    await assert.rejects(
+      () => client.request('connect', connectParams({ auth: { token: 'wrong-token' } })),
+      /Invalid auth token/,
+    )
+    const hello = await client.request('connect', connectParams())
+    assert.equal(hello.type, 'hello-ok')
   } finally {
     client.close()
     await server.close()
