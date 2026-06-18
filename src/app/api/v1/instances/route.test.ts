@@ -11,5 +11,6 @@ describe('instance docker pi-wrapper wiring', () => {
     expect(source).toContain('derivePiHostPort')
     expect(source).toContain('hostPiPort')
     expect(source).toContain('PI_WRAPPER_CONTAINER_PORT')
+    expect(source).toContain("hostIp: '127.0.0.1'")
   })
 })

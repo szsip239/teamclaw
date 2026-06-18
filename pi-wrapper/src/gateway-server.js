@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 import { createPiEventBridge } from './event-mapper.js'
 import { PiRuntime } from './pi-runtime.js'
@@ -20,6 +20,8 @@ import { SessionStore } from './session-store.js'
 
 export function createPiGatewayServer(options = {}) {
   const runtime = options.runtime ?? new PiRuntime({ agentDir: options.agentDir })
+  const authToken =
+    options.authToken ?? process.env.PI_WRAPPER_AUTH_TOKEN ?? process.env.OPENCLAW_GATEWAY_TOKEN
   const tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS
   const sessionStore =
     options.sessionStore ??
@@ -35,6 +37,7 @@ export function createPiGatewayServer(options = {}) {
   wss.on('connection', (ws) => {
     const connId = randomUUID()
     let connected = false
+    let authenticated = false
     const tickTimer = setInterval(() => {
       if (connected) sendEvent(ws, 'tick', { ts: Date.now() })
     }, tickIntervalMs)
@@ -46,7 +49,12 @@ export function createPiGatewayServer(options = {}) {
         connId,
         runtime,
         sessionStore,
+        authToken,
         tickIntervalMs,
+        isAuthenticated: () => authenticated,
+        markAuthenticated: () => {
+          authenticated = true
+        },
         markConnected: () => {
           connected = true
         },
@@ -112,8 +120,14 @@ async function handleMessage(ws, data, ctx) {
 }
 
 async function dispatch(method, params, ws, ctx) {
+  if (method !== 'connect' && !ctx.isAuthenticated()) {
+    throw new RpcError('UNAUTHORIZED', 'Connect first')
+  }
+
   switch (method) {
     case 'connect':
+      validateConnectAuth(params, ctx.authToken)
+      ctx.markAuthenticated()
       ctx.markConnected()
       return buildHelloPayload(params, {
         connId: ctx.connId,
@@ -138,6 +152,23 @@ async function dispatch(method, params, ws, ctx) {
     default:
       throw new RpcError('NOT_FOUND', `Unknown method: ${method}`)
   }
+}
+
+function validateConnectAuth(params, authToken) {
+  if (typeof authToken !== 'string' || !authToken) {
+    throw new RpcError('UNAUTHORIZED', 'Pi wrapper auth token is not configured')
+  }
+  const provided = params?.auth?.token
+  if (typeof provided !== 'string' || !safeTokenEquals(provided, authToken)) {
+    throw new RpcError('UNAUTHORIZED', 'Invalid auth token')
+  }
+}
+
+function safeTokenEquals(a, b) {
+  const aBuf = Buffer.from(a)
+  const bBuf = Buffer.from(b)
+  if (aBuf.length !== bBuf.length) return false
+  return timingSafeEqual(aBuf, bBuf)
 }
 
 async function handleChatSend(params, ws, ctx) {

@@ -8,6 +8,8 @@ OpenClaw gateway protocol subset used by TeamClaw chat.
 - `PI_PORT`: listening port, default `18790`
 - `PI_HOST`: listening host, default `0.0.0.0`
 - `PI_AGENT_DIR`: pi global config directory, default `/home/node/.openclaw`
+- `PI_WRAPPER_AUTH_TOKEN`: optional override for the gateway token used by
+  `connect.auth.token`; defaults to `OPENCLAW_GATEWAY_TOKEN`
 
 Start locally:
 
@@ -51,6 +53,10 @@ Pushed events:
 `chat.send` accepts only pi session keys in the form
 `agent:pi:<agentId>:tc:<userId>`. This keeps pi sessions isolated from the
 OpenClaw runtime session keyspace.
+
+All RPC methods except `connect` require a successful authenticated handshake.
+The wrapper validates the same `auth.token` field used by the OpenClaw gateway
+client.
 
 ## Integration Status
 
