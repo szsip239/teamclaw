@@ -7,6 +7,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { agentSupportsChatRuntime } from '@/lib/chat/runtime-options'
+import { cn } from '@/lib/utils'
+import type { ChatRuntime } from '@/lib/chat/runtime'
 
 const IMAGE_MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const FILE_MAX_SIZE = 5 * 1024 * 1024 // 5MB
@@ -19,6 +22,60 @@ interface PendingFile {
   size: number
   content: string // pure base64 (for API)
   dataUrl: string // data URL (for preview)
+}
+
+function ChatRuntimeSwitch() {
+  const t = useT()
+  const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
+  const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
+  const piAvailable = agentSupportsChatRuntime(selectedAgent, 'pi')
+
+  const options: { runtime: ChatRuntime; label: string; disabled?: boolean; title?: string }[] = [
+    {
+      runtime: 'openclaw',
+      label: t('chat.runtimeNormal'),
+      disabled: !selectedAgent,
+    },
+    {
+      runtime: 'pi',
+      label: t('chat.runtimeFast'),
+      disabled: !selectedAgent || !piAvailable,
+      title: piAvailable ? undefined : t('chat.piUnavailable'),
+    },
+  ]
+
+  return (
+    <div
+      className="bg-muted/60 flex h-8 w-[108px] shrink-0 items-center rounded-full border border-border/70 p-0.5 sm:w-[118px]"
+      role="group"
+      aria-label={t('chat.runtimeLabel')}
+      title={t('chat.runtimeLabel')}
+    >
+      {options.map((option) => {
+        const active = selectedRuntime === option.runtime
+        return (
+          <button
+            key={option.runtime}
+            type="button"
+            aria-pressed={active}
+            disabled={option.disabled}
+            title={option.title ?? option.label}
+            onClick={() => setSelectedRuntime(option.runtime)}
+            className={cn(
+              'flex h-7 min-w-0 flex-1 items-center justify-center rounded-full px-2 text-[11px] font-medium transition-colors sm:text-xs',
+              active && option.runtime === 'openclaw' && 'bg-slate-600 text-white shadow-sm',
+              active && option.runtime === 'pi' && 'bg-teal-600 text-white shadow-sm',
+              !active && 'text-muted-foreground hover:text-foreground',
+              option.disabled && 'cursor-not-allowed opacity-45 hover:text-muted-foreground',
+            )}
+          >
+            <span className="truncate">{option.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export function ChatInput() {
@@ -245,11 +302,7 @@ export function ChatInput() {
             </Button>
           )}
 
-          {selectedRuntime === 'pi' && (
-            <span className="text-muted-foreground bg-muted/60 flex h-6 shrink-0 items-center rounded px-1.5 text-[11px] font-medium">
-              [{t('chat.runtimePi')}]
-            </span>
-          )}
+          <ChatRuntimeSwitch />
 
           <Textarea
             ref={textareaRef}
@@ -257,7 +310,7 @@ export function ChatInput() {
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={t('chat.inputPlaceholder')}
-            className="min-h-8 max-h-[200px] resize-none border-0 bg-transparent px-1 py-1.5 text-sm leading-5 shadow-none focus-visible:ring-0"
+            className="min-h-8 max-h-[200px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm leading-5 shadow-none focus-visible:ring-0"
             rows={1}
             enterKeyHint="send"
           />

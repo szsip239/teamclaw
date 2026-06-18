@@ -1,16 +1,9 @@
-"use client"
+'use client'
 
-import { useState, useCallback } from "react"
-import { PanelLeftClose, PanelLeft, RotateCcw, Bot, Loader2, Download, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { useState, useCallback } from 'react'
+import { PanelLeftClose, PanelLeft, RotateCcw, Bot, Loader2, Download, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
@@ -18,22 +11,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { useChatStore } from "@/stores/chat-store"
-import { useClearContext } from "@/hooks/use-chat"
-import { agentSupportsChatRuntime } from "@/lib/chat/runtime-options"
-import { useT } from "@/stores/language-store"
-import { useIsMobile } from "@/hooks/use-mobile"
-import { toast } from "sonner"
-import { buildExportHtml, MAX_EXPORT_MESSAGES } from "@/lib/chat/export-utils"
-import type { ChatRuntime } from "@/lib/chat/runtime"
+} from '@/components/ui/dialog'
+import { useChatStore } from '@/stores/chat-store'
+import { useClearContext } from '@/hooks/use-chat'
+import { useT } from '@/stores/language-store'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { toast } from 'sonner'
+import { buildExportHtml, MAX_EXPORT_MESSAGES } from '@/lib/chat/export-utils'
 
 export function ChatHeader() {
   const t = useT()
   const isMobile = useIsMobile()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
-  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
-  const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sidebarOpen = useChatStore((s) => s.sidebarOpen)
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen)
@@ -46,7 +35,6 @@ export function ChatHeader() {
   const messages = useChatStore((s) => s.messages)
   const selectedExportIds = useChatStore((s) => s.selectedExportIds)
   const overLimit = selectedExportIds.length > MAX_EXPORT_MESSAGES
-  const piAvailable = agentSupportsChatRuntime(selectedAgent, 'pi')
 
   function handleToggleSidebar() {
     if (isMobile) {
@@ -73,9 +61,7 @@ export function ChatHeader() {
     if (selectedExportIds.length === 0) return
 
     const idSet = new Set(selectedExportIds)
-    const selected = messages
-      .filter((m) => idSet.has(m.id))
-      .slice(-MAX_EXPORT_MESSAGES)
+    const selected = messages.filter((m) => idSet.has(m.id)).slice(-MAX_EXPORT_MESSAGES)
 
     if (selected.length === 0) return
 
@@ -119,12 +105,7 @@ export function ChatHeader() {
   return (
     <>
       <div className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          onClick={handleToggleSidebar}
-        >
+        <Button variant="ghost" size="icon" className="size-8" onClick={handleToggleSidebar}>
           {(isMobile ? mobileSidebarOpen : sidebarOpen) ? (
             <PanelLeftClose className="size-4" />
           ) : (
@@ -135,27 +116,9 @@ export function ChatHeader() {
         {selectedAgent ? (
           <>
             <Bot className="text-muted-foreground size-4" />
-            <span className={`text-sm font-medium ${isMobile ? "max-w-[120px] truncate" : ""}`}>
+            <span className={`text-sm font-medium ${isMobile ? 'max-w-[120px] truncate' : ''}`}>
               {selectedAgent.agentName}
             </span>
-            <Select
-              value={selectedRuntime}
-              onValueChange={(value) => setSelectedRuntime(value as ChatRuntime)}
-            >
-              <SelectTrigger
-                size="sm"
-                className={`${isMobile ? "w-[84px]" : "w-[116px]"} h-7 px-2 text-xs`}
-                title={t('chat.runtimeLabel')}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="start">
-                <SelectItem value="openclaw">{t('chat.runtimeOpenclaw')}</SelectItem>
-                <SelectItem value="pi" disabled={!piAvailable}>
-                  {piAvailable ? t('chat.runtimePi') : t('chat.piUnavailable')}
-                </SelectItem>
-              </SelectContent>
-            </Select>
             {!isMobile && (
               <Badge variant="outline" className="text-xs">
                 {selectedAgent.instanceName}
@@ -166,7 +129,9 @@ export function ChatHeader() {
                 <>
                   {exportMode && (
                     <>
-                      <span className="text-xs text-muted-foreground tabular-nums">{String(selectedExportIds.length)}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {String(selectedExportIds.length)}
+                      </span>
                       <Button
                         variant="default"
                         size="icon"
@@ -185,11 +150,7 @@ export function ChatHeader() {
                     disabled={!activeSessionId}
                     onClick={() => setExportMode(!exportMode)}
                   >
-                    {exportMode ? (
-                      <X className="size-3.5" />
-                    ) : (
-                      <Download className="size-3.5" />
-                    )}
+                    {exportMode ? <X className="size-3.5" /> : <Download className="size-3.5" />}
                   </Button>
                   <Button
                     variant="ghost"
@@ -209,7 +170,9 @@ export function ChatHeader() {
                 <>
                   {exportMode && (
                     <>
-                      <span className="text-sm text-muted-foreground tabular-nums">{t('chat.exportSelected', { n: String(selectedExportIds.length) })}</span>
+                      <span className="text-sm text-muted-foreground tabular-nums">
+                        {t('chat.exportSelected', { n: String(selectedExportIds.length) })}
+                      </span>
                       <Button
                         variant="default"
                         size="sm"
@@ -260,21 +223,14 @@ export function ChatHeader() {
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle>{t('chat.clearContextTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('chat.clearContextDesc')}
-            </DialogDescription>
+            <DialogDescription>{t('chat.clearContextDesc')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
               {t('cancel')}
             </Button>
-            <Button
-              onClick={handleClearContext}
-              disabled={clearContext.isPending}
-            >
-              {clearContext.isPending && (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              )}
+            <Button onClick={handleClearContext} disabled={clearContext.isPending}>
+              {clearContext.isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
               {t('chat.confirmClear')}
             </Button>
           </DialogFooter>

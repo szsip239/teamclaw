@@ -138,6 +138,28 @@ export function splitThinkingFallback(thinking: string): { thinking: string; tex
   return { thinking, text: '' }
 }
 
+function parseGatewayMessageTime(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+  if (typeof value !== 'string' || !value.trim()) return undefined
+
+  const raw = value.trim()
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric) && raw.length >= 10) {
+    const date = new Date(numeric)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+export function gatewayMessageCreatedAt(message: ChatHistoryMessage): string | undefined {
+  return parseGatewayMessageTime(message.timestamp) ?? parseGatewayMessageTime(message.createdAt)
+}
+
 // ─── Snapshot building ───────────────────────────────────────────────
 
 /**
@@ -158,6 +180,7 @@ export function buildSnapshotData(
       const text = stripRagContextForDisplay(stripUserMetadata(extractText(msg.content)))
       const cb = extractContentBlocks(msg.content)
       if (text) lastUserMessage = text
+      const createdAt = gatewayMessageCreatedAt(msg)
       snapshotData.push({
         chatSessionId,
         batchId,
@@ -165,8 +188,10 @@ export function buildSnapshotData(
         role: 'user',
         content: text,
         contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
+        ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
       })
     } else if (msg.role === 'assistant') {
+      const createdAt = gatewayMessageCreatedAt(msg)
       const parsed = parseSessionMessage({
         messageId: String(orderIndex),
         messageSeq: orderIndex,
@@ -201,6 +226,7 @@ export function buildSnapshotData(
         toolCalls: parsed.toolCalls
           ? (parsed.toolCalls as unknown as Prisma.InputJsonValue)
           : undefined,
+        ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
       })
     } else if (msg.role === 'toolResult') {
       const lastSnapshot = snapshotData[snapshotData.length - 1]
@@ -403,8 +429,12 @@ export async function archiveSession(
  */
 export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
+  const fallbackBaseMs = Date.now()
 
   for (const msg of rawMessages) {
+    const messageSeq = result.length
+    const createdAt =
+      gatewayMessageCreatedAt(msg) ?? new Date(fallbackBaseMs + messageSeq).toISOString()
     if (msg.role === 'user') {
       const contentBlocks = extractContentBlocks(msg.content)
       result.push({
@@ -412,12 +442,13 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
-        createdAt: new Date().toISOString(),
+        messageSeq,
+        createdAt,
       })
     } else if (msg.role === 'assistant') {
       const parsed = parseSessionMessage({
         messageId: randomUUID(),
-        messageSeq: result.length,
+        messageSeq,
         message: msg,
       })
       let text = stripFinalTags(extractText(msg.content) || parsed.text)
@@ -445,8 +476,8 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
               stopReason: parsed.stopReason,
               isFinal: parsed.isFinal,
             }
-          : {}),
-        createdAt: new Date().toISOString(),
+          : { messageSeq }),
+        createdAt,
       })
     } else if (msg.role === 'toolResult') {
       const last = result[result.length - 1]
@@ -541,6 +572,12 @@ function messagesMatch(a: ChatMessage, b: ChatMessage): boolean {
   return (
     isLocalArtifactAugmentedContent(a.content, b.content) ||
     isLocalArtifactAugmentedContent(b.content, a.content)
+  )
+}
+
+function validMessageCreatedAt(createdAt: string | undefined): boolean {
+  return (
+    typeof createdAt === 'string' && createdAt.length > 0 && !Number.isNaN(Date.parse(createdAt))
   )
 }
 
@@ -698,11 +735,15 @@ function mergeMessagePreservingOldData(
   const content = isLocalArtifactAugmentedContent(newMessage.content, oldMessage.content)
     ? newMessage.content
     : oldMessage.content || newMessage.content
+  const createdAt = validMessageCreatedAt(newMessage.createdAt)
+    ? newMessage.createdAt
+    : oldMessage.createdAt
 
   return {
     ...newMessage,
     id: oldMessage.id,
-    createdAt: oldMessage.createdAt,
+    createdAt,
+    messageSeq: newMessage.messageSeq ?? oldMessage.messageSeq,
     content,
     ...(oldMessage.thinking || newMessage.thinking
       ? { thinking: oldMessage.thinking || newMessage.thinking }

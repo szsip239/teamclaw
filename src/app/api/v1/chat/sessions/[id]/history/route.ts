@@ -12,6 +12,7 @@ import {
   mergeLiveMessagesAppendOnly,
   mergeToolInputs,
   shouldUseLiveMessagesFallback,
+  gatewayMessageCreatedAt,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
@@ -21,7 +22,10 @@ import { parseSessionMessage } from '@/lib/chat/session-message'
 import { sanitizeOutputArtifactLinks } from '@/lib/session-files/artifacts'
 import { buildChatRuntimeSessionKey, fromDbChatRuntime } from '@/lib/chat/runtime'
 import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
-import { withRuntimeMessageMetadata } from '@/lib/chat/history-runtime-messages'
+import {
+  sortChatMessagesForDisplay,
+  withRuntimeMessageMetadata,
+} from '@/lib/chat/history-runtime-messages'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
   ChatMessage,
@@ -85,14 +89,16 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
-        createdAt: '',
+        messageSeq: orderIndex,
+        createdAt: gatewayMessageCreatedAt(msg) ?? '',
       })
       orderIndex++
     } else if (msg.role === 'assistant') {
       const id = `current-${orderIndex}`
+      const messageSeq = orderIndex
       const parsed = parseSessionMessage({
         messageId: id,
-        messageSeq: orderIndex,
+        messageSeq,
         message: msg,
       })
       const rawText = extractText(msg.content) || parsed.text
@@ -121,8 +127,8 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
               stopReason: parsed.stopReason,
               isFinal: parsed.isFinal,
             }
-          : {}),
-        createdAt: '',
+          : { messageSeq }),
+        createdAt: gatewayMessageCreatedAt(msg) ?? '',
       })
       orderIndex++
     } else if (msg.role === 'toolResult') {
@@ -192,10 +198,6 @@ function replaceInlineImagesBySource(messages: ChatMessage[], fallbackSessionId:
   }
 }
 
-function messageTime(message: Pick<ChatMessage, 'createdAt'>): number {
-  return new Date(message.createdAt).getTime()
-}
-
 function dedupeContentBlocks(blocks: ChatContentBlock[]): ChatContentBlock[] {
   const seen = new Set<string>()
   const unique: ChatContentBlock[] = []
@@ -221,10 +223,7 @@ export const GET = withAuth(
     const session = await prisma.chatSession.findFirst({
       where: {
         userId: ctx.user.id,
-        OR: [
-          { id },
-          { conversationGroupId: id },
-        ],
+        OR: [{ id }, { conversationGroupId: id }],
       },
     })
 
@@ -238,10 +237,7 @@ export const GET = withAuth(
         userId: ctx.user.id,
         instanceId: session.instanceId,
         agentId: session.agentId,
-        OR: [
-          { id: conversationGroupId },
-          { conversationGroupId },
-        ],
+        OR: [{ id: conversationGroupId }, { conversationGroupId }],
       },
       orderBy: [{ createdAt: 'asc' }],
     })
@@ -418,7 +414,9 @@ export const GET = withAuth(
               ...withRuntimeMessageMetadata(cached, {
                 sourceSessionId: runtimeSession.id,
                 runtime: fromDbChatRuntime(runtimeSession.runtime),
-                baseTimeMs: new Date(runtimeSession.lastMessageAt ?? runtimeSession.updatedAt).getTime(),
+                baseTimeMs: new Date(
+                  runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
+                ).getTime(),
                 idPrefix: 'live:',
               }),
             )
@@ -426,7 +424,7 @@ export const GET = withAuth(
         }
       }
     }
-    currentMessages.sort((a, b) => messageTime(a) - messageTime(b))
+    currentMessages = sortChatMessagesForDisplay(currentMessages)
 
     // Deduplicate: if sessions.delete failed during clear-context,
     // the gateway still has old messages that were already snapshotted.
@@ -459,7 +457,9 @@ export const GET = withAuth(
       currentMessages,
       isActive: sessionIsActive,
       ...(connectionStatus !== 'ok' ? { connectionStatus } : {}),
-      ...(groupSessionIds.some((sessionId) => activeRuns.has(sessionId)) ? { isRunning: true } : {}),
+      ...(groupSessionIds.some((sessionId) => activeRuns.has(sessionId))
+        ? { isRunning: true }
+        : {}),
     }
 
     return NextResponse.json(response)

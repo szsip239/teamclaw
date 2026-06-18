@@ -367,6 +367,8 @@ const en: Record<TranslationKey, string> = {
   'chat.runtimeLabel': 'Runtime',
   'chat.runtimeOpenclaw': 'OpenClaw',
   'chat.runtimePi': 'pi',
+  'chat.runtimeNormal': 'Normal',
+  'chat.runtimeFast': 'Fast',
   'chat.piUnavailable': 'pi runtime unavailable',
   'chat.piConnectionLost': 'Pi agent connection lost',
   'chat.inputPlaceholder': 'Type a message... (Enter to send, Shift+Enter for new line)',
@@ -1001,7 +1003,8 @@ const en: Record<TranslationKey, string> = {
     'Pick a knowledge base you can access. We will maintain clause summaries and an update list for it.',
   'regulations.pickKb': 'Knowledge base',
   'regulations.pickKbPlaceholder': 'Choose a knowledge base…',
-  'regulations.noAvailableKb': 'No knowledge base available to track (all yours are already tracked).',
+  'regulations.noAvailableKb':
+    'No knowledge base available to track (all yours are already tracked).',
   'regulations.empty': 'No trackers yet — add your first one with the button above.',
   'regulations.docs': 'docs',
   'regulations.documentCount': 'Documents',

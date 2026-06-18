@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { withRuntimeMessageMetadata } from './history-runtime-messages'
+import { sortChatMessagesForDisplay, withRuntimeMessageMetadata } from './history-runtime-messages'
 import type { ChatMessage } from '@/types/chat'
 
 function message(id: string, createdAt?: string): ChatMessage {
@@ -53,5 +53,26 @@ describe('withRuntimeMessageMetadata', () => {
         createdAt: '2026-06-17T14:11:20.001Z',
       },
     ])
+  })
+})
+
+describe('sortChatMessagesForDisplay', () => {
+  it('orders merged runtime messages by actual message time instead of collection order', () => {
+    const result = sortChatMessagesForDisplay([
+      message('pi-report', '2026-06-18T18:13:00.000Z'),
+      message('openclaw-network', '2026-06-18T18:03:36.585Z'),
+    ])
+
+    expect(result.map((item) => item.id)).toEqual(['openclaw-network', 'pi-report'])
+  })
+
+  it('uses messageSeq as the tie-breaker when gateway timestamps are identical', () => {
+    const sameTime = '2026-06-18T18:17:49.947Z'
+    const result = sortChatMessagesForDisplay([
+      { ...message('assistant', sameTime), messageSeq: 2 },
+      { ...message('user', sameTime), messageSeq: 1 },
+    ])
+
+    expect(result.map((item) => item.id)).toEqual(['user', 'assistant'])
   })
 })
