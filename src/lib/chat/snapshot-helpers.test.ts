@@ -189,6 +189,27 @@ describe('live snapshot append-only merge', () => {
     ])
   })
 
+  it('refreshes stale cached timestamps from gateway messages when merging live history', () => {
+    const cached = [
+      chatMessage('user', '把网络限制解除', {
+        createdAt: '2026-06-18T18:17:49.947Z',
+      }),
+    ]
+    const gateway = [
+      chatMessage('user', '把网络限制解除', {
+        createdAt: '2026-06-18T18:03:36.585Z',
+        messageSeq: 22,
+      }),
+    ]
+
+    const merged = mergeLiveMessagesAppendOnly(cached, gateway)
+
+    expect(merged[0]).toMatchObject({
+      createdAt: '2026-06-18T18:03:36.585Z',
+      messageSeq: 22,
+    })
+  })
+
   it('falls back to liveMessages when only local artifact links are missing from gateway history', () => {
     const gateway = [
       chatMessage('user', 'create a report'),
@@ -463,6 +484,26 @@ describe('mergeToolCalls', () => {
 })
 
 describe('transformToLiveMessages', () => {
+  it('preserves gateway message timestamps for cross-runtime ordering', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'user',
+        content: '把网络限制解除',
+        timestamp: 1781805816585,
+      },
+      {
+        role: 'assistant',
+        content: '已处理',
+        timestamp: '2026-06-18T18:03:40.000Z',
+      },
+    ])
+
+    expect(messages.map((message) => message.createdAt)).toEqual([
+      '2026-06-18T18:03:36.585Z',
+      '2026-06-18T18:03:40.000Z',
+    ])
+  })
+
   it('preserves v4 toolUse assistant text as staged display text', () => {
     const messages = transformToLiveMessages([
       {

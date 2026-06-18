@@ -124,7 +124,7 @@ export interface AgentConfigEntry {
   subagents?: AgentSubagentsConfig
   session?: AgentSessionConfig
   bindings?: Array<Record<string, string>>
-  [key: string]: unknown  // allow extra fields from openclaw.json
+  [key: string]: unknown // allow extra fields from openclaw.json
 }
 
 /** config.get response */
@@ -185,22 +185,26 @@ export interface ChatOptions {
 
 export interface ChatHistoryMessage {
   role: 'user' | 'assistant' | 'toolResult' | 'command'
-  content: string | Array<{
-    type: string
-    text?: string
-    thinking?: string
-    id?: string
-    name?: string
-    arguments?: unknown
-    // Image block fields (OpenClaw returns images in content blocks)
-    source?: { type: string; media_type?: string; data?: string }
-    url?: string
-  }>
+  content:
+    | string
+    | Array<{
+        type: string
+        text?: string
+        thinking?: string
+        id?: string
+        name?: string
+        arguments?: unknown
+        // Image block fields (OpenClaw returns images in content blocks)
+        source?: { type: string; media_type?: string; data?: string }
+        url?: string
+      }>
   toolCallId?: string
   toolName?: string
   isError?: boolean
   stopReason?: string
   errorMessage?: string
+  timestamp?: number | string
+  createdAt?: string
 }
 
 export interface ChatHistoryResult {

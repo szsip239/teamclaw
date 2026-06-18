@@ -20,6 +20,26 @@ describe('chat send post-run cleanup', () => {
     expect(source).toContain('let finishStarted = false')
     expect(source).toContain('if (finishStarted) return')
   })
+
+  it('runs artifact normalization before closing error and abort paths', () => {
+    const errorHandler = source.slice(
+      source.indexOf("} else if (state === 'error')"),
+      source.indexOf("} else if (state === 'aborted')"),
+    )
+    const abortHandler = source.slice(
+      source.indexOf("} else if (state === 'aborted')"),
+      source.indexOf('  })', source.indexOf("} else if (state === 'aborted')")),
+    )
+    const piDisconnectHandler = source.slice(
+      source.indexOf('client.onUnexpectedDisconnect = () => {'),
+      source.indexOf('  // --- Auto-attach session images'),
+    )
+
+    expect(source).toContain('appendFallbackArtifactLiveMessages')
+    expect(errorHandler).toContain('void saveSnapshotThenFinish()')
+    expect(abortHandler).toContain('void saveSnapshotThenFinish()')
+    expect(piDisconnectHandler).toContain('void saveSnapshotThenFinish()')
+  })
 })
 
 describe('chat send runtime guardrails', () => {

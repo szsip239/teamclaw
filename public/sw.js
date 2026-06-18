@@ -2,8 +2,9 @@
 // Only caches static assets (icons, fonts). Never intercepts page navigation
 // or Next.js chunks to avoid stale-cache white-screen issues.
 
-const CACHE_NAME = 'teamclaw-v1'
+const CACHE_NAME = 'teamclaw-v2'
 const CACHEABLE_PATTERN = /\.(png|jpg|jpeg|svg|ico|woff2?)$/
+const RUNTIME_ICON_PATTERN = /^\/icons\/runtime-(?:normal|pi)-robot\.png$/
 
 self.addEventListener('install', () => {
   // Activate immediately without waiting for old SW to retire
@@ -11,8 +12,15 @@ self.addEventListener('install', () => {
 })
 
 self.addEventListener('activate', (event) => {
-  // Claim all open tabs so the SW is active right away
-  event.waitUntil(self.clients.claim())
+  // Drop old static-asset caches so icon updates are not pinned by previous SWs.
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)))
+      )
+      .then(() => self.clients.claim())
+  )
 })
 
 self.addEventListener('fetch', (event) => {
@@ -23,7 +31,8 @@ self.addEventListener('fetch', (event) => {
     event.request.mode === 'navigate' ||
     event.request.method !== 'GET' ||
     url.pathname.startsWith('/api/') ||
-    url.pathname.startsWith('/_next/')
+    url.pathname.startsWith('/_next/') ||
+    RUNTIME_ICON_PATTERN.test(url.pathname)
   ) {
     return // Let the browser handle it normally
   }

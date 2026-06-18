@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, ChevronDown, FileText } from 'lucide-react'
+import { ChevronDown, FileText } from 'lucide-react'
 import type { ChatMessage, KbSourceRef } from '@/types/chat'
 import { ChatProcessGroup } from './chat-process-group'
 import { ChatTextBlock } from './chat-text-block'
@@ -13,12 +13,33 @@ import { imageBlockDisplayKey, uniqueImageBlocks } from '@/lib/chat/image-blocks
 import { selectVisibleKbSources } from '@/lib/chat/kb-sources'
 import { selectAssistantUiDisplay } from '@/lib/chat/chat-ui-display'
 import { useState } from 'react'
+import { cn } from '@/lib/utils'
+import { ChatRuntimeIcon } from './chat-runtime-icon'
 
 interface ChatAssistantMessageProps {
   message: ChatMessage
   isStreaming: boolean
   /** Preceding intermediate messages (thinking/tool only) merged into this message */
   processSteps?: ChatMessage[]
+}
+
+function ChatRuntimeAvatar({ runtime }: { runtime: ChatMessage['runtime'] }) {
+  const t = useT()
+  const isFast = runtime === 'pi'
+  const label = isFast ? t('chat.runtimeFast') : t('chat.runtimeNormal')
+
+  return (
+    <div
+      className={cn(
+        'flex size-8 shrink-0 items-center justify-center rounded-full',
+        isFast ? 'text-emerald-700' : 'text-amber-700',
+      )}
+      aria-label={label}
+      title={label}
+    >
+      <ChatRuntimeIcon runtime={isFast ? 'pi' : 'openclaw'} className="size-8" />
+    </div>
+  )
 }
 
 function KbSourceSection({ sources }: { sources: KbSourceRef[] }) {
@@ -134,7 +155,6 @@ export function ChatAssistantMessage({
   isStreaming,
   processSteps,
 }: ChatAssistantMessageProps) {
-  const t = useT()
   // Completed messages use their own sources; streaming messages use live sources.
   const liveKbSources = useChatStore((s) => s.kbSources)
   const kbSources = selectVisibleKbSources(message, isStreaming, liveKbSources)
@@ -154,18 +174,12 @@ export function ChatAssistantMessage({
         : null
   const imageBlocks = uniqueImageBlocks(message.contentBlocks)
   const display = selectAssistantUiDisplay(message, { isStreaming, processSteps })
-  const runtimeLabel = message.runtime === 'pi' ? t('chat.runtimePi') : t('chat.runtimeOpenclaw')
 
   return (
     <div className="flex justify-start">
       <div className="flex w-full max-w-[92%] items-start gap-2">
-        <div className="bg-muted flex size-7 shrink-0 items-center justify-center rounded-full">
-          <Bot className="size-3.5" />
-        </div>
+        <ChatRuntimeAvatar runtime={message.runtime === 'pi' ? 'pi' : 'openclaw'} />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <span className="w-fit rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            [{runtimeLabel}]
-          </span>
           {allSteps ? <ChatProcessGroup steps={allSteps} inline /> : null}
           {display.stagedText && (
             <ChatStageReply text={display.stagedText} toolName={display.stagedToolName} />

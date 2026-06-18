@@ -28,11 +28,7 @@ import {
 } from '@/lib/session-files/artifacts'
 import type { SessionArtifact, SessionOutputSnapshot } from '@/lib/session-files/artifacts'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
-import {
-  appendLiveMessages,
-  archiveSession,
-  saveLiveSnapshot,
-} from '@/lib/chat/snapshot-helpers'
+import { appendLiveMessages, archiveSession, saveLiveSnapshot } from '@/lib/chat/snapshot-helpers'
 import {
   buildChatRuntimeSessionKey,
   fromDbChatRuntime,
@@ -356,10 +352,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         instanceId,
         agentId,
-        OR: [
-          { id: targetSessionId },
-          { conversationGroupId: targetSessionId },
-        ],
+        OR: [{ id: targetSessionId }, { conversationGroupId: targetSessionId }],
       },
     })
     if (targetSession) {
@@ -373,10 +366,7 @@ export async function POST(req: NextRequest) {
                 instanceId,
                 agentId,
                 runtime: dbRuntime,
-                OR: [
-                  { id: conversationGroupId },
-                  { conversationGroupId },
-                ],
+                OR: [{ id: conversationGroupId }, { conversationGroupId }],
               },
             })
       if (targetRuntimeSession && !targetRuntimeSession.isActive) {
@@ -394,10 +384,7 @@ export async function POST(req: NextRequest) {
             instanceId,
             agentId,
             runtime: dbRuntime,
-            OR: [
-              { id: conversationGroupId },
-              { conversationGroupId },
-            ],
+            OR: [{ id: conversationGroupId }, { conversationGroupId }],
           },
         })
       : await tx.chatSession.findFirst({
@@ -613,6 +600,29 @@ export async function POST(req: NextRequest) {
     return undefined
   }
 
+  async function appendFallbackArtifactLiveMessages(content: string): Promise<void> {
+    await appendLiveMessages(chatSessionId, [
+      {
+        id: randomUUID(),
+        role: 'user',
+        content: message,
+        runtime,
+        messageSeq: 0,
+        createdAt: runStartedAt.toISOString(),
+      },
+      {
+        id: randomUUID(),
+        role: 'assistant',
+        content,
+        runtime,
+        messageSeq: 1,
+        isFinal: true,
+        stopReason: 'stop',
+        createdAt: new Date().toISOString(),
+      },
+    ])
+  }
+
   async function saveSnapshotThenFinish() {
     if (finishStarted) return
     finishStarted = true
@@ -632,6 +642,13 @@ export async function POST(req: NextRequest) {
       )
     } catch (err) {
       console.error('[live-snapshot] Save failed:', err)
+      if (assistantContentOverride) {
+        try {
+          await appendFallbackArtifactLiveMessages(assistantContentOverride)
+        } catch (fallbackErr) {
+          console.error('[live-snapshot] Fallback save failed:', fallbackErr)
+        }
+      }
     }
     write({ type: 'done' })
     await cleanup()
@@ -738,7 +755,7 @@ export async function POST(req: NextRequest) {
         type: 'error',
         error: String(evt.errorMessage ?? 'Unknown error'),
       })
-      cleanup()
+      void saveSnapshotThenFinish()
     } else if (state === 'aborted') {
       if (lifecycleEndTimer) {
         clearTimeout(lifecycleEndTimer)
@@ -746,7 +763,7 @@ export async function POST(req: NextRequest) {
       }
       activeRuns.delete(chatSessionId)
       write({ type: 'error', error: 'Conversation aborted' })
-      cleanup()
+      void saveSnapshotThenFinish()
     }
   })
 
@@ -895,7 +912,7 @@ export async function POST(req: NextRequest) {
       if (finishStarted || closed) return
       activeRuns.delete(chatSessionId)
       write({ type: 'error', error: PI_CONNECTION_LOST_ERROR })
-      void cleanup()
+      void saveSnapshotThenFinish()
     }
   }
 
