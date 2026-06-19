@@ -603,4 +603,54 @@ describe('transformToLiveMessages', () => {
     expect(messages[0].thinking).toBeUndefined()
     expect(messages[0].toolCalls).toEqual([{ toolName: 'exec', toolInput: { command: 'ls' } }])
   })
+
+  it('collapses OpenClaw reasoning-only retry user duplicates', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'user',
+        content: '继续',
+        idempotencyKey: 'run-1:user',
+        timestamp: 1781881312245,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Building the HTML structure.' }],
+        stopReason: 'length',
+        timestamp: 1781881312669,
+      },
+      {
+        role: 'user',
+        content: '继续',
+        idempotencyKey: 'run-1:user',
+        timestamp: 1781881312245,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Retrying with visible answer.' }],
+        stopReason: 'length',
+        timestamp: 1781881359840,
+      },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: '继续' }],
+        timestamp: 1781881403591,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Still only hidden reasoning.' }],
+        stopReason: 'length',
+        timestamp: 1781881403599,
+      },
+    ])
+
+    expect(messages.filter((message) => message.role === 'user' && message.content === '继续'))
+      .toHaveLength(1)
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'Agent failed before reply: incomplete terminal response (stopReason=length)',
+      stopReason: 'length',
+      isFinal: true,
+    })
+  })
 })

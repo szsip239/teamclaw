@@ -160,6 +160,82 @@ export function gatewayMessageCreatedAt(message: ChatHistoryMessage): string | u
   return parseGatewayMessageTime(message.timestamp) ?? parseGatewayMessageTime(message.createdAt)
 }
 
+function rawMessageHasToolCall(message: ChatHistoryMessage): boolean {
+  return (
+    Array.isArray(message.content) &&
+    message.content.some((block) => block.type === 'toolCall')
+  )
+}
+
+/**
+ * OpenClaw may append internal visible-answer retry attempts to chat.history.
+ * Those retries can repeat the same user prompt when the model only produced
+ * hidden reasoning and no deliverable content. Collapse them for display and
+ * live snapshots so one user send does not appear as multiple user bubbles.
+ */
+export function filterRetryDuplicateUserMessages(
+  rawMessages: ChatHistoryMessage[],
+): ChatHistoryMessage[] {
+  const filtered: ChatHistoryMessage[] = []
+  let lastAcceptedUserText: string | null = null
+  let hasDeliverableAfterLastUser = true
+
+  for (const message of rawMessages) {
+    if (message.role === 'user') {
+      const text = stripRagContextForDisplay(stripUserMetadata(extractText(message.content)))
+      if (text && text === lastAcceptedUserText && !hasDeliverableAfterLastUser) {
+        continue
+      }
+      filtered.push(message)
+      lastAcceptedUserText = text || null
+      hasDeliverableAfterLastUser = false
+      continue
+    }
+
+    filtered.push(message)
+    if (message.role === 'assistant') {
+      const hasVisibleText = !!extractText(message.content).trim()
+      if (hasVisibleText || rawMessageHasToolCall(message)) {
+        hasDeliverableAfterLastUser = true
+      }
+    } else if (message.role === 'toolResult' || message.role === 'command') {
+      hasDeliverableAfterLastUser = true
+    }
+  }
+
+  return filtered
+}
+
+const NON_DELIVERABLE_LENGTH_ERROR =
+  'Agent failed before reply: incomplete terminal response (stopReason=length)'
+
+export function markNonDeliverableTerminalTurn(
+  messages: ChatMessage[],
+  error = NON_DELIVERABLE_LENGTH_ERROR,
+): void {
+  const lastUserIdx = messages.findLastIndex((message) => message.role === 'user')
+  if (lastUserIdx === -1) return
+
+  const afterLastUser = messages.slice(lastUserIdx + 1)
+  if (
+    afterLastUser.some(
+      (message) => message.role === 'assistant' && (message.error || message.content),
+    )
+  ) {
+    return
+  }
+
+  const lastAssistant = [...afterLastUser]
+    .reverse()
+    .find((message) => message.role === 'assistant')
+  if (!lastAssistant) return
+  if (lastAssistant.stopReason !== 'length') return
+  if ((lastAssistant.toolCalls?.length ?? 0) > 0) return
+
+  lastAssistant.error = error
+  lastAssistant.isFinal = true
+}
+
 // ─── Snapshot building ───────────────────────────────────────────────
 
 /**
@@ -448,7 +524,7 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
   const result: ChatMessage[] = []
   const fallbackBaseMs = Date.now()
 
-  for (const msg of rawMessages) {
+  for (const msg of filterRetryDuplicateUserMessages(rawMessages)) {
     const messageSeq = result.length
     const createdAt =
       gatewayMessageCreatedAt(msg) ?? new Date(fallbackBaseMs + messageSeq).toISOString()
@@ -522,6 +598,7 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
     }
   }
 
+  markNonDeliverableTerminalTurn(result)
   return result
 }
 

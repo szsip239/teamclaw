@@ -13,6 +13,8 @@ import {
   mergeToolInputs,
   shouldUseLiveMessagesFallback,
   gatewayMessageCreatedAt,
+  filterRetryDuplicateUserMessages,
+  markNonDeliverableTerminalTurn,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
@@ -81,7 +83,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   // expanded state.
   let orderIndex = 0
 
-  for (const msg of raw) {
+  for (const msg of filterRetryDuplicateUserMessages(raw)) {
     if (msg.role === 'user') {
       const contentBlocks = extractContentBlocks(msg.content)
       const id = `current-${orderIndex}`
@@ -343,6 +345,9 @@ export const GET = withAuth(
                 mergeToolInputs(msgs, cachedLive)
               }
               sessionMessages = msgs
+            }
+            if (!activeRuns.has(runtimeSession.id)) {
+              markNonDeliverableTerminalTurn(sessionMessages)
             }
             const baseTime = new Date(
               runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,

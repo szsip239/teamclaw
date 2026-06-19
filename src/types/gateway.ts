@@ -203,6 +203,7 @@ export interface ChatHistoryMessage {
   isError?: boolean
   stopReason?: string
   errorMessage?: string
+  idempotencyKey?: string
   timestamp?: number | string
   createdAt?: string
 }
