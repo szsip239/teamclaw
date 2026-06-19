@@ -31,6 +31,6 @@ export function selectChatDisplay(turns: DisplayTurn[]): ChatDisplay {
   return {
     toolCalls,
     stagedText: final ? null : (staged?.text ?? null),
-    finalText: final?.text ?? null,
+    finalText: final?.text || null,
   }
 }

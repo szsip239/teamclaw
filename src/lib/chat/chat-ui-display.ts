@@ -37,6 +37,7 @@ export function selectAssistantUiDisplay(
 
   const display = selectChatDisplay(turns)
   if (display.finalText || display.stagedText) return display
+  if (message.error) return display
 
   const lastTool = display.toolCalls.at(-1)
   const stagedText = stringifyToolInput(lastTool?.toolInput)

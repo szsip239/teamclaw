@@ -328,6 +328,53 @@ describe('live snapshot append-only merge', () => {
     )
   })
 
+  it('persists terminal stream errors on the last assistant live message', async () => {
+    const client = {
+      request: vi.fn().mockResolvedValue({
+        sessionId: 'gw-1',
+        messages: [
+          user('create a news page'),
+          {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'I am preparing the HTML file.' },
+              { type: 'toolCall', name: 'exec', arguments: { command: 'mkdir -p output' } },
+            ],
+            stopReason: 'length',
+          } satisfies ChatHistoryMessage,
+        ],
+      }),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      gwSessionId: 'gw-1',
+      liveMessages: [],
+    })
+
+    await saveLiveSnapshot(
+      'chat-1',
+      client as never,
+      'agent:a:tc:u',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'Agent failed before reply: non_deliverable_terminal_turn',
+    )
+
+    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const liveMessages = updateArg.data.liveMessages as ChatMessage[]
+
+    expect(liveMessages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'Agent failed before reply: non_deliverable_terminal_turn',
+      stopReason: 'length',
+      isFinal: true,
+    })
+  })
+
   it('archives sessions with the unified 500 history limit', async () => {
     const client = {
       request: vi

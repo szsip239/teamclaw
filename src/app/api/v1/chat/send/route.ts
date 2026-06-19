@@ -453,6 +453,7 @@ export async function POST(req: NextRequest) {
   // chat.history doesn't return inline image blocks, so we must capture
   // them from the live chat events where OpenClaw embeds them.
   const capturedImages: { imageUrl: string; mimeType?: string }[] = []
+  let terminalErrorMessage: string | null = null
   // User-uploaded attachments (images) — passed to saveLiveSnapshot for persistence.
   // Gateway chat.history strips user image attachments, so we save them in liveMessages.
   const userImageAttachments: { name: string; mimeType: string; content: string }[] = []
@@ -639,6 +640,7 @@ export async function POST(req: NextRequest) {
         userImageAttachments,
         capturedToolInputs,
         assistantContentOverride,
+        terminalErrorMessage ?? undefined,
       )
     } catch (err) {
       console.error('[live-snapshot] Save failed:', err)
@@ -751,9 +753,10 @@ export async function POST(req: NextRequest) {
         lifecycleEndTimer = null
       }
       activeRuns.delete(chatSessionId)
+      terminalErrorMessage = String(evt.errorMessage ?? 'Unknown error')
       write({
         type: 'error',
-        error: String(evt.errorMessage ?? 'Unknown error'),
+        error: terminalErrorMessage,
       })
       void saveSnapshotThenFinish()
     } else if (state === 'aborted') {
@@ -762,7 +765,8 @@ export async function POST(req: NextRequest) {
         lifecycleEndTimer = null
       }
       activeRuns.delete(chatSessionId)
-      write({ type: 'error', error: 'Conversation aborted' })
+      terminalErrorMessage = 'Conversation aborted'
+      write({ type: 'error', error: terminalErrorMessage })
       void saveSnapshotThenFinish()
     }
   })

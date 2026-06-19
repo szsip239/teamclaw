@@ -45,4 +45,23 @@ describe('assistant UI display selection', () => {
     expect(display.stagedText).toBe('{"command":"ls"}')
     expect(display.stagedToolName).toBe('exec')
   })
+
+  it('does not show tool input as staged text for terminal errors', () => {
+    const display = selectAssistantUiDisplay(
+      assistant('', {
+        error: 'Agent failed before reply: non_deliverable_terminal_turn',
+        isFinal: true,
+        stopReason: 'length',
+        toolCalls: [{ toolName: 'exec', toolInput: { command: 'mkdir -p output' } }],
+      }),
+      { isStreaming: false },
+    )
+
+    expect(display.finalText).toBe(null)
+    expect(display.stagedText).toBe(null)
+    expect(display.stagedToolName).toBeUndefined()
+    expect(display.toolCalls).toEqual([
+      { toolName: 'exec', toolInput: { command: 'mkdir -p output' } },
+    ])
+  })
 })

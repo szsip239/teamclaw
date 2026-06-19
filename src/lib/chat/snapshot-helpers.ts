@@ -562,6 +562,34 @@ function replaceLastAssistantMessageContent(
   }
 }
 
+function applyLastAssistantMessageError(
+  messages: ChatMessage[],
+  errorOverride: string | undefined,
+): void {
+  const error = errorOverride?.trim()
+  if (!error) return
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'assistant') continue
+    message.error = error
+    message.isFinal = true
+    if (!message.stopReason) message.stopReason = 'error'
+    return
+  }
+
+  messages.push({
+    id: randomUUID(),
+    role: 'assistant',
+    content: '',
+    error,
+    messageSeq: messages.length,
+    stopReason: 'error',
+    isFinal: true,
+    createdAt: new Date().toISOString(),
+  })
+}
+
 function containsOutputLink(content: string): boolean {
   return /\]\(output\/[^)]+\)|(?:^|\s)output\/[^\s)]+/.test(content)
 }
@@ -911,6 +939,7 @@ export async function saveLiveSnapshot(
   userAttachments?: { name: string; mimeType: string; content: string }[],
   capturedToolInputs?: { toolName: string; toolInput: unknown }[],
   assistantContentOverride?: string,
+  assistantErrorOverride?: string,
 ): Promise<void> {
   const rawResult = await client.request(
     'chat.history',
@@ -923,6 +952,7 @@ export async function saveLiveSnapshot(
 
   let liveMessages = transformToLiveMessages(rawMessages)
   replaceLastAssistantMessageContent(liveMessages, assistantContentOverride)
+  applyLastAssistantMessageError(liveMessages, assistantErrorOverride)
 
   // Merge user-uploaded image attachments into the last user message's contentBlocks.
   // Gateway chat.history strips user image attachments, so we must re-inject them
