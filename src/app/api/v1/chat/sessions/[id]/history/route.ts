@@ -26,6 +26,7 @@ import {
   sortChatMessagesForDisplay,
   withRuntimeMessageMetadata,
 } from '@/lib/chat/history-runtime-messages'
+import { mergeOverlappingSnapshotBatches } from '@/lib/chat/history-snapshot-batches'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
   ChatMessage,
@@ -268,6 +269,7 @@ export const GET = withAuth(
         sourceSessionId: row.chatSessionId,
         role: row.role as 'user' | 'assistant',
         content: sanitizeOutputArtifactLinks(row.content),
+        messageSeq: row.orderIndex,
         ...(row.contentBlocks
           ? { contentBlocks: row.contentBlocks as unknown as ChatContentBlock[] }
           : {}),
@@ -278,12 +280,12 @@ export const GET = withAuth(
       })
     }
 
-    const snapshots: ChatSnapshotBatch[] = Array.from(batchMap.entries()).map(
-      ([batchId, data]) => ({
+    const snapshots: ChatSnapshotBatch[] = mergeOverlappingSnapshotBatches(
+      Array.from(batchMap.entries()).map(([batchId, data]) => ({
         batchId,
         createdAt: data.createdAt,
         messages: data.messages,
-      }),
+      })),
     )
 
     // 3. If any runtime session is active, load current messages from its gateway

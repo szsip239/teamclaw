@@ -270,6 +270,22 @@ function mergeContentBlocksIntoSnapshots(
   }
 }
 
+function mergeLiveTimestampsIntoSnapshots(
+  snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[],
+  liveMessages: ChatMessage[],
+): void {
+  let liveIdx = 0
+  for (const snap of snapshotData) {
+    if (liveIdx >= liveMessages.length) break
+    const live = liveMessages[liveIdx]
+    if (snap.role !== live.role) continue
+    liveIdx++
+
+    if (snap.createdAt || !validMessageCreatedAt(live.createdAt)) continue
+    snap.createdAt = new Date(live.createdAt)
+  }
+}
+
 function mergeLocalAssistantContentIntoSnapshots(
   snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[],
   liveMessages: ChatMessage[],
@@ -341,6 +357,7 @@ export async function archiveSession(
     // chat.history strips image blocks, but liveMessages captured them
     // during SSE streaming. Without this merge, images are lost on archive.
     if (liveMessages && liveMessages.length > 0 && snapshotData.length > 0) {
+      mergeLiveTimestampsIntoSnapshots(snapshotData, liveMessages)
       mergeContentBlocksIntoSnapshots(snapshotData, liveMessages)
       mergeLocalAssistantContentIntoSnapshots(snapshotData, liveMessages)
     }
@@ -1148,6 +1165,7 @@ function buildLiveSnapshotRows(
       contentBlocks: msg.contentBlocks
         ? (msg.contentBlocks as unknown as Prisma.InputJsonValue)
         : undefined,
+      ...(validMessageCreatedAt(msg.createdAt) ? { createdAt: new Date(msg.createdAt) } : {}),
     }))
 }
 

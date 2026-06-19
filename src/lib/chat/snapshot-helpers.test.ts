@@ -400,6 +400,35 @@ describe('live snapshot append-only merge', () => {
     expect(createArg.data[1].content).toBe('文件已创建完成。\n\n[report.html](output/report.html)')
   })
 
+  it('preserves live message timestamps when gateway archive history lacks timestamps', async () => {
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValueOnce({
+          sessionId: 'gw-1',
+          messages: [user('pi question'), assistant('pi answer')],
+        })
+        .mockResolvedValueOnce({}),
+      on: vi.fn(),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      liveMessages: [
+        chatMessage('user', 'pi question', { createdAt: '2026-06-18T18:16:30.047Z' }),
+        chatMessage('assistant', 'pi answer', { createdAt: '2026-06-18T18:16:45.100Z' }),
+      ],
+    })
+    mocks.prisma.chatSession.update.mockResolvedValue({})
+
+    await archiveSession('chat-1', 'instance-1', 'agent-a', 'user-1', client as never, {
+      runtime: 'pi',
+    })
+
+    const createArg = mocks.prisma.chatMessageSnapshot.createMany.mock.calls[0][0]
+    expect(createArg.data.map((row: { createdAt?: Date }) => row.createdAt?.toISOString()))
+      .toEqual(['2026-06-18T18:16:30.047Z', '2026-06-18T18:16:45.100Z'])
+  })
+
   it('serializes live message appends for the same chat session', async () => {
     let liveMessages: ChatMessage[] = []
 
@@ -445,9 +474,11 @@ describe('live snapshot append-only merge', () => {
     expect(mocks.tx.chatSession.update).toHaveBeenCalledTimes(1)
 
     const updateArg = mocks.tx.chatSession.update.mock.calls[0][0]
+    const archiveArg = mocks.tx.chatMessageSnapshot.createMany.mock.calls[0][0]
     expect(updateArg.data.liveMessages).toHaveLength(MAX_LIVE_MESSAGES)
     expect(updateArg.data.liveMessages[0].content).toBe('message-2')
     expect(updateArg.data.liveMessages.at(-1).content).toBe('new reply')
+    expect(archiveArg.data[0].createdAt?.toISOString()).toBe('2026-05-28T00:00:00.000Z')
   })
 })
 

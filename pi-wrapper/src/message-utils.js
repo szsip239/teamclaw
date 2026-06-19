@@ -45,12 +45,14 @@ export function textFromToolResult(result) {
   return JSON.stringify(result)
 }
 
-export function toGatewayHistoryMessage(message) {
+export function toGatewayHistoryMessage(message, fallbackTimestamp) {
   if (!message || typeof message !== 'object') return undefined
+  const timestamp = message.timestamp ?? fallbackTimestamp
   if (message.role === 'user') {
     return {
       role: 'user',
       content: normalizeContent(message.content),
+      ...(timestamp ? { timestamp } : {}),
     }
   }
   if (message.role === 'assistant') {
@@ -59,6 +61,7 @@ export function toGatewayHistoryMessage(message) {
       content: normalizeContent(message.content),
       stopReason: message.stopReason,
       errorMessage: message.errorMessage,
+      ...(timestamp ? { timestamp } : {}),
     }
   }
   if (message.role === 'toolResult') {
@@ -68,6 +71,7 @@ export function toGatewayHistoryMessage(message) {
       toolCallId: message.toolCallId,
       toolName: message.toolName,
       isError: Boolean(message.isError),
+      ...(timestamp ? { timestamp } : {}),
     }
   }
   if (message.role === 'bashExecution') {
@@ -76,6 +80,7 @@ export function toGatewayHistoryMessage(message) {
       content: message.output ?? '',
       toolName: 'bash',
       isError: typeof message.exitCode === 'number' ? message.exitCode !== 0 : false,
+      ...(timestamp ? { timestamp } : {}),
     }
   }
   return undefined
@@ -85,7 +90,7 @@ export function gatewayMessagesFromSessionEntries(entries) {
   if (!Array.isArray(entries)) return []
   return entries
     .filter((entry) => entry?.type === 'message')
-    .map((entry) => toGatewayHistoryMessage(entry.message))
+    .map((entry) => toGatewayHistoryMessage(entry.message, entry.timestamp))
     .filter(Boolean)
 }
 
