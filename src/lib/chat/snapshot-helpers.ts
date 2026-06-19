@@ -160,11 +160,40 @@ export function gatewayMessageCreatedAt(message: ChatHistoryMessage): string | u
   return parseGatewayMessageTime(message.timestamp) ?? parseGatewayMessageTime(message.createdAt)
 }
 
+/**
+ * Strip local file references from assistant text.
+ * These paths are useful to the runtime but should not participate in display
+ * or history de-duplication; TeamClaw turns output artifacts into stable links.
+ */
+export function stripMediaReferences(text: string): string {
+  return text
+    .replace(/\n*MEDIA:\s*\S+/gi, '')
+    .replace(/\n*Image saved:\s*\S+/gi, '')
+    .replace(/!\[[^\]]*\]\(file:\/\/\/[^)]+\)/gi, '')
+    .replace(/file:\/\/\/\S+?\.(?:png|jpg|jpeg|gif|webp|bmp)(?=[)\s\]"]|$)/gi, '')
+    .trim()
+}
+
 function rawMessageHasToolCall(message: ChatHistoryMessage): boolean {
   return (
-    Array.isArray(message.content) &&
-    message.content.some((block) => block.type === 'toolCall')
+    Array.isArray(message.content) && message.content.some((block) => block.type === 'toolCall')
   )
+}
+
+function rawAssistantVisibleText(message: ChatHistoryMessage): string {
+  const text = stripFinalTags(stripMediaReferences(extractText(message.content))).trim()
+  if (text) return text
+
+  const thinking = extractThinking(message.content)
+  if (!thinking) return ''
+  return splitThinkingFallback(thinking).text.trim()
+}
+
+function rawMessageHasDeliverableContent(message: ChatHistoryMessage): boolean {
+  if (message.role === 'assistant') {
+    return !!rawAssistantVisibleText(message) || rawMessageHasToolCall(message)
+  }
+  return message.role === 'toolResult' || message.role === 'command'
 }
 
 /**
@@ -172,6 +201,9 @@ function rawMessageHasToolCall(message: ChatHistoryMessage): boolean {
  * Those retries can repeat the same user prompt when the model only produced
  * hidden reasoning and no deliverable content. Collapse them for display and
  * live snapshots so one user send does not appear as multiple user bubbles.
+ * Reasoning-only assistant messages from those failed attempts are also
+ * suppressed unless they are the terminal message, where they become the
+ * visible "failed before reply" error.
  */
 export function filterRetryDuplicateUserMessages(
   rawMessages: ChatHistoryMessage[],
@@ -179,28 +211,45 @@ export function filterRetryDuplicateUserMessages(
   const filtered: ChatHistoryMessage[] = []
   let lastAcceptedUserText: string | null = null
   let hasDeliverableAfterLastUser = true
+  let pendingNonDeliverableAssistant: ChatHistoryMessage | null = null
+  let skippingDuplicateAttempt = false
 
   for (const message of rawMessages) {
     if (message.role === 'user') {
       const text = stripRagContextForDisplay(stripUserMetadata(extractText(message.content)))
       if (text && text === lastAcceptedUserText && !hasDeliverableAfterLastUser) {
+        skippingDuplicateAttempt = true
         continue
       }
+      pendingNonDeliverableAssistant = null
+      skippingDuplicateAttempt = false
       filtered.push(message)
       lastAcceptedUserText = text || null
       hasDeliverableAfterLastUser = false
       continue
     }
 
+    const hasDeliverable = rawMessageHasDeliverableContent(message)
+    if (message.role === 'assistant' && !hasDeliverable) {
+      pendingNonDeliverableAssistant = message
+      continue
+    }
+
+    if (skippingDuplicateAttempt && !hasDeliverable) {
+      continue
+    }
+
+    pendingNonDeliverableAssistant = null
+    skippingDuplicateAttempt = false
     filtered.push(message)
-    if (message.role === 'assistant') {
-      const hasVisibleText = !!extractText(message.content).trim()
-      if (hasVisibleText || rawMessageHasToolCall(message)) {
-        hasDeliverableAfterLastUser = true
-      }
-    } else if (message.role === 'toolResult' || message.role === 'command') {
+
+    if (hasDeliverable) {
       hasDeliverableAfterLastUser = true
     }
+  }
+
+  if (pendingNonDeliverableAssistant) {
+    filtered.push(pendingNonDeliverableAssistant)
   }
 
   return filtered
@@ -225,9 +274,7 @@ export function markNonDeliverableTerminalTurn(
     return
   }
 
-  const lastAssistant = [...afterLastUser]
-    .reverse()
-    .find((message) => message.role === 'assistant')
+  const lastAssistant = [...afterLastUser].reverse().find((message) => message.role === 'assistant')
   if (!lastAssistant) return
   if (lastAssistant.stopReason !== 'length') return
   if ((lastAssistant.toolCalls?.length ?? 0) > 0) return
@@ -274,7 +321,7 @@ export function buildSnapshotData(
         message: msg,
       })
       let text = sanitizeOutputArtifactLinks(
-        stripFinalTags(extractText(msg.content) || parsed.text),
+        stripFinalTags(stripMediaReferences(extractText(msg.content) || parsed.text)),
       )
       let thinking = parsed.thinking ?? extractThinking(msg.content)
       const cb = extractContentBlocks(msg.content)
@@ -544,7 +591,9 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
         messageSeq,
         message: msg,
       })
-      let text = stripFinalTags(extractText(msg.content) || parsed.text)
+      let text = sanitizeOutputArtifactLinks(
+        stripFinalTags(stripMediaReferences(extractText(msg.content) || parsed.text)),
+      )
       let thinking = parsed.thinking ?? extractThinking(msg.content)
       const contentBlocks = extractContentBlocks(msg.content)
 
@@ -671,26 +720,43 @@ function containsOutputLink(content: string): boolean {
   return /\]\(output\/[^)]+\)|(?:^|\s)output\/[^\s)]+/.test(content)
 }
 
-function isLocalArtifactAugmentedContent(localContent: string, gatewayContent: string): boolean {
-  if (localContent === gatewayContent) return false
+function comparableContent(content: string): string {
+  return stripOutputArtifactLinksToLabels(stripMediaReferences(content)).replace(/\s+/g, ' ').trim()
+}
 
-  const gatewayBase = gatewayContent.trimEnd()
-  if (gatewayBase && localContent.startsWith(gatewayBase)) {
-    const localSuffix = localContent.slice(gatewayBase.length)
-    if (containsOutputLink(localSuffix)) return true
-  } else if (!gatewayBase && containsOutputLink(localContent)) {
+function isLocalArtifactAugmentedContent(localContent: string, gatewayContent: string): boolean {
+  const local = sanitizeOutputArtifactLinks(stripMediaReferences(localContent))
+  const gateway = sanitizeOutputArtifactLinks(stripMediaReferences(gatewayContent))
+  if (local === gateway) return false
+
+  if (containsOutputLink(local) && comparableContent(local) === comparableContent(gateway)) {
     return true
   }
 
-  const gatewayLabelBase = stripOutputArtifactLinksToLabels(gatewayContent).trimEnd()
-  if (!gatewayLabelBase || !localContent.startsWith(gatewayLabelBase)) return false
-  return containsOutputLink(localContent.slice(gatewayLabelBase.length))
+  const gatewayBase = gateway.trimEnd()
+  if (gatewayBase && local.startsWith(gatewayBase)) {
+    const localSuffix = local.slice(gatewayBase.length)
+    if (containsOutputLink(localSuffix)) return true
+  }
+
+  const gatewayLabelBase = comparableContent(gateway)
+  const localLabel = comparableContent(local)
+  if (!gatewayLabelBase || !localLabel.startsWith(gatewayLabelBase)) return false
+  return containsOutputLink(local)
 }
 
 function messagesMatch(a: ChatMessage, b: ChatMessage): boolean {
   if (a.role !== b.role) return false
   if (a.content === b.content) return true
   if (a.role !== 'assistant') return false
+
+  const aComparable = comparableContent(a.content)
+  const bComparable = comparableContent(b.content)
+  const aProcessOnly = a.stopReason === 'toolUse' || (a.toolCalls?.length ?? 0) > 0
+  const bProcessOnly = b.stopReason === 'toolUse' || (b.toolCalls?.length ?? 0) > 0
+  if ((!aComparable || !bComparable) && (aProcessOnly || bProcessOnly)) return false
+  if (aComparable === bComparable) return true
+
   return (
     isLocalArtifactAugmentedContent(a.content, b.content) ||
     isLocalArtifactAugmentedContent(b.content, a.content)
@@ -727,6 +793,51 @@ function findIncomingOverlap(
   }
 
   return { start: bestStart, length: bestLength }
+}
+
+function commonPrefixLength(existing: ChatMessage[], incoming: ChatMessage[]): number {
+  let length = 0
+  while (
+    length < existing.length &&
+    length < incoming.length &&
+    messagesMatch(existing[length], incoming[length])
+  ) {
+    length++
+  }
+  return length
+}
+
+function mergeIncomingHistoryWithExistingData(
+  existing: ChatMessage[],
+  incoming: ChatMessage[],
+): ChatMessage[] {
+  const usedExisting = new Set<number>()
+
+  return incoming.map((incomingMessage, incomingIndex) => {
+    let existingIndex = -1
+    if (
+      incomingIndex < existing.length &&
+      !usedExisting.has(incomingIndex) &&
+      messagesMatch(existing[incomingIndex], incomingMessage)
+    ) {
+      existingIndex = incomingIndex
+    } else {
+      existingIndex = existing.findIndex(
+        (existingMessage, index) =>
+          !usedExisting.has(index) && messagesMatch(existingMessage, incomingMessage),
+      )
+    }
+
+    if (existingIndex === -1) return incomingMessage
+    usedExisting.add(existingIndex)
+    return mergeMessagePreservingOldData(existing[existingIndex], incomingMessage)
+  })
+}
+
+function shouldUseIncomingAsFullHistory(existing: ChatMessage[], incoming: ChatMessage[]): boolean {
+  const prefixLength = commonPrefixLength(existing, incoming)
+  if (prefixLength === existing.length) return true
+  return prefixLength >= 3 && incoming.length >= Math.ceil(existing.length * 0.5)
 }
 
 function contentBlockKey(block: ChatContentBlock): string {
@@ -854,9 +965,16 @@ function mergeMessagePreservingOldData(
 ): ChatMessage {
   const contentBlocks = mergeContentBlocks(oldMessage.contentBlocks, newMessage.contentBlocks)
   const toolCalls = mergeToolCalls(oldMessage.toolCalls, newMessage.toolCalls)
-  const content = isLocalArtifactAugmentedContent(newMessage.content, oldMessage.content)
-    ? newMessage.content
-    : oldMessage.content || newMessage.content
+  const oldContent = sanitizeOutputArtifactLinks(stripMediaReferences(oldMessage.content))
+  const newContent = sanitizeOutputArtifactLinks(stripMediaReferences(newMessage.content))
+  const content =
+    containsOutputLink(oldContent) && !containsOutputLink(newContent)
+      ? oldContent
+      : containsOutputLink(newContent) && !containsOutputLink(oldContent)
+        ? newContent
+        : isLocalArtifactAugmentedContent(newContent, oldContent)
+          ? newContent
+          : oldContent || newContent
   const createdAt = validMessageCreatedAt(newMessage.createdAt)
     ? newMessage.createdAt
     : oldMessage.createdAt
@@ -893,6 +1011,10 @@ export function mergeLiveMessagesAppendOnly(
 
   const existing = existingMessages.map(cloneMessage)
   const incoming = incomingMessages.map(cloneMessage)
+  if (shouldUseIncomingAsFullHistory(existing, incoming)) {
+    return mergeIncomingHistoryWithExistingData(existing, incoming)
+  }
+
   const overlap = findIncomingOverlap(existing, incoming)
   const merged = existing
 

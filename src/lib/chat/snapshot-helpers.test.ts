@@ -249,6 +249,89 @@ describe('live snapshot append-only merge', () => {
     )
   })
 
+  it('rebuilds from full gateway history when cached live messages contain duplicate tails', () => {
+    const existing = [
+      chatMessage('user', '制作一个谷歌最新发布的okf标注的新闻页'),
+      chatMessage(
+        'assistant',
+        '已制作完成：\n\n[google-okf-news.html](output/google-okf-news.html)\n页面包含：OKF 新闻内容',
+      ),
+      chatMessage('user', '你的模型？'),
+      chatMessage('assistant', '当前模型：volcengine-agent-plan/glm-latest'),
+      chatMessage(
+        'assistant',
+        '已制作完成：\n\n[google-okf-news.html](output/google-okf-news.html)\n页面包含：OKF 新闻内容',
+      ),
+      chatMessage('user', '你的模型？'),
+      chatMessage('assistant', '当前模型：volcengine-agent-plan/glm-latest'),
+    ]
+    const gateway = [
+      chatMessage('user', '制作一个谷歌最新发布的okf标注的新闻页'),
+      chatMessage(
+        'assistant',
+        '已制作完成： google-okf-news.html\n页面包含：OKF 新闻内容\nMEDIA:current-session/output/google-okf-news.html',
+      ),
+      chatMessage('user', '你的模型？'),
+      chatMessage('assistant', '当前模型：volcengine-agent-plan/glm-latest'),
+      chatMessage('user', '今天有什么重要新闻'),
+      chatMessage('assistant', '今日重要新闻速报'),
+    ]
+
+    const merged = mergeLiveMessagesAppendOnly(existing, gateway)
+
+    expect(merged).toHaveLength(6)
+    expect(
+      merged.filter((message) => message.content.includes('google-okf-news.html')),
+    ).toHaveLength(1)
+    expect(merged[1].content).toContain('[google-okf-news.html](output/google-okf-news.html)')
+    expect(merged[1].content).not.toContain('MEDIA:')
+    expect(
+      merged.filter((message) => message.role === 'user' && message.content === '你的模型？'),
+    ).toHaveLength(1)
+  })
+
+  it('does not merge artifact links into later empty tool-use turns', () => {
+    const existing = [
+      chatMessage('user', '制作一个谷歌最新发布的okf标注的新闻页'),
+      chatMessage(
+        'assistant',
+        '已制作完成：\n\n[google-okf-news.html](output/google-okf-news.html)',
+        { isFinal: true, stopReason: 'stop' },
+      ),
+      chatMessage('user', '你的模型？'),
+      chatMessage('assistant', '', {
+        isFinal: false,
+        stopReason: 'toolUse',
+        toolCalls: [{ toolName: 'session_status', toolInput: null }],
+      }),
+    ]
+    const gateway = [
+      chatMessage('user', '制作一个谷歌最新发布的okf标注的新闻页'),
+      chatMessage(
+        'assistant',
+        '已制作完成： google-okf-news.html\nMEDIA:current-session/output/google-okf-news.html',
+        { isFinal: true, stopReason: 'stop' },
+      ),
+      chatMessage('user', '你的模型？'),
+      chatMessage('assistant', '', {
+        isFinal: false,
+        stopReason: 'toolUse',
+        toolCalls: [{ toolName: 'session_status', toolInput: null }],
+      }),
+      chatMessage('assistant', '当前模型：volcengine-agent-plan/glm-latest', {
+        isFinal: true,
+        stopReason: 'stop',
+      }),
+    ]
+
+    const merged = mergeLiveMessagesAppendOnly(existing, gateway)
+
+    expect(merged).toHaveLength(5)
+    expect(merged[1].content).toContain('[google-okf-news.html](output/google-okf-news.html)')
+    expect(merged[3].content).toBe('')
+    expect(merged[3].toolCalls?.[0].toolName).toBe('session_status')
+  })
+
   it('fetches live snapshots with the unified 500 history limit', async () => {
     const client = {
       request: vi.fn().mockResolvedValue({
@@ -472,8 +555,9 @@ describe('live snapshot append-only merge', () => {
     })
 
     const createArg = mocks.prisma.chatMessageSnapshot.createMany.mock.calls[0][0]
-    expect(createArg.data.map((row: { createdAt?: Date }) => row.createdAt?.toISOString()))
-      .toEqual(['2026-06-18T18:16:30.047Z', '2026-06-18T18:16:45.100Z'])
+    expect(createArg.data.map((row: { createdAt?: Date }) => row.createdAt?.toISOString())).toEqual(
+      ['2026-06-18T18:16:30.047Z', '2026-06-18T18:16:45.100Z'],
+    )
   })
 
   it('serializes live message appends for the same chat session', async () => {
@@ -604,6 +688,19 @@ describe('transformToLiveMessages', () => {
     expect(messages[0].toolCalls).toEqual([{ toolName: 'exec', toolInput: { command: 'ls' } }])
   })
 
+  it('strips local MEDIA references from live assistant text', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'assistant',
+        content:
+          '已制作完成：google-okf-news.html\nMEDIA:current-session/output/google-okf-news.html',
+        stopReason: 'stop',
+      },
+    ])
+
+    expect(messages[0].content).toBe('已制作完成：google-okf-news.html')
+  })
+
   it('collapses OpenClaw reasoning-only retry user duplicates', () => {
     const messages = transformToLiveMessages([
       {
@@ -643,8 +740,10 @@ describe('transformToLiveMessages', () => {
       },
     ])
 
-    expect(messages.filter((message) => message.role === 'user' && message.content === '继续'))
-      .toHaveLength(1)
+    expect(
+      messages.filter((message) => message.role === 'user' && message.content === '继续'),
+    ).toHaveLength(1)
+    expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(1)
     expect(messages.at(-1)).toMatchObject({
       role: 'assistant',
       content: '',
@@ -652,5 +751,54 @@ describe('transformToLiveMessages', () => {
       stopReason: 'length',
       isFinal: true,
     })
+  })
+
+  it('drops non-terminal hidden retry assistant attempts before a later user turn', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'user',
+        content: '继续',
+        idempotencyKey: 'run-1:user',
+        timestamp: 1781881312245,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Building the HTML structure.' }],
+        stopReason: 'length',
+        timestamp: 1781881312669,
+      },
+      {
+        role: 'user',
+        content: '继续',
+        idempotencyKey: 'run-1:user',
+        timestamp: 1781881312245,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Retrying with visible answer.' }],
+        stopReason: 'length',
+        timestamp: 1781881359840,
+      },
+      {
+        role: 'user',
+        content: '你的模型？',
+        timestamp: 1781881403591,
+      },
+      {
+        role: 'assistant',
+        content: '当前模型：volcengine-agent-plan/glm-latest',
+        stopReason: 'stop',
+        timestamp: 1781881403599,
+      },
+    ])
+
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ['user', '继续'],
+      ['user', '你的模型？'],
+      ['assistant', '当前模型：volcengine-agent-plan/glm-latest'],
+    ])
+    expect(messages.some((message) => message.role === 'assistant' && message.content === '')).toBe(
+      false,
+    )
   })
 })
