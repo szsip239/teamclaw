@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { decryptCredential } from '@/lib/resources/credential-utils'
 import { getProvider } from '@/lib/resources/providers'
+import { syncPiProviderConfig } from './pi-provider-sync'
 
 // ─── Google provider baseUrl fix ─────────────────────────────────────
 // pi-ai's Google provider createClient() sets apiVersion="" when baseUrl
@@ -328,6 +329,13 @@ export async function syncProviderToInstances(providerId: string): Promise<void>
         raw: JSON.stringify(patch),
         baseHash: configResult.hash,
       })
+      const piResult = await syncPiProviderConfig({
+        instanceId,
+        entries: patchProviders as Record<string, ProviderEntry>,
+      })
+      if (piResult.ok === false) {
+        console.warn(`[resource-sync] Failed to sync pi provider config to ${instanceId}:`, piResult.error)
+      }
       console.log(
         `[resource-sync] Synced provider "${Object.keys(patchProviders).join(',')}" to instance ${instanceId}`,
       )

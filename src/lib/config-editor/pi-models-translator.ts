@@ -13,9 +13,15 @@ export interface PiModelsPatch {
   models: {
     providers: Record<string, PiProviderEntry>
   }
+  settings?: {
+    defaultProvider: string
+    defaultModel: string
+  }
 }
 
 export function mapProviderApiToPiApi(api: string | undefined): string {
+  if (api === undefined) return 'openai-completions'
+
   switch (api) {
     case 'anthropic':
     case 'anthropic-messages':
@@ -27,7 +33,7 @@ export function mapProviderApiToPiApi(api: string | undefined): string {
     case 'openai-completions':
       return 'openai-completions'
     default:
-      return 'openai-completions'
+      throw new Error(`Unsupported Pi provider API type: ${api}`)
   }
 }
 
@@ -40,12 +46,43 @@ export function toPiProviderEntry(entry: ProviderEntry): PiProviderEntry {
   }
 }
 
-export function buildPiModelsPatch(providerId: string, entry: ProviderEntry): PiModelsPatch {
-  return {
+export function buildPiModelsPatch(
+  providerId: string,
+  entry: ProviderEntry,
+  options: { defaultModelId?: string } = {},
+): PiModelsPatch {
+  const patch: PiModelsPatch = {
     models: {
       providers: {
         [providerId]: toPiProviderEntry(entry),
       },
     },
   }
+  if (options.defaultModelId) {
+    patch.settings = {
+      defaultProvider: providerId,
+      defaultModel: options.defaultModelId,
+    }
+  }
+  return patch
+}
+
+export function buildPiModelsPatchFromEntries(
+  entries: Record<string, ProviderEntry>,
+  options: { defaultProviderId?: string; defaultModelId?: string } = {},
+): PiModelsPatch {
+  const providers = Object.fromEntries(
+    Object.entries(entries).map(([providerId, entry]) => [
+      providerId,
+      toPiProviderEntry(entry),
+    ]),
+  )
+  const patch: PiModelsPatch = { models: { providers } }
+  if (options.defaultProviderId && options.defaultModelId) {
+    patch.settings = {
+      defaultProvider: options.defaultProviderId,
+      defaultModel: options.defaultModelId,
+    }
+  }
+  return patch
 }

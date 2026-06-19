@@ -5,6 +5,10 @@ export function modelsJsonPath(agentDir) {
   return join(agentDir, 'models.json')
 }
 
+export function settingsJsonPath(agentDir) {
+  return join(agentDir, 'settings.json')
+}
+
 export function openClawJsonPath(agentDir) {
   return join(agentDir, 'openclaw.json')
 }
@@ -33,7 +37,27 @@ export async function ensureModelsConfig(agentDir) {
 }
 
 export async function writeModelsConfig(agentDir, config) {
-  const path = modelsJsonPath(agentDir)
+  return writeJsonConfig(modelsJsonPath(agentDir), config)
+}
+
+export async function readSettingsConfig(agentDir) {
+  const path = settingsJsonPath(agentDir)
+  try {
+    const raw = await readFile(path, 'utf8')
+    return { path, raw, config: JSON.parse(raw) }
+  } catch (err) {
+    if (err?.code === 'ENOENT') {
+      return { path, raw: '', config: {} }
+    }
+    throw err
+  }
+}
+
+export async function writeSettingsConfig(agentDir, config) {
+  return writeJsonConfig(settingsJsonPath(agentDir), config)
+}
+
+async function writeJsonConfig(path, config) {
   await mkdir(dirname(path), { recursive: true })
   const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`
   const raw = `${JSON.stringify(config, null, 2)}\n`
@@ -44,8 +68,20 @@ export async function writeModelsConfig(agentDir, config) {
 
 export async function patchModelsConfig(agentDir, patch) {
   const current = await readModelsConfig(agentDir)
-  const nextConfig = mergeConfig(current.config, normalizePatch(patch))
+  const modelsPatch = normalizePatch(patch)
+  if (Object.keys(modelsPatch).length === 0) return current
+
+  const nextConfig = mergeConfig(current.config, modelsPatch)
   return writeModelsConfig(agentDir, nextConfig)
+}
+
+export async function patchSettingsConfig(agentDir, patch) {
+  const settingsPatch = normalizeSettingsPatch(patch)
+  if (Object.keys(settingsPatch).length === 0) return null
+
+  const current = await readSettingsConfig(agentDir)
+  const nextConfig = mergeConfig(current.config, settingsPatch)
+  return writeSettingsConfig(agentDir, nextConfig)
 }
 
 async function readOpenClawModelsConfig(agentDir) {
@@ -86,6 +122,28 @@ function normalizePatch(patch) {
     return { providers: rawPatch.providers }
   }
   return {}
+}
+
+function normalizeSettingsPatch(patch) {
+  if (!patch || typeof patch !== 'object') return {}
+  const rawPatch =
+    patch.raw && typeof patch.raw === 'object'
+      ? patch.raw
+      : patch.patch && typeof patch.patch === 'object'
+        ? patch.patch
+        : patch
+
+  const settings = rawPatch.settings
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return {}
+
+  const result = {}
+  if (typeof settings.defaultProvider === 'string') {
+    result.defaultProvider = settings.defaultProvider
+  }
+  if (typeof settings.defaultModel === 'string') {
+    result.defaultModel = settings.defaultModel
+  }
+  return result
 }
 
 function mergeConfig(base, patch) {

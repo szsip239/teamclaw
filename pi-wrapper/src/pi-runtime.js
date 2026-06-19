@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { ensureModelsConfig, patchModelsConfig } from './config-store.js'
+import {
+  ensureModelsConfig,
+  patchModelsConfig,
+  patchSettingsConfig,
+  readSettingsConfig,
+} from './config-store.js'
 import { gatewayMessagesFromSessionEntries, toGatewayHistoryMessage } from './message-utils.js'
 
 export function getDefaultAgentDir(home = process.env.HOME) {
@@ -36,14 +41,23 @@ export class PiRuntime {
 
   async getConfig() {
     const { path, raw, config } = await ensureModelsConfig(this.agentDir)
-    return { path, raw, hash: hashRawConfig(raw), config }
+    const settings = await readSettingsConfig(this.agentDir)
+    return { path, raw, hash: hashRawConfig(raw), config, settings: settings.config }
   }
 
   async patchConfig(patch) {
     const result = await patchModelsConfig(this.agentDir, patch)
+    const settingsResult = await patchSettingsConfig(this.agentDir, patch)
     applyRuntimeApiKeys(this.authStorage, result.config)
     this.modelRegistry?.refresh?.()
-    return { ok: true, path: result.path, raw: result.raw, hash: hashRawConfig(result.raw), config: result.config }
+    return {
+      ok: true,
+      path: result.path,
+      raw: result.raw,
+      hash: hashRawConfig(result.raw),
+      config: result.config,
+      settings: settingsResult?.config,
+    }
   }
 }
 

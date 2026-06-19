@@ -21,16 +21,20 @@ import { toast } from "sonner"
 import type { ModelDefinition } from "@/types/resource"
 
 type PushRole = "primary" | "fallbacks" | "imageModel" | "imageGenerationModel"
+type PushTarget = "openclaw" | "pi"
 
 interface PushOutcome {
   instanceId: string
   ok: boolean
   error?: string
+  piOk?: boolean
+  piError?: string
 }
 
 interface PushResponse {
   modelRef: string
   role: PushRole
+  targets: PushTarget[]
   outcomes: PushOutcome[]
   successCount: number
   failedCount: number
@@ -59,6 +63,9 @@ export function ModelPushDialog({
   const instances = instancesData?.instances ?? []
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedTargets, setSelectedTargets] = useState<Set<PushTarget>>(
+    new Set(["openclaw", "pi"]),
+  )
   const [role, setRole] = useState<PushRole>("primary")
   const [submitting, setSubmitting] = useState(false)
 
@@ -66,6 +73,7 @@ export function ModelPushDialog({
   useEffect(() => {
     if (open) {
       setSelectedIds(new Set())
+      setSelectedTargets(new Set(["openclaw", "pi"]))
       setRole("primary")
     }
   }, [open, model?.id])
@@ -77,10 +85,21 @@ export function ModelPushDialog({
     setSelectedIds(next)
   }
 
+  function toggleTarget(target: PushTarget, checked: boolean) {
+    const next = new Set(selectedTargets)
+    if (checked) next.add(target)
+    else next.delete(target)
+    setSelectedTargets(next)
+  }
+
   async function handleSubmit() {
     if (!model) return
     if (selectedIds.size === 0) {
       toast.error(t('resource.pushModelSelectAtLeastOne'))
+      return
+    }
+    if (selectedTargets.size === 0) {
+      toast.error(t('resource.pushModelSelectAtLeastOneTarget'))
       return
     }
     setSubmitting(true)
@@ -90,7 +109,8 @@ export function ModelPushDialog({
         {
           modelId: model.id,
           instanceIds: Array.from(selectedIds),
-          role,
+          targets: Array.from(selectedTargets),
+          role: selectedTargets.has("openclaw") ? role : undefined,
         },
       )
       if (result.failedCount === 0) {
@@ -158,45 +178,87 @@ export function ModelPushDialog({
         </DialogHeader>
 
         <div className="space-y-5">
-          {/* Role */}
+          {/* Targets */}
           <div className="space-y-2">
             <Label className="text-[13px] font-medium">
-              {t('resource.pushModelRoleLabel')}
+              {t('resource.pushModelTargetLabel')}
             </Label>
             <div className="space-y-1.5">
-              {roleOptions.map((opt) => {
-                const isSelected = role === opt.value
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setRole(opt.value)}
-                    className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
-                      isSelected
-                        ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-                        : "border-border hover:bg-muted/50"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[13px] font-medium">
-                        {t(opt.labelKey)}
-                      </span>
-                      <div
-                        className={`size-3.5 rounded-full border-2 ${
-                          isSelected
-                            ? "border-primary bg-primary"
-                            : "border-muted-foreground/30"
-                        }`}
-                      />
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {([
+                {
+                  value: "openclaw" as const,
+                  labelKey: "resource.pushModelTargetOpenClaw" as const,
+                  hintKey: "resource.pushModelTargetOpenClawHint" as const,
+                },
+                {
+                  value: "pi" as const,
+                  labelKey: "resource.pushModelTargetPi" as const,
+                  hintKey: "resource.pushModelTargetPiHint" as const,
+                },
+              ]).map((opt) => (
+                <label
+                  key={opt.value}
+                  className="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 hover:bg-muted/50"
+                >
+                  <Checkbox
+                    checked={selectedTargets.has(opt.value)}
+                    onCheckedChange={(c) => toggleTarget(opt.value, !!c)}
+                    className="mt-0.5"
+                  />
+                  <span className="flex-1">
+                    <span className="block text-[13px] font-medium">
+                      {t(opt.labelKey)}
+                    </span>
+                    <span className="block text-[11px] text-muted-foreground">
                       {t(opt.hintKey)}
-                    </p>
-                  </button>
-                )
-              })}
+                    </span>
+                  </span>
+                </label>
+              ))}
             </div>
           </div>
+
+          {/* Role */}
+          {selectedTargets.has("openclaw") && (
+            <div className="space-y-2">
+              <Label className="text-[13px] font-medium">
+                {t('resource.pushModelRoleLabel')}
+              </Label>
+              <div className="space-y-1.5">
+                {roleOptions.map((opt) => {
+                  const isSelected = role === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setRole(opt.value)}
+                      className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                        isSelected
+                          ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                          : "border-border hover:bg-muted/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[13px] font-medium">
+                          {t(opt.labelKey)}
+                        </span>
+                        <div
+                          className={`size-3.5 rounded-full border-2 ${
+                            isSelected
+                              ? "border-primary bg-primary"
+                              : "border-muted-foreground/30"
+                          }`}
+                        />
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {t(opt.hintKey)}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Target instances */}
           <div className="space-y-2">
@@ -248,7 +310,9 @@ export function ModelPushDialog({
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || selectedIds.size === 0 || !model}
+            disabled={
+              submitting || selectedIds.size === 0 || selectedTargets.size === 0 || !model
+            }
           >
             {submitting && <Loader2 className="size-4 animate-spin" />}
             {t('resource.pushModelSubmit')}
@@ -258,4 +322,3 @@ export function ModelPushDialog({
     </Dialog>
   )
 }
-

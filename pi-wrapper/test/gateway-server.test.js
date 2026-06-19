@@ -252,6 +252,64 @@ test('config.patch writes pi models.json atomically and refreshes registry', asy
   }
 })
 
+test('config.patch writes pi settings.json default model for new sessions', async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'teamclaw-pi-wrapper-'))
+  const runtime = new PiRuntime({
+    agentDir,
+    createSession: async () => createFakeSession(),
+  })
+
+  try {
+    const result = await runtime.patchConfig({
+      models: {
+        providers: {
+          anthropic: {
+            api: 'anthropic-messages',
+            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+          },
+        },
+      },
+      settings: {
+        defaultProvider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-20250514',
+      },
+    })
+
+    assert.equal(result.ok, true)
+    const raw = await readFile(join(agentDir, 'settings.json'), 'utf8')
+    const parsed = JSON.parse(raw)
+    assert.equal(parsed.defaultProvider, 'anthropic')
+    assert.equal(parsed.defaultModel, 'claude-sonnet-4-20250514')
+  } finally {
+    await rm(agentDir, { recursive: true, force: true })
+  }
+})
+
+test('config.get returns pi default model settings', async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'teamclaw-pi-wrapper-'))
+  const runtime = new PiRuntime({
+    agentDir,
+    createSession: async () => createFakeSession(),
+  })
+
+  try {
+    await runtime.patchConfig({
+      settings: {
+        defaultProvider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-20250514',
+      },
+    })
+
+    const result = await runtime.getConfig()
+    assert.deepEqual(result.settings, {
+      defaultProvider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-20250514',
+    })
+  } finally {
+    await rm(agentDir, { recursive: true, force: true })
+  }
+})
+
 test('models config is seeded from OpenClaw providers when pi config is missing', async () => {
   const agentDir = await mkdtemp(join(tmpdir(), 'teamclaw-pi-wrapper-'))
 

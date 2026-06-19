@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
+import { useChatModel } from '@/hooks/use-chat'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { agentSupportsChatRuntime } from '@/lib/chat/runtime-options'
 import { cn } from '@/lib/utils'
@@ -24,11 +25,17 @@ interface PendingFile {
   dataUrl: string // data URL (for preview)
 }
 
-function ChatRuntimeSwitch() {
+function ChatRuntimeControl() {
   const t = useT()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const { data: model } = useChatModel({
+    agent: selectedAgent,
+    runtime: selectedRuntime,
+    sessionId: activeSessionId,
+  })
   const piAvailable = agentSupportsChatRuntime(selectedAgent, 'pi')
 
   const options: { runtime: ChatRuntime; label: string; disabled?: boolean; title?: string }[] = [
@@ -47,33 +54,44 @@ function ChatRuntimeSwitch() {
 
   return (
     <div
-      className="bg-muted/60 flex h-8 w-[108px] shrink-0 items-center rounded-full border border-border/70 p-0.5 sm:w-[118px]"
+      className="bg-muted/60 flex h-8 max-w-[52vw] shrink-0 items-center rounded-full border border-border/70 p-0.5 sm:max-w-[360px]"
       role="group"
       aria-label={t('chat.runtimeLabel')}
       title={t('chat.runtimeLabel')}
     >
-      {options.map((option) => {
-        const active = selectedRuntime === option.runtime
-        return (
-          <button
-            key={option.runtime}
-            type="button"
-            aria-pressed={active}
-            disabled={option.disabled}
-            title={option.title ?? option.label}
-            onClick={() => setSelectedRuntime(option.runtime)}
-            className={cn(
-              'flex h-7 min-w-0 flex-1 items-center justify-center rounded-full px-2 text-[11px] font-medium transition-colors sm:text-xs',
-              active && option.runtime === 'openclaw' && 'bg-slate-600 text-white shadow-sm',
-              active && option.runtime === 'pi' && 'bg-teal-600 text-white shadow-sm',
-              !active && 'text-muted-foreground hover:text-foreground',
-              option.disabled && 'cursor-not-allowed opacity-45 hover:text-muted-foreground',
-            )}
-          >
-            <span className="truncate">{option.label}</span>
-          </button>
-        )
-      })}
+      <div className="flex h-full w-[108px] shrink-0 items-center sm:w-[118px]">
+        {options.map((option) => {
+          const active = selectedRuntime === option.runtime
+          return (
+            <button
+              key={option.runtime}
+              type="button"
+              aria-pressed={active}
+              disabled={option.disabled}
+              title={option.title ?? option.label}
+              onClick={() => setSelectedRuntime(option.runtime)}
+              className={cn(
+                'flex h-7 min-w-0 flex-1 items-center justify-center rounded-full px-2 text-[11px] font-medium transition-colors sm:text-xs',
+                active && option.runtime === 'openclaw' && 'bg-slate-600 text-white shadow-sm',
+                active && option.runtime === 'pi' && 'bg-teal-600 text-white shadow-sm',
+                !active && 'text-muted-foreground hover:text-foreground',
+                option.disabled && 'cursor-not-allowed opacity-45 hover:text-muted-foreground',
+              )}
+            >
+              <span className="truncate">{option.label}</span>
+            </button>
+          )
+        })}
+      </div>
+      {model?.label && (
+        <div
+          className="hidden min-w-0 max-w-[170px] border-l border-border/70 px-2 text-[11px] font-medium text-muted-foreground sm:block"
+          title={model.ref}
+          aria-label={t('chat.modelLabel')}
+        >
+          <span className="block truncate">{model.label}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -302,7 +320,7 @@ export function ChatInput() {
             </Button>
           )}
 
-          <ChatRuntimeSwitch />
+          <ChatRuntimeControl />
 
           <Textarea
             ref={textareaRef}

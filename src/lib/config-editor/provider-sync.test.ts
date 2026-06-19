@@ -1,5 +1,20 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
+const mocks = vi.hoisted(() => ({
+  ensureRegistryInitialized: vi.fn(),
+  getRuntimeGatewayClient: vi.fn(),
+  piClient: {
+    request: vi.fn(),
+  },
+  piLease: {
+    release: vi.fn(),
+  },
+  registry: {
+    getConnectedIds: vi.fn(),
+    request: vi.fn(),
+  },
+}))
+
 vi.mock('@/lib/db', () => ({
   prisma: {
     resource: {
@@ -12,11 +27,21 @@ vi.mock('@/lib/resources/credential-utils', () => ({
   decryptCredential: vi.fn(() => 'test-key'),
 }))
 
+vi.mock('@/lib/gateway/registry', () => ({
+  ensureRegistryInitialized: mocks.ensureRegistryInitialized,
+  registry: mocks.registry,
+}))
+
+vi.mock('@/lib/chat/runtime-gateway', () => ({
+  getRuntimeGatewayClient: mocks.getRuntimeGatewayClient,
+}))
+
 import { prisma } from '@/lib/db'
 import {
   buildProviderEntries,
   buildProviderEntryFromResource,
   resolveOpenClawProviderId,
+  syncProviderToInstances,
 } from './provider-sync'
 
 const findManyMock = prisma.resource.findMany as unknown as Mock
@@ -24,6 +49,7 @@ const findManyMock = prisma.resource.findMany as unknown as Mock
 describe('provider sync OpenClaw provider mapping', () => {
   beforeEach(() => {
     findManyMock.mockReset()
+    vi.clearAllMocks()
   })
 
   it('maps TeamClaw doubao coding resources to OpenClaw volcengine-plan refs', () => {
@@ -161,5 +187,58 @@ describe('provider sync OpenClaw provider mapping', () => {
 
     expect(built?.providerId).toBe('volcengine-agent-plan')
     expect(built?.entry.baseUrl).toBe('https://ark.cn-beijing.volces.com/api/plan/v3')
+  })
+
+  it('auto-syncs Pi provider config without changing the Pi default model', async () => {
+    findManyMock.mockResolvedValue([
+      {
+        provider: 'anthropic',
+        credentials: 'encrypted',
+        config: {
+          baseUrl: 'https://api.anthropic.com',
+          apiType: 'anthropic',
+          models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+        },
+      },
+    ])
+    mocks.registry.getConnectedIds.mockReturnValue(['instance-1'])
+    mocks.registry.request.mockImplementation(async (_instanceId, method) => {
+      if (method === 'config.get') {
+        return {
+          hash: 'hash-1',
+          config: { models: { providers: { anthropic: {} } } },
+        }
+      }
+      if (method === 'config.patch') return { ok: true }
+      throw new Error(`unexpected method ${method}`)
+    })
+    mocks.getRuntimeGatewayClient.mockResolvedValue({
+      ...mocks.piLease,
+      client: mocks.piClient,
+      temporary: true,
+    })
+    mocks.piClient.request.mockResolvedValue({ ok: true })
+
+    await syncProviderToInstances('anthropic')
+
+    expect(mocks.registry.request).toHaveBeenCalledWith('instance-1', 'config.patch', {
+      raw: expect.stringContaining('"anthropic"'),
+      baseHash: 'hash-1',
+    })
+    expect(mocks.getRuntimeGatewayClient).toHaveBeenCalledWith('instance-1', 'pi')
+    expect(mocks.piClient.request).toHaveBeenCalledWith('config.patch', {
+      models: {
+        providers: {
+          anthropic: {
+            baseUrl: 'https://api.anthropic.com',
+            apiKey: 'test-key',
+            api: 'anthropic-messages',
+            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+          },
+        },
+      },
+    })
+    expect(mocks.piClient.request.mock.calls[0][1].settings).toBeUndefined()
+    expect(mocks.piLease.release).toHaveBeenCalled()
   })
 })

@@ -13,10 +13,12 @@ describe('Chat runtime controls', () => {
     expect(headerSource).not.toContain("t('chat.runtimeLabel')")
   })
 
-  it('renders normal/fast runtime switch inside the input instead of a pi marker', () => {
-    expect(inputSource).toContain('ChatRuntimeSwitch')
+  it('renders normal/fast runtime and model control inside the input instead of a pi marker', () => {
+    expect(inputSource).toContain('ChatRuntimeControl')
     expect(inputSource).toContain("t('chat.runtimeNormal')")
     expect(inputSource).toContain("t('chat.runtimeFast')")
+    expect(inputSource).toContain("t('chat.modelLabel')")
+    expect(inputSource).toContain('useChatModel')
     expect(inputSource).toContain('setSelectedRuntime')
     expect(inputSource).toContain('agentSupportsChatRuntime')
     expect(inputSource).not.toContain('ChatRuntimeIcon')

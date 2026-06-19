@@ -9,13 +9,14 @@ import {
   sanitizeProviderPatch,
   type ProviderEntry,
 } from '@/lib/config-editor/provider-sync'
-import { buildPiModelsPatch } from '@/lib/config-editor/pi-models-translator'
-import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
+import { syncPiProviderConfig } from '@/lib/config-editor/pi-provider-sync'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import type { ResourceConfig, ModelDefinition } from '@/types/resource'
 
 const PUSH_ROLES = ['primary', 'fallbacks', 'imageModel', 'imageGenerationModel'] as const
 type ModelPushRole = (typeof PUSH_ROLES)[number]
+const PUSH_TARGETS = ['openclaw', 'pi'] as const
+type ModelPushTarget = (typeof PUSH_TARGETS)[number]
 
 // Map non-fallback roles to the agents.defaults.<key>.primary slot.
 const PRIMARY_SLOT_KEY: Record<Exclude<ModelPushRole, 'fallbacks'>, string> = {
@@ -27,7 +28,8 @@ const PRIMARY_SLOT_KEY: Record<Exclude<ModelPushRole, 'fallbacks'>, string> = {
 const pushSchema = z.object({
   modelId: z.string().min(1),
   instanceIds: z.array(z.string().min(1)).min(1),
-  role: z.enum(PUSH_ROLES),
+  role: z.enum(PUSH_ROLES).optional().default('primary'),
+  targets: z.array(z.enum(PUSH_TARGETS)).min(1).optional().default(['openclaw']),
 })
 
 interface ConfigGetResult {
@@ -74,29 +76,31 @@ async function pushPiModelsConfig(params: {
   instanceId: string
   providerId: string
   providerEntry: ProviderEntry
+  modelId?: string
+  required?: boolean
 }): Promise<Pick<PushOutcome, 'piOk' | 'piError'>> {
-  let lease: Awaited<ReturnType<typeof getRuntimeGatewayClient>> | null = null
-  try {
-    lease = await getRuntimeGatewayClient(params.instanceId, 'pi')
-    if (!lease) return {}
-
-    await lease.client.request(
-      'config.patch',
-      buildPiModelsPatch(params.providerId, params.providerEntry) as unknown as Record<string, unknown>,
-    )
+  const result = await syncPiProviderConfig({
+    instanceId: params.instanceId,
+    entries: { [params.providerId]: params.providerEntry },
+    defaultProviderId: params.modelId ? params.providerId : undefined,
+    defaultModelId: params.modelId,
+  })
+  if (result.skipped) {
+    return params.required
+      ? { piOk: false, piError: 'Pi runtime is not enabled for this instance' }
+      : {}
+  }
+  if (result.ok) {
     return { piOk: true }
-  } catch (err) {
-    const message = (err as Error).message ?? 'unknown'
-    if (message.includes('Pi runtime is not enabled')) return {}
-
+  }
+  if (result.error) {
     console.warn(
       `[resource-push] Pi model sync failed for instance ${params.instanceId}:`,
-      message,
+      result.error,
     )
-    return { piOk: false, piError: message }
-  } finally {
-    lease?.release()
+    return { piOk: false, piError: result.error }
   }
+  return {}
 }
 
 export const POST = withAuth(
@@ -147,39 +151,55 @@ export const POST = withAuth(
       }
       const providerEntry = builtProvider.entry
 
-      await ensureRegistryInitialized()
-      const connected = new Set(registry.getConnectedIds())
+      const targets = Array.from(new Set(body.targets)) as ModelPushTarget[]
+      const wantsOpenClaw = targets.includes('openclaw')
+      const wantsPi = targets.includes('pi')
+      let connected = new Set<string>()
+      if (wantsOpenClaw) {
+        await ensureRegistryInitialized()
+        connected = new Set(registry.getConnectedIds())
+      }
 
       const outcomes: PushOutcome[] = await Promise.all(
         body.instanceIds.map(async (instanceId): Promise<PushOutcome> => {
-          if (!connected.has(instanceId)) {
+          if (wantsOpenClaw && !connected.has(instanceId)) {
             return { instanceId, ok: false, error: 'Instance not connected' }
           }
           try {
-            // config.get is required to obtain baseHash — OpenClaw rejects
-            // config.patch without it. fallbacks additionally consumes
-            // cur.config to append-if-missing; overwrite roles ignore it.
-            const cur = (await registry.request(instanceId, 'config.get')) as ConfigGetResult
-            const rolePatch = buildRolePatch({
-              role: body.role as ModelPushRole,
-              modelRef,
-              currentConfig: cur.config,
-            })
-            const patch = {
-              models: { providers: { [openClawProviderId]: providerEntry } },
-              ...rolePatch,
+            if (wantsOpenClaw) {
+              // config.get is required to obtain baseHash — OpenClaw rejects
+              // config.patch without it. fallbacks additionally consumes
+              // cur.config to append-if-missing; overwrite roles ignore it.
+              const cur = (await registry.request(instanceId, 'config.get')) as ConfigGetResult
+              const rolePatch = buildRolePatch({
+                role: body.role as ModelPushRole,
+                modelRef,
+                currentConfig: cur.config,
+              })
+              const patch = {
+                models: { providers: { [openClawProviderId]: providerEntry } },
+                ...rolePatch,
+              }
+              const sanitized = sanitizeProviderPatch(patch)
+              await registry.request(instanceId, 'config.patch', {
+                raw: JSON.stringify(sanitized),
+                baseHash: cur.hash,
+              })
             }
-            const sanitized = sanitizeProviderPatch(patch)
-            await registry.request(instanceId, 'config.patch', {
-              raw: JSON.stringify(sanitized),
-              baseHash: cur.hash,
-            })
             const piResult = await pushPiModelsConfig({
               instanceId,
               providerId: openClawProviderId,
               providerEntry,
+              modelId: wantsPi ? body.modelId : undefined,
+              required: wantsPi,
             })
-            return { instanceId, ok: true, ...piResult }
+            const ok = wantsPi && piResult.piOk !== true ? false : true
+            return {
+              instanceId,
+              ok,
+              error: ok ? undefined : piResult.piError,
+              ...piResult,
+            }
           } catch (err) {
             return {
               instanceId,
@@ -201,6 +221,7 @@ export const POST = withAuth(
         details: {
           modelRef,
           role: body.role,
+          targets: targets.join(','),
           successInstanceIds: successIds.join(','),
           failedInstanceIds: failedOutcomes.map((o) => o.instanceId).join(','),
         },
@@ -212,6 +233,7 @@ export const POST = withAuth(
       return NextResponse.json({
         modelRef,
         role: body.role,
+        targets,
         outcomes,
         successCount: successIds.length,
         failedCount: failedOutcomes.length,

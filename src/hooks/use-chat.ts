@@ -10,6 +10,7 @@ import { useAuthStore } from "@/stores/auth-store"
 import { useChatStore } from "@/stores/chat-store"
 import type { ChatAgentInfo, ChatSessionResponse, ChatHistoryResponse } from "@/types/chat"
 import type { ChatRuntime } from "@/lib/chat/runtime"
+import type { ChatModelSummary } from "@/lib/chat/model-summary"
 
 // ─── Query Key Factory ───────────────────────────────────────────────
 
@@ -17,6 +18,12 @@ export const chatKeys = {
   all: ["chat"] as const,
   agents: () => [...chatKeys.all, "agents"] as const,
   sessions: () => [...chatKeys.all, "sessions"] as const,
+  model: (
+    instanceId: string | null | undefined,
+    agentId: string | null | undefined,
+    runtime: ChatRuntime,
+    sessionId: string | null | undefined,
+  ) => [...chatKeys.all, "model", instanceId, agentId, runtime, sessionId ?? null] as const,
   history: (sessionId: string | null) =>
     [...chatKeys.all, "history", sessionId] as const,
 }
@@ -32,6 +39,37 @@ export function useChatAgents() {
     enabled: !!user,
     staleTime: 60_000,
     select: (data) => data.agents,
+  })
+}
+
+export function useChatModel(params: {
+  agent: ChatAgentInfo | null
+  runtime: ChatRuntime
+  sessionId: string | null
+}) {
+  const user = useAuthStore((s) => s.user)
+  const isStreaming = useChatStore((s) => s.isStreaming)
+  const remoteStreaming = useChatStore((s) => s.remoteStreaming)
+  const instanceId = params.agent?.instanceId
+  const agentId = params.agent?.agentId
+
+  return useQuery({
+    queryKey: chatKeys.model(instanceId, agentId, params.runtime, params.sessionId),
+    queryFn: () => {
+      const qs = new URLSearchParams({
+        instanceId: instanceId ?? '',
+        agentId: agentId ?? '',
+        runtime: params.runtime,
+      })
+      if (params.sessionId) qs.set('sessionId', params.sessionId)
+      return api.get<{ model: ChatModelSummary | null }>(
+        `/api/v1/chat/model?${qs.toString()}`,
+      )
+    },
+    enabled: !!user && !!instanceId && !!agentId,
+    staleTime: 15_000,
+    refetchInterval: isStreaming || remoteStreaming ? 5_000 : false,
+    select: (data) => data.model,
   })
 }
 

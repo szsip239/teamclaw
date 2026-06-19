@@ -34,6 +34,12 @@ describe('pi models translator', () => {
     expect(mapProviderApiToPiApi(undefined)).toBe('openai-completions')
   })
 
+  it('rejects unsupported API identifiers instead of silently using OpenAI', () => {
+    expect(() => mapProviderApiToPiApi('unknown-provider-api')).toThrow(
+      'Unsupported Pi provider API type',
+    )
+  })
+
   it('keeps provider credentials and model capability metadata in pi format', () => {
     expect(toPiProviderEntry(providerEntry)).toEqual({
       baseUrl: 'https://api.anthropic.com',
@@ -74,6 +80,17 @@ describe('pi models translator', () => {
             ],
           },
         },
+      },
+    })
+  })
+
+  it('can include Pi default model settings for manual Pi pushes', () => {
+    expect(buildPiModelsPatch('anthropic', providerEntry, {
+      defaultModelId: 'claude-sonnet-4-20250514',
+    })).toMatchObject({
+      settings: {
+        defaultProvider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-20250514',
       },
     })
   })

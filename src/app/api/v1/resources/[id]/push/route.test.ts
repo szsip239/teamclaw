@@ -48,7 +48,7 @@ vi.mock('@/lib/resources/credential-utils', () => ({
 
 import { POST } from './route'
 
-function createRequest() {
+function createRequest(body: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/v1/resources/resource-1/push', {
     headers: {
       'content-type': 'application/json',
@@ -59,6 +59,7 @@ function createRequest() {
       modelId: 'claude-sonnet-4-20250514',
       instanceIds: ['instance-1'],
       role: 'primary',
+      ...body,
     }),
   })
 }
@@ -142,6 +143,53 @@ describe('resource model push route pi sync', () => {
     expect(mocks.piLease.release).toHaveBeenCalled()
   })
 
+  it('pushes a Pi-only target without patching OpenClaw and sets the Pi default for new sessions', async () => {
+    const response = await POST(createRequest({
+      targets: ['pi'],
+      role: undefined,
+    }), routeCtx())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.successCount).toBe(1)
+    expect(body.outcomes).toEqual([
+      expect.objectContaining({ instanceId: 'instance-1', ok: true, piOk: true }),
+    ])
+    expect(mocks.ensureRegistryInitialized).not.toHaveBeenCalled()
+    expect(mocks.registry.request).not.toHaveBeenCalled()
+    expect(mocks.piClient.request).toHaveBeenCalledWith('config.patch', {
+      models: {
+        providers: {
+          anthropic: expect.objectContaining({
+            api: 'anthropic-messages',
+            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+          }),
+        },
+      },
+      settings: {
+        defaultProvider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-20250514',
+      },
+    })
+  })
+
+  it('keeps OpenClaw-only push from changing the Pi default model', async () => {
+    const response = await POST(createRequest({ targets: ['openclaw'] }), routeCtx())
+
+    expect(response.status).toBe(200)
+    const piPatch = mocks.piClient.request.mock.calls[0]?.[1]
+    expect(piPatch).toEqual({
+      models: {
+        providers: {
+          anthropic: expect.objectContaining({
+            api: 'anthropic-messages',
+          }),
+        },
+      },
+    })
+    expect(piPatch.settings).toBeUndefined()
+  })
+
   it('keeps OpenClaw push successful when pi-wrapper sync fails', async () => {
     mocks.piClient.request.mockRejectedValue(new Error('pi-wrapper unavailable'))
 
@@ -160,6 +208,25 @@ describe('resource model push route pi sync', () => {
       }),
     ])
     expect(mocks.piLease.release).toHaveBeenCalled()
+  })
+
+  it('fails the instance outcome when an explicitly requested Pi target fails', async () => {
+    mocks.piClient.request.mockRejectedValue(new Error('pi-wrapper unavailable'))
+
+    const response = await POST(createRequest({ targets: ['pi'] }), routeCtx())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.successCount).toBe(0)
+    expect(body.failedCount).toBe(1)
+    expect(body.outcomes).toEqual([
+      expect.objectContaining({
+        instanceId: 'instance-1',
+        ok: false,
+        piOk: false,
+        piError: 'pi-wrapper unavailable',
+      }),
+    ])
   })
 
   it('skips pi sync without failing when the target instance has no pi runtime', async () => {
