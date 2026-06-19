@@ -13,7 +13,9 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Loader2, Send } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api-client"
+import { chatKeys } from "@/hooks/use-chat"
 import { useInstances } from "@/hooks/use-instances"
 import { useT } from "@/stores/language-store"
 import type { TranslationKey } from "@/locales/zh-CN"
@@ -56,6 +58,7 @@ export function ModelPushDialog({
   model,
 }: ModelPushDialogProps) {
   const t = useT()
+  const qc = useQueryClient()
   const { data: instancesData, isLoading: instancesLoading } = useInstances({
     pageSize: 100,
     status: "ONLINE",
@@ -113,6 +116,9 @@ export function ModelPushDialog({
           role: selectedTargets.has("openclaw") ? role : undefined,
         },
       )
+      if (result.successCount > 0) {
+        void qc.invalidateQueries({ queryKey: [...chatKeys.all, "model"] })
+      }
       if (result.failedCount === 0) {
         toast.success(
           t('resource.pushModelSuccess', { count: String(result.successCount) }),

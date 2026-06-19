@@ -64,8 +64,24 @@ async function executeTest(
   let method = testEndpoint.method
   let headers = testEndpoint.headers(apiKey)
   let body = testEndpoint.body ? JSON.stringify(testEndpoint.body(apiKey, baseUrl)) : undefined
+  const apiType = config?.apiType || providerDef.apiType
 
-  if (isVolcenginePlanChatEndpoint(providerDef.id, baseUrl)) {
+  if (apiType === 'anthropic-messages') {
+    const modelId = normalizeModelId(
+      config?.defaultModelId ||
+        config?.models?.[0]?.id ||
+        providerDef.defaultModels?.[0]?.id ||
+        'claude-sonnet-4-5-20250929',
+    )
+    url = versionedEndpoint(baseUrl, 'messages')
+    method = 'POST'
+    headers = anthropicHeaders(apiKey)
+    body = JSON.stringify({
+      model: modelId,
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+  } else if (isVolcenginePlanChatEndpoint(providerDef.id, baseUrl)) {
     const normalized = normalizeBaseUrl(baseUrl)
     const modelId = normalizeModelId(
       config?.defaultModelId || config?.models?.[0]?.id || getDefaultVolcenginePlanModel(baseUrl),
@@ -145,6 +161,13 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
 }
 
+function versionedEndpoint(baseUrl: string, path: string): string {
+  const normalized = normalizeBaseUrl(baseUrl)
+  return normalized.endsWith('/v1')
+    ? `${normalized}/${path}`
+    : `${normalized}/v1/${path}`
+}
+
 function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
   if (providerId !== 'doubao') return baseUrl
 
@@ -161,6 +184,14 @@ function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
 
 function bearerHeaders(key: string): Record<string, string> {
   return { Authorization: `Bearer ${key}` }
+}
+
+function anthropicHeaders(key: string): Record<string, string> {
+  return {
+    'x-api-key': key,
+    'anthropic-version': '2023-06-01',
+    'Content-Type': 'application/json',
+  }
 }
 
 function normalizeModelId(modelId: string): string {

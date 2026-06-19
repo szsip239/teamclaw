@@ -90,3 +90,40 @@ describe('testConnection volcengine coding plan', () => {
     )
   })
 })
+
+describe('testConnection anthropic-compatible resources', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('uses an anthropic messages smoke test when a DeepSeek resource is configured as anthropic-compatible', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 'msg-test' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await testConnection('deepseek', 'encrypted', {
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      apiType: 'anthropic-messages',
+      defaultModelId: 'deepseek-v4-flash',
+      models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.deepseek.com/anthropic/v1/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-api-key': 'test-key',
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        }),
+        body: expect.stringContaining('"model":"deepseek-v4-flash"'),
+      }),
+    )
+  })
+})
