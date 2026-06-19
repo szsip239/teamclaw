@@ -1,5 +1,6 @@
 import type { AgentCategory } from './agent'
 import type { KbCategory } from './knowledge-base'
+import type { ChatRuntime } from '@/lib/chat/runtime'
 
 /** Knowledge base source reference — shown under assistant messages */
 export interface KbSourceRef {
@@ -23,6 +24,7 @@ export interface ChatAgentInfo {
   agentId: string
   agentName: string
   status: string
+  availableRuntimes?: ChatRuntime[]
   model?: string
   category?: AgentCategory
   hasContainer?: boolean
@@ -47,8 +49,12 @@ export interface ChatAttachment {
 }
 
 export interface ChatSessionResponse {
-  id: string
+  id: string // visible conversation id; grouped sessions use conversationGroupId
+  conversationGroupId?: string
   sessionId: string // OpenClaw session key (e.g. "agent:<agentId>:tc:<userId>")
+  runtime: ChatRuntime
+  runtimes?: ChatRuntime[]
+  sessionIdsByRuntime?: Partial<Record<ChatRuntime, string>>
   instanceId: string
   instanceName: string
   agentId: string
@@ -76,6 +82,7 @@ export interface ChatHistoryResponse {
 
 export interface ChatMessage {
   id: string
+  sourceSessionId?: string
   role: 'user' | 'assistant'
   content: string // plain text (backward compatible)
   contentBlocks?: ChatContentBlock[] // structured content blocks (images, etc.)
@@ -84,6 +91,7 @@ export interface ChatMessage {
   messageSeq?: number
   stopReason?: string
   isFinal?: boolean
+  runtime?: ChatRuntime
   error?: string
   createdAt: string
   attachments?: ChatAttachment[] // user-uploaded attachments

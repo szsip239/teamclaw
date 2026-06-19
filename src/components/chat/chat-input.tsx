@@ -7,6 +7,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { agentSupportsChatRuntime } from '@/lib/chat/runtime-options'
+import { cn } from '@/lib/utils'
+import type { ChatRuntime } from '@/lib/chat/runtime'
 
 const IMAGE_MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const FILE_MAX_SIZE = 5 * 1024 * 1024 // 5MB
@@ -21,6 +24,60 @@ interface PendingFile {
   dataUrl: string // data URL (for preview)
 }
 
+function ChatRuntimeSwitch() {
+  const t = useT()
+  const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
+  const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
+  const piAvailable = agentSupportsChatRuntime(selectedAgent, 'pi')
+
+  const options: { runtime: ChatRuntime; label: string; disabled?: boolean; title?: string }[] = [
+    {
+      runtime: 'openclaw',
+      label: t('chat.runtimeNormal'),
+      disabled: !selectedAgent,
+    },
+    {
+      runtime: 'pi',
+      label: t('chat.runtimeFast'),
+      disabled: !selectedAgent || !piAvailable,
+      title: piAvailable ? undefined : t('chat.piUnavailable'),
+    },
+  ]
+
+  return (
+    <div
+      className="bg-muted/60 flex h-8 w-[108px] shrink-0 items-center rounded-full border border-border/70 p-0.5 sm:w-[118px]"
+      role="group"
+      aria-label={t('chat.runtimeLabel')}
+      title={t('chat.runtimeLabel')}
+    >
+      {options.map((option) => {
+        const active = selectedRuntime === option.runtime
+        return (
+          <button
+            key={option.runtime}
+            type="button"
+            aria-pressed={active}
+            disabled={option.disabled}
+            title={option.title ?? option.label}
+            onClick={() => setSelectedRuntime(option.runtime)}
+            className={cn(
+              'flex h-7 min-w-0 flex-1 items-center justify-center rounded-full px-2 text-[11px] font-medium transition-colors sm:text-xs',
+              active && option.runtime === 'openclaw' && 'bg-slate-600 text-white shadow-sm',
+              active && option.runtime === 'pi' && 'bg-teal-600 text-white shadow-sm',
+              !active && 'text-muted-foreground hover:text-foreground',
+              option.disabled && 'cursor-not-allowed opacity-45 hover:text-muted-foreground',
+            )}
+          >
+            <span className="truncate">{option.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function ChatInput() {
   const t = useT()
   const isMobile = useIsMobile()
@@ -30,6 +87,7 @@ export function ChatInput() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const remoteStreaming = useChatStore((s) => s.remoteStreaming)
   const abortChat = useChatStore((s) => s.abortChat)
@@ -51,11 +109,12 @@ export function ChatInput() {
 
     if (isStreaming || remoteStreaming) {
       // Agent is running — queue the message (gateway handles serialization)
-      queueMessage(message, attachments)
+      queueMessage(selectedRuntime, message, attachments)
     } else {
       sendMessage(
         selectedAgent.instanceId,
         selectedAgent.agentId,
+        selectedRuntime,
         message,
         activeSessionId ?? undefined,
         attachments,
@@ -74,6 +133,7 @@ export function ChatInput() {
     input,
     pendingFiles,
     selectedAgent,
+    selectedRuntime,
     isStreaming,
     remoteStreaming,
     sendMessage,
@@ -242,13 +302,15 @@ export function ChatInput() {
             </Button>
           )}
 
+          <ChatRuntimeSwitch />
+
           <Textarea
             ref={textareaRef}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={t('chat.inputPlaceholder')}
-            className="min-h-8 max-h-[200px] resize-none border-0 bg-transparent px-1 py-1.5 text-sm leading-5 shadow-none focus-visible:ring-0"
+            className="min-h-8 max-h-[200px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm leading-5 shadow-none focus-visible:ring-0"
             rows={1}
             enterKeyHint="send"
           />

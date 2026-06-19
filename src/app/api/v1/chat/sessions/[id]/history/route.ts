@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import {
   extractText,
   extractThinking,
@@ -13,6 +12,7 @@ import {
   mergeLiveMessagesAppendOnly,
   mergeToolInputs,
   shouldUseLiveMessagesFallback,
+  gatewayMessageCreatedAt,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
@@ -20,6 +20,12 @@ import { activeRuns } from '@/lib/chat/active-runs'
 import { imageBlockDisplayKey, imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
 import { parseSessionMessage } from '@/lib/chat/session-message'
 import { sanitizeOutputArtifactLinks } from '@/lib/session-files/artifacts'
+import { buildChatRuntimeSessionKey, fromDbChatRuntime } from '@/lib/chat/runtime'
+import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
+import {
+  sortChatMessagesForDisplay,
+  withRuntimeMessageMetadata,
+} from '@/lib/chat/history-runtime-messages'
 import type { ChatHistoryResult, ChatHistoryMessage } from '@/types/gateway'
 import type {
   ChatMessage,
@@ -83,14 +89,16 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
-        createdAt: new Date().toISOString(),
+        messageSeq: orderIndex,
+        createdAt: gatewayMessageCreatedAt(msg) ?? '',
       })
       orderIndex++
     } else if (msg.role === 'assistant') {
       const id = `current-${orderIndex}`
+      const messageSeq = orderIndex
       const parsed = parseSessionMessage({
         messageId: id,
-        messageSeq: orderIndex,
+        messageSeq,
         message: msg,
       })
       const rawText = extractText(msg.content) || parsed.text
@@ -119,8 +127,8 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
               stopReason: parsed.stopReason,
               isFinal: parsed.isFinal,
             }
-          : {}),
-        createdAt: new Date().toISOString(),
+          : { messageSeq }),
+        createdAt: gatewayMessageCreatedAt(msg) ?? '',
       })
       orderIndex++
     } else if (msg.role === 'toolResult') {
@@ -142,7 +150,12 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   // Move their text content into the thinking field so it renders in the
   // collapsible thinking block instead of as prominent chat text.
   for (const msg of result) {
-    if (msg.role === 'assistant' && msg.stopReason == null && msg.toolCalls?.length && msg.content) {
+    if (
+      msg.role === 'assistant' &&
+      msg.stopReason == null &&
+      msg.toolCalls?.length &&
+      msg.content
+    ) {
       msg.thinking = msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
       msg.content = ''
     }
@@ -172,6 +185,19 @@ function replaceInlineImages(messages: ChatMessage[], sessionId: string): void {
   }
 }
 
+function replaceInlineImagesBySource(messages: ChatMessage[], fallbackSessionId: string): void {
+  const bySession = new Map<string, ChatMessage[]>()
+  for (const message of messages) {
+    const sourceSessionId = message.sourceSessionId ?? fallbackSessionId
+    const group = bySession.get(sourceSessionId) ?? []
+    group.push(message)
+    bySession.set(sourceSessionId, group)
+  }
+  for (const [sourceSessionId, group] of bySession) {
+    replaceInlineImages(group, sourceSessionId)
+  }
+}
+
 function dedupeContentBlocks(blocks: ChatContentBlock[]): ChatContentBlock[] {
   const seen = new Set<string>()
   const unique: ChatContentBlock[] = []
@@ -194,34 +220,52 @@ export const GET = withAuth(
       return NextResponse.json({ error: 'Missing session ID' }, { status: 400 })
     }
 
-    const session = await prisma.chatSession.findUnique({ where: { id } })
+    const session = await prisma.chatSession.findFirst({
+      where: {
+        userId: ctx.user.id,
+        OR: [{ id }, { conversationGroupId: id }],
+      },
+    })
 
     if (!session) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
-    if (session.userId !== ctx.user.id) {
-      return NextResponse.json({ error: 'No access to this session' }, { status: 403 })
-    }
+    const conversationGroupId = session.conversationGroupId ?? session.id
+    const groupSessions = await prisma.chatSession.findMany({
+      where: {
+        userId: ctx.user.id,
+        instanceId: session.instanceId,
+        agentId: session.agentId,
+        OR: [{ id: conversationGroupId }, { conversationGroupId }],
+      },
+      orderBy: [{ createdAt: 'asc' }],
+    })
+    const groupSessionIds = groupSessions.map((item) => item.id)
+    const runtimeBySessionId = new Map(
+      groupSessions.map((item) => [item.id, fromDbChatRuntime(item.runtime)]),
+    )
 
     // 1. Load snapshot messages from DB
     const snapshotRows = await prisma.chatMessageSnapshot.findMany({
-      where: { chatSessionId: id },
+      where: { chatSessionId: { in: groupSessionIds } },
       orderBy: [{ createdAt: 'asc' }, { orderIndex: 'asc' }],
     })
 
     // 2. Group by batchId
     const batchMap = new Map<string, { createdAt: string; messages: ChatMessage[] }>()
     for (const row of snapshotRows) {
-      if (!batchMap.has(row.batchId)) {
-        batchMap.set(row.batchId, {
+      const batchId = `${row.chatSessionId}:${row.batchId}`
+      if (!batchMap.has(batchId)) {
+        batchMap.set(batchId, {
           createdAt: row.createdAt.toISOString(),
           messages: [],
         })
       }
-      const batch = batchMap.get(row.batchId)!
+      const batch = batchMap.get(batchId)!
       batch.messages.push({
         id: row.id,
+        sourceSessionId: row.chatSessionId,
         role: row.role as 'user' | 'assistant',
         content: sanitizeOutputArtifactLinks(row.content),
         ...(row.contentBlocks
@@ -229,6 +273,7 @@ export const GET = withAuth(
           : {}),
         ...(row.thinking ? { thinking: row.thinking } : {}),
         ...(row.toolCalls ? { toolCalls: row.toolCalls as unknown as ChatToolCall[] } : {}),
+        runtime: runtimeBySessionId.get(row.chatSessionId),
         createdAt: row.createdAt.toISOString(),
       })
     }
@@ -241,82 +286,120 @@ export const GET = withAuth(
       }),
     )
 
-    // 3. If session is active, load current messages from OpenClaw
+    // 3. If any runtime session is active, load current messages from its gateway
     let currentMessages: ChatMessage[] = []
     let connectionStatus: 'ok' | 'unreachable' | 'session-lost' = 'ok'
-    const sessionIsActive = session.isActive
+    const sessionIsActive = groupSessions.some((item) => item.isActive)
 
-    if (session.isActive) {
+    for (const runtimeSession of groupSessions) {
+      if (!runtimeSession.isActive) continue
       try {
-        await ensureRegistryInitialized()
-        const client = registry.getClient(session.instanceId)
-        if (client) {
-          const sessionKey = `agent:${session.agentId}:tc:${session.userId}`
-          const rawResult = await client.request(
-            'chat.history',
-            { sessionKey, limit: 1000 },
-            10_000,
-          )
-          const historyResult = rawResult as ChatHistoryResult
-          const msgs = transformMessages(historyResult.messages ?? [])
-          let cachedLive: ChatMessage[] | null = null
+        const runtime = fromDbChatRuntime(runtimeSession.runtime)
+        const lease = await getRuntimeGatewayClient(runtimeSession.instanceId, runtime)
+        if (lease) {
+          try {
+            const sessionKey = buildChatRuntimeSessionKey(
+              runtime,
+              runtimeSession.agentId,
+              runtimeSession.userId,
+            )
+            const rawResult = await lease.client.request(
+              'chat.history',
+              { sessionKey, limit: 1000 },
+              10_000,
+            )
+            const historyResult = rawResult as ChatHistoryResult
+            const msgs = transformMessages(historyResult.messages ?? [])
+            let cachedLive: ChatMessage[] | null = null
 
-          // Merge image contentBlocks from liveMessages (captured during SSE streaming).
-          // chat.history doesn't return inline image blocks, so liveMessages is
-          // the primary source of image data for page refreshes.
-          if (session.liveMessages) {
-            const cached = session.liveMessages as unknown as ChatMessage[]
-            if (Array.isArray(cached)) {
-              cachedLive = cached
-            }
-          }
-
-          const sameGatewaySession =
-            !session.gwSessionId ||
-            !historyResult.sessionId ||
-            session.gwSessionId === historyResult.sessionId
-
-          if (
-            cachedLive &&
-            shouldUseLiveMessagesFallback(msgs, cachedLive, sameGatewaySession)
-          ) {
-            currentMessages = mergeLiveMessagesAppendOnly(cachedLive, msgs)
-          } else {
-            if (cachedLive) {
-              mergeExistingContentBlocks(msgs, cachedLive)
-              mergeToolInputs(msgs, cachedLive)
-            }
-            currentMessages = msgs
-          }
-
-          // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
-          // Don't auto-archive — let the user decide whether to retry or start a new conversation.
-          // The session stays active so the user can simply send a new message to continue.
-          const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
-          const sessionAgeMs = Date.now() - session.createdAt.getTime()
-          if (
-            !isPolling &&
-            !activeRuns.has(id) &&
-            currentMessages.length === 0 &&
-            sessionAgeMs > 30_000 &&
-            session.messageCount > 0
-          ) {
-            connectionStatus = 'session-lost'
-            if (session.liveMessages) {
-              const cached = session.liveMessages as unknown as ChatMessage[]
+            // Merge image contentBlocks from liveMessages (captured during SSE streaming).
+            // chat.history doesn't return inline image blocks, so liveMessages is
+            // the primary source of image data for page refreshes.
+            if (runtimeSession.liveMessages) {
+              const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
               if (Array.isArray(cached)) {
-                currentMessages = cached
+                cachedLive = cached
               }
             }
+
+            const sameGatewaySession =
+              !runtimeSession.gwSessionId ||
+              !historyResult.sessionId ||
+              runtimeSession.gwSessionId === historyResult.sessionId
+
+            let sessionMessages: ChatMessage[]
+            if (cachedLive && sameGatewaySession) {
+              sessionMessages = mergeLiveMessagesAppendOnly(cachedLive, msgs)
+            } else if (
+              cachedLive &&
+              shouldUseLiveMessagesFallback(msgs, cachedLive, sameGatewaySession)
+            ) {
+              sessionMessages = mergeLiveMessagesAppendOnly(cachedLive, msgs)
+            } else {
+              if (cachedLive) {
+                mergeExistingContentBlocks(msgs, cachedLive)
+                mergeToolInputs(msgs, cachedLive)
+              }
+              sessionMessages = msgs
+            }
+            const baseTime = new Date(
+              runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
+            ).getTime()
+            sessionMessages = withRuntimeMessageMetadata(sessionMessages, {
+              sourceSessionId: runtimeSession.id,
+              runtime,
+              baseTimeMs: baseTime,
+            })
+            replaceInlineImagesBySource(sessionMessages, runtimeSession.id)
+            currentMessages.push(...sessionMessages)
+
+            // Stale session detection: gateway responded but session was destroyed (SIGUSR1 restart).
+            // Don't auto-archive — let the user decide whether to retry or start a new conversation.
+            // The session stays active so the user can simply send a new message to continue.
+            const isPolling = new URL(_req.url).searchParams.get('polling') === 'true'
+            const sessionAgeMs = Date.now() - runtimeSession.createdAt.getTime()
+            if (
+              !isPolling &&
+              !activeRuns.has(runtimeSession.id) &&
+              sessionMessages.length === 0 &&
+              sessionAgeMs > 30_000 &&
+              runtimeSession.messageCount > 0
+            ) {
+              connectionStatus = 'session-lost'
+              if (runtimeSession.liveMessages) {
+                const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
+                if (Array.isArray(cached)) {
+                  currentMessages.push(
+                    ...withRuntimeMessageMetadata(cached, {
+                      sourceSessionId: runtimeSession.id,
+                      runtime,
+                      baseTimeMs: baseTime,
+                      idPrefix: 'live:',
+                    }),
+                  )
+                }
+              }
+            }
+          } finally {
+            lease.release()
           }
         } else {
           // Client not available (instance not yet reconnected after restart).
           // Fall back to liveMessages for display without archiving the session.
           connectionStatus = 'unreachable'
-          if (session.liveMessages) {
-            const cached = session.liveMessages as unknown as ChatMessage[]
+          if (runtimeSession.liveMessages) {
+            const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
             if (Array.isArray(cached)) {
-              currentMessages = cached
+              currentMessages.push(
+                ...withRuntimeMessageMetadata(cached, {
+                  sourceSessionId: runtimeSession.id,
+                  runtime: fromDbChatRuntime(runtimeSession.runtime),
+                  baseTimeMs: new Date(
+                    runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
+                  ).getTime(),
+                  idPrefix: 'live:',
+                }),
+              )
             }
           }
         }
@@ -324,14 +407,24 @@ export const GET = withAuth(
         // Gateway unreachable / timeout — show warning, keep session active for retry.
         // Fall back to liveMessages so the user still sees their conversation.
         connectionStatus = 'unreachable'
-        if (session.liveMessages) {
-          const cached = session.liveMessages as unknown as ChatMessage[]
+        if (runtimeSession.liveMessages) {
+          const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
           if (Array.isArray(cached)) {
-            currentMessages = cached
+            currentMessages.push(
+              ...withRuntimeMessageMetadata(cached, {
+                sourceSessionId: runtimeSession.id,
+                runtime: fromDbChatRuntime(runtimeSession.runtime),
+                baseTimeMs: new Date(
+                  runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
+                ).getTime(),
+                idPrefix: 'live:',
+              }),
+            )
           }
         }
       }
     }
+    currentMessages = sortChatMessagesForDisplay(currentMessages)
 
     // Deduplicate: if sessions.delete failed during clear-context,
     // the gateway still has old messages that were already snapshotted.
@@ -354,9 +447,9 @@ export const GET = withAuth(
       }
     }
 
-    replaceInlineImages(currentMessages, id)
+    replaceInlineImagesBySource(currentMessages, conversationGroupId)
     for (const batch of snapshots) {
-      replaceInlineImages(batch.messages, id)
+      replaceInlineImagesBySource(batch.messages, conversationGroupId)
     }
 
     const response: ChatHistoryResponse = {
@@ -364,7 +457,9 @@ export const GET = withAuth(
       currentMessages,
       isActive: sessionIsActive,
       ...(connectionStatus !== 'ok' ? { connectionStatus } : {}),
-      ...(activeRuns.has(id) ? { isRunning: true } : {}),
+      ...(groupSessionIds.some((sessionId) => activeRuns.has(sessionId))
+        ? { isRunning: true }
+        : {}),
     }
 
     return NextResponse.json(response)

@@ -1,14 +1,21 @@
+import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { Prisma } from '@/generated/prisma'
 import { withAuth, withPermission } from '@/lib/middleware/auth'
-import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import { archiveSession } from '@/lib/chat/snapshot-helpers'
+import {
+  buildChatRuntimeSessionKey,
+  fromDbChatRuntime,
+  instanceSupportsPiRuntime,
+  toDbChatRuntime,
+} from '@/lib/chat/runtime'
+import { getRuntimeGatewayClient, markSessionInactive } from '@/lib/chat/runtime-gateway'
 
 const bodySchema = z.object({
   instanceId: z.string().min(1),
   agentId: z.string().min(1),
+  runtime: z.enum(['openclaw', 'pi']).default('openclaw'),
 })
 
 // POST /api/v1/chat/conversations/new — archive current session and create a new one
@@ -29,7 +36,8 @@ export const POST = withAuth(
       )
     }
 
-    const { instanceId, agentId } = parsed.data
+    const { instanceId, agentId, runtime } = parsed.data
+    const dbRuntime = toDbChatRuntime(runtime)
 
     // Permission check
     if (user.role !== 'SYSTEM_ADMIN') {
@@ -53,34 +61,53 @@ export const POST = withAuth(
       }
     }
 
-    // Find current active session
-    const activeSession = await prisma.chatSession.findFirst({
+    const instance = await prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { dockerConfig: true },
+    })
+    if (!instance) {
+      return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
+    }
+    if (runtime === 'pi' && !instanceSupportsPiRuntime(instance.dockerConfig)) {
+      return NextResponse.json(
+        { error: 'Pi runtime is not enabled for this instance' },
+        { status: 503 },
+      )
+    }
+    // Starting a visible conversation resets all active runtime sessions for this agent.
+    const activeSessions = await prisma.chatSession.findMany({
       where: { userId: user.id, instanceId, agentId, isActive: true },
     })
 
-    if (activeSession) {
-      // Archive the active session using shared helper
-      await ensureRegistryInitialized()
-      const client = registry.getClient(instanceId)
+    for (const activeSession of activeSessions) {
+      const sessionRuntime = fromDbChatRuntime(activeSession.runtime)
+      const lease = await getRuntimeGatewayClient(instanceId, sessionRuntime).catch(() => null)
 
-      if (client) {
-        await archiveSession(activeSession.id, instanceId, agentId, user.id, client, { triggerMemoryDump: true, waitForNewCompletion: true })
+      if (!lease) {
+        await markSessionInactive(activeSession.id)
       } else {
-        // No client — just mark inactive + clear liveMessages
-        await prisma.chatSession.update({
-          where: { id: activeSession.id },
-          data: { isActive: false, liveMessages: Prisma.DbNull },
-        })
+        try {
+          await archiveSession(activeSession.id, instanceId, agentId, user.id, lease.client, {
+            runtime: sessionRuntime,
+            triggerMemoryDump: sessionRuntime === 'openclaw',
+            waitForNewCompletion: sessionRuntime === 'openclaw',
+          })
+        } finally {
+          lease.release()
+        }
       }
     }
 
     // Create new active session
-    const sessionKey = `agent:${agentId}:tc:${user.id}`
+    const sessionKey = buildChatRuntimeSessionKey(runtime, agentId, user.id)
+    const conversationGroupId = randomUUID()
     const newSession = await prisma.chatSession.create({
       data: {
         userId: user.id,
         instanceId,
         agentId,
+        runtime: dbRuntime,
+        conversationGroupId,
         sessionId: sessionKey,
         isActive: true,
       },
@@ -89,8 +116,12 @@ export const POST = withAuth(
 
     return NextResponse.json({
       session: {
-        id: newSession.id,
+        id: conversationGroupId,
+        conversationGroupId,
         sessionId: newSession.sessionId,
+        runtime,
+        runtimes: [runtime],
+        sessionIdsByRuntime: { [runtime]: newSession.id },
         instanceId: newSession.instanceId,
         instanceName: newSession.instance.name,
         agentId: newSession.agentId,

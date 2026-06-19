@@ -13,6 +13,16 @@ interface LanguageState {
 
 const translations = { "zh-CN": zhCN, en } as const
 
+function formatTranslation(
+  template: string,
+  params?: Record<string, string | number>,
+): string {
+  if (!params) return template
+  return template.replace(/\{(\w+)\}/g, (_, k) =>
+    k in params ? String(params[k]) : `{${k}}`
+  )
+}
+
 export const useLanguageStore = create<LanguageState>()(
   persist(
     (set) => ({
@@ -26,10 +36,11 @@ export const useLanguageStore = create<LanguageState>()(
 export function useT() {
   const language = useLanguageStore((s) => s.language)
   return (key: TranslationKey, params?: Record<string, string | number>) => {
-    const template = translations[language][key]
-    if (!params) return template
-    return template.replace(/\{(\w+)\}/g, (_, k) =>
-      k in params ? String(params[k]) : `{${k}}`
-    )
+    return formatTranslation(translations[language][key], params)
   }
+}
+
+export function translate(key: TranslationKey, params?: Record<string, string | number>) {
+  const language = useLanguageStore.getState().language
+  return formatTranslation(translations[language][key], params)
 }

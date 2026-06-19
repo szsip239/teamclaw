@@ -51,6 +51,8 @@ export interface InstanceConfigResponse {
 
 export interface DockerConfig {
   imageName?: string
+  enablePiWrapper?: boolean
+  hostPiPort?: number
   env?: Record<string, string>
   portBindings?: Record<string, string>
   volumes?: Record<string, string>

@@ -90,7 +90,13 @@ export class GatewayV1Adapter implements GatewayAdapter {
   }
 
   async getAgent(client: GatewayClient, agentId: string): Promise<GatewayAgent> {
-    return (await client.request('agents.get', { agentId })) as GatewayAgent
+    const { agents, defaultId } = await this.getAgents(client)
+    const resolvedAgentId = agentId === 'default' && defaultId ? defaultId : agentId
+    const agent = agents.find((item) => item.id === resolvedAgentId)
+    if (!agent) {
+      throw new Error(`Agent not found: ${agentId}`)
+    }
+    return agent
   }
 
   async getSessions(client: GatewayClient, agentId?: string): Promise<GatewaySession[]> {
@@ -269,7 +275,7 @@ export class GatewayV1Adapter implements GatewayAdapter {
 }
 
 /** Resolve the appropriate adapter for the connected gateway version. */
-export function resolveAdapter(_version?: string): GatewayAdapter {
+export function resolveAdapter(): GatewayAdapter {
   // For now we only have V1. When OpenClaw ships a breaking protocol change,
   // add a V2 adapter and select based on the version string returned during
   // the connect handshake.

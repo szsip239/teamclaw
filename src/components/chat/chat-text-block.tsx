@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import { Download, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/stores/chat-store'
+import { normalizeChatMarkdown } from '@/lib/chat/markdown'
 
 function ChartLoadingSkeleton() {
   return (
@@ -28,6 +29,7 @@ const ChatMermaidBlock = dynamic(
 
 interface ChatTextBlockProps {
   content: string
+  sessionId?: string
   // Pure predicate run during render: should this href be styled as an
   // in-app interactive chip (instead of an external link)? MUST be pure
   // — no setState. Used by KB QA to recognize page-citation hrefs.
@@ -39,6 +41,7 @@ interface ChatTextBlockProps {
 
 export const ChatTextBlock = memo(function ChatTextBlock({
   content,
+  sessionId,
   shouldIntercept,
   onIntercept,
 }: ChatTextBlockProps) {
@@ -46,7 +49,8 @@ export const ChatTextBlock = memo(function ChatTextBlock({
   // ReactMarkdown strips HTML for safety — turn <br> into actual
   // newlines so bullets and table cells render correctly.
   const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const cleaned = content.replace(/<br\s*\/?>/gi, '\n')
+  const downloadSessionId = sessionId ?? activeSessionId
+  const cleaned = normalizeChatMarkdown(content.replace(/<br\s*\/?>/gi, '\n'))
   return (
     <div className="text-sm leading-relaxed prose-chat overflow-x-auto min-w-0">
       <ReactMarkdown
@@ -119,8 +123,8 @@ export const ChatTextBlock = memo(function ChatTextBlock({
           // --- Links ---
           a({ href, children }) {
             // Agent output files: rewrite output/ links to session download API
-            if (typeof href === 'string' && href.startsWith('output/') && activeSessionId) {
-              const apiUrl = `/api/v1/chat/sessions/${activeSessionId}/files/${href}`
+            if (typeof href === 'string' && href.startsWith('output/') && downloadSessionId) {
+              const apiUrl = `/api/v1/chat/sessions/${downloadSessionId}/files/${href}`
               return (
                 <a href={apiUrl} download target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 underline decoration-blue-600/30 dark:decoration-blue-400/30 hover:decoration-blue-600 dark:hover:decoration-blue-400 cursor-pointer"

@@ -14,6 +14,8 @@ const modelProviderSchema = z.object({
 const dockerConfigSchema = z.object({
   imageName: z.string().min(1).optional(),
   pullLatest: z.boolean().optional(),
+  enablePiWrapper: z.boolean().optional(),
+  hostPiPort: z.number().int().positive().optional(),
   env: z.record(z.string(), z.string()).optional(),
   portBindings: z.record(z.string(), z.string()).optional(),
   volumes: z.record(z.string(), z.string()).optional(),

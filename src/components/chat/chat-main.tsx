@@ -12,6 +12,7 @@ import {
   assembleHistoryMessages,
   latestUserTurnHasFinalAssistant,
 } from '@/lib/chat/message-assembly'
+import { selectMatchingChatSession } from '@/lib/chat/session-selection'
 
 export function ChatMain() {
   const selectedAgent = useChatStore((s) => s.selectedAgent)
@@ -27,19 +28,7 @@ export function ChatMain() {
   // Find existing session for the selected agent.
   // Prefer active session, fall back to the most recent inactive one (e.g. after gateway restart).
   const { data: sessions } = useChatSessions()
-  const matchingSession = selectedAgent
-    ? ((activeSessionId
-        ? sessions?.find((s) => s.id === activeSessionId)
-        : (sessions?.find(
-            (s) =>
-              s.instanceId === selectedAgent.instanceId &&
-              s.agentId === selectedAgent.agentId &&
-              s.isActive,
-          ) ??
-          sessions?.find(
-            (s) => s.instanceId === selectedAgent.instanceId && s.agentId === selectedAgent.agentId,
-          ))) ?? null)
-    : null
+  const matchingSession = selectMatchingChatSession(sessions, selectedAgent, activeSessionId)
 
   // Fetch history when we have a matching session
   const {
@@ -57,7 +46,7 @@ export function ChatMain() {
 
   // Set activeSessionId when we find a matching session
   useEffect(() => {
-    if (matchingSession && !activeSessionId) {
+    if (matchingSession && activeSessionId !== matchingSession.id) {
       setActiveSessionId(matchingSession.id)
     }
   }, [matchingSession, activeSessionId, setActiveSessionId])

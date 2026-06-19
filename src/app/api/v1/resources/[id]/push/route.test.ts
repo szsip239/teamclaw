@@ -1,0 +1,183 @@
+import { NextRequest } from 'next/server'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+  auditLog: vi.fn(),
+  getRuntimeGatewayClient: vi.fn(),
+  ensureRegistryInitialized: vi.fn(),
+  piClient: {
+    request: vi.fn(),
+  },
+  piLease: {
+    release: vi.fn(),
+  },
+  prisma: {
+    resource: {
+      findUnique: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
+    },
+  },
+  registry: {
+    getConnectedIds: vi.fn(),
+    request: vi.fn(),
+  },
+}))
+
+vi.mock('@/lib/audit', () => ({
+  auditLog: mocks.auditLog,
+}))
+
+vi.mock('@/lib/chat/runtime-gateway', () => ({
+  getRuntimeGatewayClient: mocks.getRuntimeGatewayClient,
+}))
+
+vi.mock('@/lib/db', () => ({
+  prisma: mocks.prisma,
+}))
+
+vi.mock('@/lib/gateway/registry', () => ({
+  ensureRegistryInitialized: mocks.ensureRegistryInitialized,
+  registry: mocks.registry,
+}))
+
+vi.mock('@/lib/resources/credential-utils', () => ({
+  decryptCredential: vi.fn(() => 'secret-key'),
+}))
+
+import { POST } from './route'
+
+function createRequest() {
+  return new NextRequest('http://localhost/api/v1/resources/resource-1/push', {
+    headers: {
+      'content-type': 'application/json',
+      'x-user-id': 'user-1',
+    },
+    method: 'POST',
+    body: JSON.stringify({
+      modelId: 'claude-sonnet-4-20250514',
+      instanceIds: ['instance-1'],
+      role: 'primary',
+    }),
+  })
+}
+
+function routeCtx() {
+  return { params: Promise.resolve({ id: 'resource-1' }) }
+}
+
+describe('resource model push route pi sync', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mocks.prisma.user.findUnique.mockResolvedValue({
+      avatar: null,
+      department: null,
+      departmentId: null,
+      email: 'user@example.com',
+      id: 'user-1',
+      name: 'Test User',
+      role: 'SYSTEM_ADMIN',
+      status: 'ACTIVE',
+    })
+    mocks.prisma.resource.findUnique.mockResolvedValue({
+      config: {
+        apiType: 'anthropic',
+        baseUrl: 'https://api.anthropic.com',
+        models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+      },
+      credentials: 'encrypted',
+      id: 'resource-1',
+      provider: 'anthropic',
+      type: 'MODEL',
+    })
+    mocks.registry.getConnectedIds.mockReturnValue(['instance-1'])
+    mocks.registry.request.mockImplementation(async (instanceId, method) => {
+      if (instanceId !== 'instance-1') throw new Error('unexpected instance')
+      if (method === 'config.get') {
+        return { hash: 'hash-1', config: { agents: { defaults: {} } } }
+      }
+      if (method === 'config.patch') return { ok: true }
+      throw new Error(`unexpected method ${method}`)
+    })
+    mocks.piClient.request.mockResolvedValue({ ok: true })
+    mocks.piLease.release.mockReset()
+    mocks.getRuntimeGatewayClient.mockResolvedValue({
+      ...mocks.piLease,
+      client: mocks.piClient,
+      temporary: true,
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('pushes pi-compatible provider config to pi-wrapper after OpenClaw config succeeds', async () => {
+    const response = await POST(createRequest(), routeCtx())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.outcomes).toEqual([
+      expect.objectContaining({ instanceId: 'instance-1', ok: true, piOk: true }),
+    ])
+    expect(mocks.registry.request).toHaveBeenCalledWith('instance-1', 'config.patch', {
+      raw: expect.stringContaining('"agents"'),
+      baseHash: 'hash-1',
+    })
+    expect(mocks.getRuntimeGatewayClient).toHaveBeenCalledWith('instance-1', 'pi')
+    expect(mocks.piClient.request).toHaveBeenCalledWith('config.patch', {
+      models: {
+        providers: {
+          anthropic: {
+            baseUrl: 'https://api.anthropic.com',
+            apiKey: 'secret-key',
+            api: 'anthropic-messages',
+            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+          },
+        },
+      },
+    })
+    expect(mocks.piLease.release).toHaveBeenCalled()
+  })
+
+  it('keeps OpenClaw push successful when pi-wrapper sync fails', async () => {
+    mocks.piClient.request.mockRejectedValue(new Error('pi-wrapper unavailable'))
+
+    const response = await POST(createRequest(), routeCtx())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.successCount).toBe(1)
+    expect(body.failedCount).toBe(0)
+    expect(body.outcomes).toEqual([
+      expect.objectContaining({
+        instanceId: 'instance-1',
+        ok: true,
+        piOk: false,
+        piError: 'pi-wrapper unavailable',
+      }),
+    ])
+    expect(mocks.piLease.release).toHaveBeenCalled()
+  })
+
+  it('skips pi sync without failing when the target instance has no pi runtime', async () => {
+    mocks.getRuntimeGatewayClient.mockRejectedValue(
+      new Error('Pi runtime is not enabled for this instance'),
+    )
+
+    const response = await POST(createRequest(), routeCtx())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.successCount).toBe(1)
+    expect(body.failedCount).toBe(0)
+    expect(body.outcomes).toEqual([
+      expect.objectContaining({ instanceId: 'instance-1', ok: true }),
+    ])
+    expect(body.outcomes[0].piOk).toBeUndefined()
+    expect(body.outcomes[0].piError).toBeUndefined()
+    expect(mocks.piClient.request).not.toHaveBeenCalled()
+  })
+})

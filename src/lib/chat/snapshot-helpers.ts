@@ -17,6 +17,7 @@ import {
   sanitizeOutputArtifactLinks,
   stripOutputArtifactLinksToLabels,
 } from '@/lib/session-files/artifacts'
+import { buildChatRuntimeSessionKey, type ChatRuntime } from '@/lib/chat/runtime'
 import type { ChatHistoryMessage, ChatHistoryResult } from '@/types/gateway'
 import type { ChatToolCall, ChatContentBlock, ChatMessage } from '@/types/chat'
 import type { GatewayClient } from '@/lib/gateway/client'
@@ -26,10 +27,7 @@ export const MAX_LIVE_MESSAGES = 800
 
 const snapshotLocks = new Map<string, Promise<void>>()
 
-async function withSessionSnapshotLock<T>(
-  chatSessionId: string,
-  fn: () => Promise<T>,
-): Promise<T> {
+async function withSessionSnapshotLock<T>(chatSessionId: string, fn: () => Promise<T>): Promise<T> {
   const previous = snapshotLocks.get(chatSessionId) ?? Promise.resolve()
   const run = previous.catch(() => {}).then(fn)
   const tracked = run.then(
@@ -69,7 +67,9 @@ export function extractThinking(content: ChatHistoryMessage['content']): string 
   return parts.join('\n').trim()
 }
 
-export function extractContentBlocks(content: ChatHistoryMessage['content']): ChatContentBlock[] | undefined {
+export function extractContentBlocks(
+  content: ChatHistoryMessage['content'],
+): ChatContentBlock[] | undefined {
   if (!Array.isArray(content)) return undefined
   const blocks: ChatContentBlock[] = []
   for (const block of content) {
@@ -138,6 +138,28 @@ export function splitThinkingFallback(thinking: string): { thinking: string; tex
   return { thinking, text: '' }
 }
 
+function parseGatewayMessageTime(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+  if (typeof value !== 'string' || !value.trim()) return undefined
+
+  const raw = value.trim()
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric) && raw.length >= 10) {
+    const date = new Date(numeric)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+export function gatewayMessageCreatedAt(message: ChatHistoryMessage): string | undefined {
+  return parseGatewayMessageTime(message.timestamp) ?? parseGatewayMessageTime(message.createdAt)
+}
+
 // ─── Snapshot building ───────────────────────────────────────────────
 
 /**
@@ -158,6 +180,7 @@ export function buildSnapshotData(
       const text = stripRagContextForDisplay(stripUserMetadata(extractText(msg.content)))
       const cb = extractContentBlocks(msg.content)
       if (text) lastUserMessage = text
+      const createdAt = gatewayMessageCreatedAt(msg)
       snapshotData.push({
         chatSessionId,
         batchId,
@@ -165,14 +188,18 @@ export function buildSnapshotData(
         role: 'user',
         content: text,
         contentBlocks: cb ? (cb as unknown as Prisma.InputJsonValue) : undefined,
+        ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
       })
     } else if (msg.role === 'assistant') {
+      const createdAt = gatewayMessageCreatedAt(msg)
       const parsed = parseSessionMessage({
         messageId: String(orderIndex),
         messageSeq: orderIndex,
         message: msg,
       })
-      let text = sanitizeOutputArtifactLinks(stripFinalTags(extractText(msg.content) || parsed.text))
+      let text = sanitizeOutputArtifactLinks(
+        stripFinalTags(extractText(msg.content) || parsed.text),
+      )
       let thinking = parsed.thinking ?? extractThinking(msg.content)
       const cb = extractContentBlocks(msg.content)
 
@@ -199,6 +226,7 @@ export function buildSnapshotData(
         toolCalls: parsed.toolCalls
           ? (parsed.toolCalls as unknown as Prisma.InputJsonValue)
           : undefined,
+        ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
       })
     } else if (msg.role === 'toolResult') {
       const lastSnapshot = snapshotData[snapshotData.length - 1]
@@ -235,7 +263,7 @@ function mergeContentBlocksIntoSnapshots(
     liveIdx++
 
     if (snap.contentBlocks) continue // already has content blocks
-    const imageBlocks = live.contentBlocks?.filter(b => b.type === 'image')
+    const imageBlocks = live.contentBlocks?.filter((b) => b.type === 'image')
     if (imageBlocks?.length) {
       snap.contentBlocks = imageBlocks as unknown as Prisma.InputJsonValue
     }
@@ -272,9 +300,14 @@ export async function archiveSession(
   agentId: string,
   userId: string,
   client: GatewayClient,
-  opts?: { keepActive?: boolean; triggerMemoryDump?: boolean; waitForNewCompletion?: boolean },
+  opts?: {
+    keepActive?: boolean
+    runtime?: ChatRuntime
+    triggerMemoryDump?: boolean
+    waitForNewCompletion?: boolean
+  },
 ): Promise<void> {
-  const sessionKey = `agent:${agentId}:tc:${userId}`
+  const sessionKey = buildChatRuntimeSessionKey(opts?.runtime ?? 'openclaw', agentId, userId)
 
   // Load liveMessages before archiving — they contain image contentBlocks
   // that chat.history doesn't return (images are captured during SSE streaming
@@ -290,7 +323,10 @@ export async function archiveSession(
   // Fetch history from gateway (may fail if gateway is offline)
   let rawMessages: ChatHistoryMessage[] = []
   try {
-    const rawResult = await client.request('chat.history', { sessionKey, limit: LIVE_HISTORY_LIMIT })
+    const rawResult = await client.request('chat.history', {
+      sessionKey,
+      limit: LIVE_HISTORY_LIMIT,
+    })
     const historyResult = rawResult as ChatHistoryResult
     rawMessages = historyResult.messages ?? []
   } catch {
@@ -345,7 +381,10 @@ export async function archiveSession(
         // because /new destroys and recreates the gateway session — messages sent during this
         // transition are silently dropped.
         await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => { unsub(); resolve() }, 30_000)
+          const timeout = setTimeout(() => {
+            unsub()
+            resolve()
+          }, 30_000)
           const unsub = client.on('chat', (payload: unknown) => {
             const evt = payload as Record<string, unknown>
             if (evt?.runId !== newRunId) return
@@ -360,7 +399,11 @@ export async function archiveSession(
       }
     } catch {
       // /new failed — fall back to direct session delete (memory dump skipped)
-      try { await client.request('sessions.delete', { key: sessionKey }) } catch { /* offline */ }
+      try {
+        await client.request('sessions.delete', { key: sessionKey })
+      } catch {
+        /* offline */
+      }
     }
   } else {
     try {
@@ -386,8 +429,12 @@ export async function archiveSession(
  */
 export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
+  const fallbackBaseMs = Date.now()
 
   for (const msg of rawMessages) {
+    const messageSeq = result.length
+    const createdAt =
+      gatewayMessageCreatedAt(msg) ?? new Date(fallbackBaseMs + messageSeq).toISOString()
     if (msg.role === 'user') {
       const contentBlocks = extractContentBlocks(msg.content)
       result.push({
@@ -395,12 +442,13 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
-        createdAt: new Date().toISOString(),
+        messageSeq,
+        createdAt,
       })
     } else if (msg.role === 'assistant') {
       const parsed = parseSessionMessage({
         messageId: randomUUID(),
-        messageSeq: result.length,
+        messageSeq,
         message: msg,
       })
       let text = stripFinalTags(extractText(msg.content) || parsed.text)
@@ -428,8 +476,8 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
               stopReason: parsed.stopReason,
               isFinal: parsed.isFinal,
             }
-          : {}),
-        createdAt: new Date().toISOString(),
+          : { messageSeq }),
+        createdAt,
       })
     } else if (msg.role === 'toolResult') {
       const last = result[result.length - 1]
@@ -446,7 +494,12 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
 
   // Reclassify: assistant messages with tool calls are intermediate narration
   for (const msg of result) {
-    if (msg.role === 'assistant' && msg.stopReason == null && msg.toolCalls?.length && msg.content) {
+    if (
+      msg.role === 'assistant' &&
+      msg.stopReason == null &&
+      msg.toolCalls?.length &&
+      msg.content
+    ) {
       msg.thinking = msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
       msg.content = ''
     }
@@ -455,7 +508,9 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
   return result
 }
 
-function cloneContentBlocks(blocks: ChatContentBlock[] | undefined): ChatContentBlock[] | undefined {
+function cloneContentBlocks(
+  blocks: ChatContentBlock[] | undefined,
+): ChatContentBlock[] | undefined {
   return blocks?.map((block) => ({ ...block }))
 }
 
@@ -468,7 +523,9 @@ function cloneMessage(message: ChatMessage): ChatMessage {
     ...message,
     ...(message.contentBlocks ? { contentBlocks: cloneContentBlocks(message.contentBlocks) } : {}),
     ...(message.toolCalls ? { toolCalls: cloneToolCalls(message.toolCalls) } : {}),
-    ...(message.attachments ? { attachments: message.attachments.map((attachment) => ({ ...attachment })) } : {}),
+    ...(message.attachments
+      ? { attachments: message.attachments.map((attachment) => ({ ...attachment })) }
+      : {}),
     ...(message.kbSources ? { kbSources: message.kbSources.map((source) => ({ ...source })) } : {}),
   }
 }
@@ -515,6 +572,12 @@ function messagesMatch(a: ChatMessage, b: ChatMessage): boolean {
   return (
     isLocalArtifactAugmentedContent(a.content, b.content) ||
     isLocalArtifactAugmentedContent(b.content, a.content)
+  )
+}
+
+function validMessageCreatedAt(createdAt: string | undefined): boolean {
+  return (
+    typeof createdAt === 'string' && createdAt.length > 0 && !Number.isNaN(Date.parse(createdAt))
   )
 }
 
@@ -663,22 +726,31 @@ export function mergeToolCalls(
   return merged.length > 0 ? merged : undefined
 }
 
-function mergeMessagePreservingOldData(oldMessage: ChatMessage, newMessage: ChatMessage): ChatMessage {
+function mergeMessagePreservingOldData(
+  oldMessage: ChatMessage,
+  newMessage: ChatMessage,
+): ChatMessage {
   const contentBlocks = mergeContentBlocks(oldMessage.contentBlocks, newMessage.contentBlocks)
   const toolCalls = mergeToolCalls(oldMessage.toolCalls, newMessage.toolCalls)
   const content = isLocalArtifactAugmentedContent(newMessage.content, oldMessage.content)
     ? newMessage.content
     : oldMessage.content || newMessage.content
+  const createdAt = validMessageCreatedAt(newMessage.createdAt)
+    ? newMessage.createdAt
+    : oldMessage.createdAt
 
   return {
     ...newMessage,
     id: oldMessage.id,
-    createdAt: oldMessage.createdAt,
+    createdAt,
+    messageSeq: newMessage.messageSeq ?? oldMessage.messageSeq,
     content,
     ...(oldMessage.thinking || newMessage.thinking
       ? { thinking: oldMessage.thinking || newMessage.thinking }
       : {}),
-    ...(oldMessage.error || newMessage.error ? { error: oldMessage.error || newMessage.error } : {}),
+    ...(oldMessage.error || newMessage.error
+      ? { error: oldMessage.error || newMessage.error }
+      : {}),
     ...(oldMessage.attachments || newMessage.attachments
       ? { attachments: oldMessage.attachments ?? newMessage.attachments }
       : {}),
@@ -713,7 +785,10 @@ export function mergeLiveMessagesAppendOnly(
   return merged
 }
 
-function isSuffixOfLiveMessages(gatewayMessages: ChatMessage[], liveMessages: ChatMessage[]): boolean {
+function isSuffixOfLiveMessages(
+  gatewayMessages: ChatMessage[],
+  liveMessages: ChatMessage[],
+): boolean {
   if (gatewayMessages.length === 0) return false
   if (gatewayMessages.length > liveMessages.length) return false
 
@@ -771,7 +846,7 @@ async function resolveMediaPerMessage(
 
   for (const msg of messages) {
     if (msg.role !== 'assistant') continue
-    if (msg.contentBlocks?.some(b => b.type === 'image')) continue
+    if (msg.contentBlocks?.some((b) => b.type === 'image')) continue
     if (!msg.toolCalls?.length) continue
 
     const allPaths: string[] = []
@@ -900,7 +975,7 @@ export async function saveLiveSnapshot(
       if (existingLive.length > 0) {
         console.warn(
           `[live-snapshot] Session reset detected for ${chatSessionId}: ` +
-          `gwSessionId changed ${session.gwSessionId} → ${gwSessionId}. Archiving old messages.`,
+            `gwSessionId changed ${session.gwSessionId} → ${gwSessionId}. Archiving old messages.`,
         )
         archiveMessages.push(...existingLive)
       }
@@ -1024,10 +1099,7 @@ function applyToolInputsToMessages(
  * SSE agent:item events capture the descriptions; this merge prevents
  * them from being lost when saveLiveSnapshot overwrites liveMessages.
  */
-export function mergeToolInputs(
-  newMessages: ChatMessage[],
-  oldMessages: ChatMessage[],
-): void {
+export function mergeToolInputs(newMessages: ChatMessage[], oldMessages: ChatMessage[]): void {
   const oldInputs: { name: string; input: string }[] = []
   for (const msg of oldMessages) {
     if (msg.role !== 'assistant' || !msg.toolCalls?.length) continue
@@ -1064,7 +1136,7 @@ function buildLiveSnapshotRows(
 ): Prisma.ChatMessageSnapshotCreateManyInput[] {
   const batchId = randomUUID()
   return messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((msg, i) => ({
       chatSessionId: sessionId,
       batchId,
@@ -1073,7 +1145,9 @@ function buildLiveSnapshotRows(
       content: msg.content,
       thinking: msg.thinking ?? null,
       toolCalls: msg.toolCalls ? (msg.toolCalls as unknown as Prisma.InputJsonValue) : undefined,
-      contentBlocks: msg.contentBlocks ? (msg.contentBlocks as unknown as Prisma.InputJsonValue) : undefined,
+      contentBlocks: msg.contentBlocks
+        ? (msg.contentBlocks as unknown as Prisma.InputJsonValue)
+        : undefined,
     }))
 }
 

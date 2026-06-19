@@ -16,6 +16,7 @@ import { useChatAgents, useChatSessions, useNewConversation, chatKeys } from "@/
 import { useChatStore } from "@/stores/chat-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { ensureChatRuntimeForAgent } from "@/lib/chat/runtime-options"
 import { useT } from "@/stores/language-store"
 import type { ChatAgentInfo } from "@/types/chat"
 
@@ -30,7 +31,9 @@ export function ChatAgentList() {
   const { data: agents, isLoading } = useChatAgents()
   const { data: sessions } = useChatSessions()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
+  const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const setSelectedAgent = useChatStore((s) => s.setSelectedAgent)
+  const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const qc = useQueryClient()
   const newConversation = useNewConversation()
@@ -54,12 +57,14 @@ export function ChatAgentList() {
 
   function handleNewConversation() {
     if (!confirmAgent) return
+    const runtime = ensureChatRuntimeForAgent(confirmAgent, selectedRuntime)
     newConversation.mutate(
-      { instanceId: confirmAgent.instanceId, agentId: confirmAgent.agentId },
+      { instanceId: confirmAgent.instanceId, agentId: confirmAgent.agentId, runtime },
       {
         onSuccess: (data) => {
           clearMessages()
           setSelectedAgent(confirmAgent)
+          setSelectedRuntime(runtime)
           useChatStore.getState().setActiveSessionId(data.session.id)
           setConfirmAgent(null)
           toast.success(t('chat.newConversationCreated'))

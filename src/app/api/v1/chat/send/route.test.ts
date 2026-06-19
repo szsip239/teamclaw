@@ -20,4 +20,38 @@ describe('chat send post-run cleanup', () => {
     expect(source).toContain('let finishStarted = false')
     expect(source).toContain('if (finishStarted) return')
   })
+
+  it('runs artifact normalization before closing error and abort paths', () => {
+    const errorHandler = source.slice(
+      source.indexOf("} else if (state === 'error')"),
+      source.indexOf("} else if (state === 'aborted')"),
+    )
+    const abortHandler = source.slice(
+      source.indexOf("} else if (state === 'aborted')"),
+      source.indexOf('  })', source.indexOf("} else if (state === 'aborted')")),
+    )
+    const piDisconnectHandler = source.slice(
+      source.indexOf('client.onUnexpectedDisconnect = () => {'),
+      source.indexOf('  // --- Auto-attach session images'),
+    )
+
+    expect(source).toContain('appendFallbackArtifactLiveMessages')
+    expect(errorHandler).toContain('void saveSnapshotThenFinish()')
+    expect(abortHandler).toContain('void saveSnapshotThenFinish()')
+    expect(piDisconnectHandler).toContain('void saveSnapshotThenFinish()')
+  })
+})
+
+describe('chat send runtime guardrails', () => {
+  it('keeps runtime-specific sessions separated and routes pi to pi-wrapper', () => {
+    expect(source).toContain('buildChatRuntimeSessionKey(runtime, agentId, user.id)')
+    expect(source).toContain('runtime: dbRuntime, isActive: true')
+    expect(source).toContain('targetSession.runtime === dbRuntime')
+    expect(source).toContain("runtime === 'pi'")
+    expect(source).toContain('resolvePiGatewayUrl')
+    expect(source).toContain('buildPiChatSendParams')
+    expect(source).toContain('onUnexpectedDisconnect')
+    expect(source).toContain('Pi agent connection lost')
+    expect(source).not.toContain('Pi runtime is not implemented yet')
+  })
 })
