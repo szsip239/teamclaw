@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: bash setup.sh
 # This script will:
 #   1. Create .env from .env.example
-#   2. Generate JWT RS256 key pair + encryption key
+#   2. Generate JWT RS256 key pair + encryption key when missing
 #   3. (Optional) Configure Nginx HTTPS reverse proxy
 #   4. Start all services via Docker Compose
 #      (init container handles DB migration + seed automatically)
@@ -28,9 +28,43 @@ NC='\033[0m'
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════════════════╗"
 echo "║           TeamClaw Quick Setup                   ║"
-echo "║   Enterprise OpenClaw Management Platform        ║"
+echo "║   Enterprise AI Agent Operations Platform        ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  SED_INPLACE=(sed -i '')
+else
+  SED_INPLACE=(sed -i)
+fi
+
+get_env_var() {
+  local key="$1"
+  grep "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
+}
+
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local escaped="$value"
+  escaped="${escaped//\\/\\\\}"
+  escaped="${escaped//&/\\&}"
+  escaped="${escaped//|/\\|}"
+
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    "${SED_INPLACE[@]}" "s|^${key}=.*|${key}=\"${escaped}\"|" "$ENV_FILE"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
+needs_env_value() {
+  local key="$1"
+  local placeholder="$2"
+  local value
+  value="$(get_env_var "$key")"
+  [[ -z "$value" || "$value" == "$placeholder" || "$value" == \<*\> ]]
+}
 
 # ── Step 1: Create .env ──────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
@@ -45,41 +79,51 @@ else
 fi
 
 # ── Step 2: Generate secrets ─────────────────────────────
-echo -e "${CYAN}[2/5] Generating cryptographic keys...${NC}"
+echo -e "${CYAN}[2/5] Checking cryptographic keys...${NC}"
 
-# Generate RS256 key pair
-PRIVATE_KEY=$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null)
-PUBLIC_KEY=$(echo "$PRIVATE_KEY" | openssl rsa -pubout 2>/dev/null)
+if needs_env_value "JWT_PRIVATE_KEY" "<base64-encoded-RS256-private-key>" || needs_env_value "JWT_PUBLIC_KEY" "<base64-encoded-RS256-public-key>"; then
+  PRIVATE_KEY=$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null)
+  PUBLIC_KEY=$(echo "$PRIVATE_KEY" | openssl rsa -pubout 2>/dev/null)
 
-JWT_PRIVATE_KEY=$(echo "$PRIVATE_KEY" | base64 | tr -d '\n')
-JWT_PUBLIC_KEY=$(echo "$PUBLIC_KEY" | base64 | tr -d '\n')
+  JWT_PRIVATE_KEY=$(echo "$PRIVATE_KEY" | base64 | tr -d '\n')
+  JWT_PUBLIC_KEY=$(echo "$PUBLIC_KEY" | base64 | tr -d '\n')
 
-# Generate encryption key (32 bytes hex = 64 chars)
-ENCRYPTION_KEY=$(openssl rand -hex 32)
-
-# Update .env with generated values
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  SED_INPLACE="sed -i ''"
+  set_env_var "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY"
+  set_env_var "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY"
+  echo -e "${GREEN}  -> JWT RS256 key pair generated${NC}"
 else
-  SED_INPLACE="sed -i"
+  echo -e "${GREEN}  -> Existing JWT RS256 key pair preserved${NC}"
 fi
 
-$SED_INPLACE "s|JWT_PRIVATE_KEY=.*|JWT_PRIVATE_KEY=\"$JWT_PRIVATE_KEY\"|" "$ENV_FILE"
-$SED_INPLACE "s|JWT_PUBLIC_KEY=.*|JWT_PUBLIC_KEY=\"$JWT_PUBLIC_KEY\"|" "$ENV_FILE"
-$SED_INPLACE "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=\"$ENCRYPTION_KEY\"|" "$ENV_FILE"
-
-echo -e "${GREEN}  -> JWT RS256 key pair generated${NC}"
-echo -e "${GREEN}  -> AES-256-CBC encryption key generated${NC}"
+if needs_env_value "ENCRYPTION_KEY" "<64-char-hex-string>"; then
+  ENCRYPTION_KEY=$(openssl rand -hex 32)
+  set_env_var "ENCRYPTION_KEY" "$ENCRYPTION_KEY"
+  echo -e "${GREEN}  -> AES-256-CBC encryption key generated${NC}"
+else
+  echo -e "${GREEN}  -> Existing AES-256-CBC encryption key preserved${NC}"
+fi
 
 # ── Step 2b: Configure TEAMCLAW_DATA_DIR ───────────────────
-TEAMCLAW_DATA_DIR_VAL=$(grep '^TEAMCLAW_DATA_DIR=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"')
+TEAMCLAW_DATA_DIR_VAL=$(get_env_var "TEAMCLAW_DATA_DIR")
 if [[ -z "$TEAMCLAW_DATA_DIR_VAL" ]]; then
   DEFAULT_DATA_DIR="${HOME}/.teamclaw/instances"
-  $SED_INPLACE "s|TEAMCLAW_DATA_DIR=.*|TEAMCLAW_DATA_DIR=\"${DEFAULT_DATA_DIR}\"|" "$ENV_FILE"
+  set_env_var "TEAMCLAW_DATA_DIR" "$DEFAULT_DATA_DIR"
   mkdir -p "$DEFAULT_DATA_DIR"
   echo -e "${GREEN}  -> Instance data dir: ${DEFAULT_DATA_DIR}${NC}"
 else
   echo -e "${GREEN}  -> Instance data dir already set: ${TEAMCLAW_DATA_DIR_VAL}${NC}"
+fi
+
+# ── Step 2c: Configure Docker socket group on Linux ───────
+DOCKER_SOCKET_VAL=$(get_env_var "DOCKER_SOCKET_PATH")
+DOCKER_SOCKET_VAL="${DOCKER_SOCKET_VAL:-/var/run/docker.sock}"
+DOCKER_GID_VAL=$(get_env_var "DOCKER_GID")
+if [[ "$(uname -s)" == "Linux" && -S "$DOCKER_SOCKET_VAL" && ( -z "$DOCKER_GID_VAL" || "$DOCKER_GID_VAL" == "0" ) ]]; then
+  DETECTED_DOCKER_GID=$(stat -c '%g' "$DOCKER_SOCKET_VAL" 2>/dev/null || true)
+  if [[ -n "$DETECTED_DOCKER_GID" ]]; then
+    set_env_var "DOCKER_GID" "$DETECTED_DOCKER_GID"
+    echo -e "${GREEN}  -> Docker socket group id: ${DETECTED_DOCKER_GID}${NC}"
+  fi
 fi
 
 # ── Step 3: Nginx HTTPS Configuration (optional) ─────────
@@ -139,11 +183,11 @@ if [[ "$nginx_answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
   NGINX_HTTP="${input_http:-80}"
 
   # Write nginx config to .env
-  $SED_INPLACE "s|NGINX_SERVER_NAME=.*|NGINX_SERVER_NAME=\"$NGINX_DOMAIN\"|" "$ENV_FILE"
-  $SED_INPLACE "s|NGINX_HTTPS_PORT=.*|NGINX_HTTPS_PORT=\"$NGINX_HTTPS\"|" "$ENV_FILE"
-  $SED_INPLACE "s|NGINX_HTTP_PORT=.*|NGINX_HTTP_PORT=\"$NGINX_HTTP\"|" "$ENV_FILE"
-  $SED_INPLACE "s|NGINX_SSL_CERT=.*|NGINX_SSL_CERT=\"$SSL_CERT\"|" "$ENV_FILE"
-  $SED_INPLACE "s|NGINX_SSL_KEY=.*|NGINX_SSL_KEY=\"$SSL_KEY\"|" "$ENV_FILE"
+  set_env_var "NGINX_SERVER_NAME" "$NGINX_DOMAIN"
+  set_env_var "NGINX_HTTPS_PORT" "$NGINX_HTTPS"
+  set_env_var "NGINX_HTTP_PORT" "$NGINX_HTTP"
+  set_env_var "NGINX_SSL_CERT" "$SSL_CERT"
+  set_env_var "NGINX_SSL_KEY" "$SSL_KEY"
 
   echo ""
   echo -e "${GREEN}  -> Nginx HTTPS configured${NC}"
