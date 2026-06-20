@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(path.resolve('src/components/chat/chat-agent-list.tsx'), 'utf-8')
 
 describe('ChatAgentList', () => {
-  it('exposes agent rename controls from the chat sidebar', () => {
-    expect(source).toContain('chat.renameAgent')
+  it('opens agent rename from long press instead of a visible row button', () => {
+    expect(source).toContain('startRenameLongPress')
+    expect(source).toContain('onPointerDown={() => startRenameLongPress(agent)}')
     expect(source).toContain('/api/v1/agents/')
-    expect(source).toContain('Pencil')
+    expect(source).not.toContain('Pencil')
+    expect(source).not.toContain('title={t("chat.renameAgent")}')
   })
 
   it('renders per-agent activity indicators', () => {
@@ -17,5 +19,12 @@ describe('ChatAgentList', () => {
     expect(source).toContain('chat.agentRunningStatus')
     expect(source).toContain('chat.agentUnreadStatus')
     expect(source).toContain('chat.agentErrorStatus')
+  })
+
+  it('does not infer running state from active chat sessions', () => {
+    expect(source).toContain('activity?.state === "running"')
+    expect(source).not.toContain('runningAgentKeys')
+    expect(source).not.toContain('session.isActive')
+    expect(source).not.toContain('useChatSessions')
   })
 })

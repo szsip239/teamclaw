@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Bot, Loader2, Plus, Globe, Building2, UserCircle, Pencil } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Bot, Loader2, Plus, Globe, Building2, UserCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useQueryClient } from "@tanstack/react-query"
-import { useChatAgents, useChatSessions, useNewConversation, chatKeys } from "@/hooks/use-chat"
+import { useChatAgents, useNewConversation, chatKeys } from "@/hooks/use-chat"
 import { useChatStore } from "@/stores/chat-store"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -35,7 +35,6 @@ export function ChatAgentList() {
   const t = useT()
   const currentUser = useAuthStore((s) => s.user)
   const { data: agents, isLoading } = useChatAgents()
-  const { data: sessions } = useChatSessions()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
   const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const setSelectedAgent = useChatStore((s) => s.setSelectedAgent)
@@ -49,7 +48,17 @@ export function ChatAgentList() {
   const [renameAgent, setRenameAgent] = useState<ChatAgentInfo | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [renaming, setRenaming] = useState(false)
+  const renameLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressNextSelectRef = useRef(false)
   const canRenameAgents = currentUser?.role === "SYSTEM_ADMIN"
+
+  useEffect(() => {
+    return () => {
+      if (renameLongPressTimerRef.current) {
+        clearTimeout(renameLongPressTimerRef.current)
+      }
+    }
+  }, [])
 
   function handleSelect(agent: ChatAgentInfo) {
     const isSameAgent =
@@ -70,6 +79,32 @@ export function ChatAgentList() {
   function openRenameDialog(agent: ChatAgentInfo) {
     setRenameAgent(agent)
     setRenameValue(agent.agentName)
+  }
+
+  function clearRenameLongPressTimer() {
+    if (renameLongPressTimerRef.current) {
+      clearTimeout(renameLongPressTimerRef.current)
+      renameLongPressTimerRef.current = null
+    }
+  }
+
+  function startRenameLongPress(agent: ChatAgentInfo) {
+    if (!canRenameAgents) return
+    clearRenameLongPressTimer()
+    suppressNextSelectRef.current = false
+    renameLongPressTimerRef.current = setTimeout(() => {
+      renameLongPressTimerRef.current = null
+      suppressNextSelectRef.current = true
+      openRenameDialog(agent)
+    }, 650)
+  }
+
+  function handleAgentClick(agent: ChatAgentInfo) {
+    if (suppressNextSelectRef.current) {
+      suppressNextSelectRef.current = false
+      return
+    }
+    handleSelect(agent)
   }
 
   async function handleRenameSubmit() {
@@ -151,12 +186,6 @@ export function ChatAgentList() {
     list.push(agent)
     grouped.set(agent.instanceId, list)
   }
-  const runningAgentKeys = new Set(
-    (sessions ?? [])
-      .filter((session) => session.isActive)
-      .map((session) => chatAgentActivityKey(session.instanceId, session.agentId)),
-  )
-
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -171,7 +200,7 @@ export function ChatAgentList() {
                 selectedAgent?.agentId === agent.agentId
               const activityKey = chatAgentActivityKey(agent.instanceId, agent.agentId)
               const activity = agentActivities[activityKey]
-              const isRunning = activity?.state === "running" || runningAgentKeys.has(activityKey)
+              const isRunning = activity?.state === "running"
               return (
                 <div
                   key={`${agent.instanceId}:${agent.agentId}`}
@@ -183,9 +212,20 @@ export function ChatAgentList() {
                       ? "bg-secondary text-secondary-foreground"
                       : "hover:bg-accent hover:text-accent-foreground",
                   )}
-                  onClick={() => handleSelect(agent)}
+                  onPointerDown={() => startRenameLongPress(agent)}
+                  onPointerUp={clearRenameLongPressTimer}
+                  onPointerLeave={clearRenameLongPressTimer}
+                  onPointerCancel={clearRenameLongPressTimer}
+                  onContextMenu={(e) => {
+                    if (canRenameAgents) e.preventDefault()
+                  }}
+                  onClick={() => handleAgentClick(agent)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") handleSelect(agent)
+                    if (e.key === "Enter" || e.key === " ") handleAgentClick(agent)
+                    if (e.key === "F2" && canRenameAgents) {
+                      e.preventDefault()
+                      openRenameDialog(agent)
+                    }
                   }}
                 >
                   <Bot className="size-4 shrink-0" />
@@ -218,27 +258,14 @@ export function ChatAgentList() {
                       error: t("chat.agentErrorStatus"),
                     }}
                   />
-                  {canRenameAgents && (
-                    <button
-                      type="button"
-                      className={cn(
-                        "ml-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-gray-400 transition-opacity hover:bg-gray-100 hover:text-gray-700 focus-visible:opacity-100",
-                        isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-                      )}
-                      title={t("chat.renameAgent")}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        openRenameDialog(agent)
-                      }}
-                    >
-                      <Pencil className="size-3" />
-                    </button>
-                  )}
                   <button
                     type="button"
                     className="ml-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-700"
                     title={t("chat.newConversation")}
+                    onPointerDown={(e) => {
+                      e.stopPropagation()
+                      clearRenameLongPressTimer()
+                    }}
                     onKeyDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -332,11 +359,11 @@ function AgentStatusIndicator({
   if (isRunning) {
     return (
       <span
-        className="relative ml-1 flex size-4 shrink-0 items-center justify-center"
+        className="relative ml-1 flex size-3 shrink-0 items-center justify-center"
         title={labels.running}
       >
         <span className="absolute inset-0 rounded-full border border-green-300 border-t-green-600 animate-spin" />
-        <span className="size-1.5 rounded-full bg-green-500" />
+        <span className="size-1 rounded-full bg-green-500" />
       </span>
     )
   }
@@ -344,7 +371,7 @@ function AgentStatusIndicator({
   if (activity?.state === "error") {
     return (
       <span
-        className="ml-1 flex size-4 shrink-0 items-center justify-center rounded-full bg-red-500 text-[9px] font-semibold leading-none text-white"
+        className="ml-1 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[8px] font-semibold leading-none text-white"
         title={labels.error}
       >
         {activity.unreadCount}
@@ -355,7 +382,7 @@ function AgentStatusIndicator({
   if (activity?.state === "done") {
     return (
       <span
-        className="ml-1 flex size-4 shrink-0 items-center justify-center rounded-full bg-green-500 text-[9px] font-semibold leading-none text-white"
+        className="ml-1 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[8px] font-semibold leading-none text-white"
         title={labels.unread}
       >
         {activity.unreadCount}
