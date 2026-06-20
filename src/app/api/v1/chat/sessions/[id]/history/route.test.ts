@@ -23,4 +23,10 @@ describe('chat history runtime routing', () => {
     expect(source).toContain('trimCurrentMessagesOverlappingSnapshot(snapshots, currentMessages)')
     expect(source).not.toContain('lastBatch[i].content === currentMessages[i].content')
   })
+
+  it('finalizes queued artifacts through history polling before returning live messages', () => {
+    expect(source).toContain('finalizeAssistantArtifacts')
+    expect(source).toContain('messageHasOutputArtifactLink')
+    expect(source).toContain('liveMessages: sessionMessages as unknown as Prisma.InputJsonValue')
+  })
 })

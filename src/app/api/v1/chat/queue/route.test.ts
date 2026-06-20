@@ -13,7 +13,8 @@ describe('chat queue runtime routing', () => {
     expect(source).not.toContain('Pi runtime is not implemented yet')
   })
 
-  it.todo(
-    'finalizes artifacts from queued replies through history/liveMessages polling without converting queue sends into SSE',
-  )
+  it('keeps queued sends fire-and-forget instead of converting them into SSE', () => {
+    expect(source).not.toContain('new TransformStream')
+    expect(source).not.toContain("client.on('chat'")
+  })
 })

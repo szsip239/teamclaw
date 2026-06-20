@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@/generated/prisma'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import {
@@ -14,8 +15,13 @@ import { computeImageId } from '@/lib/chat/image-helpers'
 import { activeRuns } from '@/lib/chat/active-runs'
 import { imageBlockDisplayKey, imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
 import { sanitizeOutputArtifactLinks } from '@/lib/session-files/artifacts'
+import {
+  finalizeAssistantArtifacts,
+  messageHasOutputArtifactLink,
+} from '@/lib/chat/artifact-finalizer'
 import { buildChatRuntimeSessionKey, fromDbChatRuntime } from '@/lib/chat/runtime'
 import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
+import { dockerManager } from '@/lib/docker/manager'
 import {
   sortChatMessagesForDisplay,
   withRuntimeMessageMetadata,
@@ -40,6 +46,53 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
     fallbackCreatedAt: () => '',
     markNonDeliverableTerminal: false,
   })
+}
+
+function lastAssistantMessageIndex(messages: ChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') return i
+  }
+  return -1
+}
+
+async function finalizeHistoryArtifacts(params: {
+  agentId: string
+  chatSessionId: string
+  instanceId: string
+  messages: ChatMessage[]
+  runStartedAt: Date
+}): Promise<ChatMessage[]> {
+  const assistantIndex = lastAssistantMessageIndex(params.messages)
+  if (assistantIndex === -1) return params.messages
+
+  const assistant = params.messages[assistantIndex]
+  if (!assistant.content || messageHasOutputArtifactLink(assistant.content)) return params.messages
+
+  const instance = await prisma.instance.findUnique({
+    where: { id: params.instanceId },
+    select: { containerId: true, workspacePath: true },
+  })
+  if (!instance?.containerId && !instance?.workspacePath) return params.messages
+
+  const result = await finalizeAssistantArtifacts({
+    agentId: params.agentId,
+    chatSessionId: params.chatSessionId,
+    runStartedAt: params.runStartedAt,
+    assistantText: assistant.content,
+    containerId: instance.containerId,
+    workspacePath: instance.workspacePath,
+    execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
+  })
+  if (!result) return params.messages
+
+  const sessionMessages = params.messages.map((message, index) =>
+    index === assistantIndex ? { ...message, content: result.content } : message,
+  )
+  await prisma.chatSession.update({
+    where: { id: params.chatSessionId },
+    data: { liveMessages: sessionMessages as unknown as Prisma.InputJsonValue },
+  })
+  return sessionMessages
 }
 
 /**
@@ -221,8 +274,16 @@ export const GET = withAuth(
               }
               sessionMessages = msgs
             }
-            if (!activeRuns.has(runtimeSession.id)) {
+            const runIsActive = activeRuns.has(runtimeSession.id)
+            if (!runIsActive) {
               markNonDeliverableTerminalTurn(sessionMessages)
+              sessionMessages = await finalizeHistoryArtifacts({
+                agentId: runtimeSession.agentId,
+                chatSessionId: runtimeSession.id,
+                instanceId: runtimeSession.instanceId,
+                messages: sessionMessages,
+                runStartedAt: runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,
+              })
             }
             const baseTime = new Date(
               runtimeSession.lastMessageAt ?? runtimeSession.updatedAt,

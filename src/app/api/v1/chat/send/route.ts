@@ -19,16 +19,14 @@ import {
   buildExternalWorkspaceSessionTarget,
 } from '@/lib/session-files/helpers'
 import {
-  appendArtifactLinks,
   artifactLinksMarkdown,
   createContainerSessionOutputSnapshot,
   createExternalSessionOutputSnapshot,
-  normalizeContainerSessionArtifacts,
-  normalizeExternalSessionArtifacts,
 } from '@/lib/session-files/artifacts'
-import type { SessionArtifact, SessionOutputSnapshot } from '@/lib/session-files/artifacts'
+import type { SessionOutputSnapshot } from '@/lib/session-files/artifacts'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
 import { appendLiveMessages, archiveSession, saveLiveSnapshot } from '@/lib/chat/snapshot-helpers'
+import { finalizeAssistantArtifacts } from '@/lib/chat/artifact-finalizer'
 import {
   buildChatRuntimeSessionKey,
   fromDbChatRuntime,
@@ -552,45 +550,25 @@ export async function POST(req: NextRequest) {
 
   async function normalizeAndEmitArtifactLinks(): Promise<string | undefined> {
     try {
-      let artifacts: SessionArtifact[] = []
-      if (containerId) {
-        try {
-          artifacts = await normalizeContainerSessionArtifacts({
-            containerId,
-            agentId,
-            chatSessionId,
-            runStartedAt,
-            execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
-            assistantText: lastTextContent,
-            outputSnapshot: containerOutputSnapshot,
-          })
-        } catch (err) {
-          console.warn(
-            '[session-artifacts] container normalization failed:',
-            (err as Error).message,
-          )
-        }
-      }
-      if (artifacts.length === 0 && instanceWorkspacePath) {
-        artifacts = await normalizeExternalSessionArtifacts({
-          workspacePath: instanceWorkspacePath,
-          agentId,
-          chatSessionId,
-          runStartedAt,
-          assistantText: lastTextContent,
-          outputSnapshot: externalOutputSnapshot,
-        })
-      }
-
-      if (artifacts.length === 0) return undefined
-      const augmented = appendArtifactLinks(lastTextContent, artifacts)
-      if (augmented === lastTextContent) return undefined
+      const result = await finalizeAssistantArtifacts({
+        agentId,
+        chatSessionId,
+        runStartedAt,
+        assistantText: lastTextContent,
+        containerId,
+        workspacePath: instanceWorkspacePath,
+        execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
+        containerOutputSnapshot,
+        externalOutputSnapshot,
+      })
+      if (!result) return undefined
+      const augmented = result.content
       const previous = lastTextContent.trimEnd()
       const streamContent =
         previous && augmented.startsWith(previous)
           ? augmented.slice(previous.length)
           : previous
-            ? `\n\n${artifactLinksMarkdown(artifacts)}`
+            ? `\n\n${artifactLinksMarkdown(result.artifacts)}`
             : augmented
       if (streamContent.trim()) {
         write({ type: 'text', content: streamContent })
