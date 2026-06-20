@@ -28,4 +28,9 @@ describe('ChatAgentList', () => {
     expect(source).not.toContain('session.isActive')
     expect(source).not.toContain('useChatSessions')
   })
+
+  it('does not clear running activity when selecting an agent', () => {
+    expect(source).toContain('selectedActivity?.state !== "running"')
+    expect(source).toContain('qc.invalidateQueries({ queryKey: chatKeys.history(selectedActivity.sessionId) })')
+  })
 })

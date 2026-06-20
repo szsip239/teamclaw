@@ -90,6 +90,28 @@ describe('chat store agent activity indicators', () => {
     })
   })
 
+  it('keeps the session id when a running activity becomes done or error', () => {
+    const key = chatAgentActivityKey('sales', 'main')
+
+    useChatStore.getState().markAgentRunning('sales', 'main', 'session-1')
+    useChatStore.getState().markAgentDone('sales', 'main')
+
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'done',
+      unreadCount: 1,
+      sessionId: 'session-1',
+    })
+
+    useChatStore.getState().markAgentRunning('sales', 'main', 'session-2')
+    useChatStore.getState().markAgentError('sales', 'main')
+
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'error',
+      unreadCount: 1,
+      sessionId: 'session-2',
+    })
+  })
+
   it('reconciles a detached running agent to an unread done state from history', async () => {
     const key = chatAgentActivityKey('sales', 'main')
     useChatStore.getState().markAgentRunning('sales', 'main', 'session-1')
@@ -123,6 +145,12 @@ describe('chat store agent activity indicators', () => {
     expect(useChatStore.getState().agentActivities[key]).toEqual({
       state: 'done',
       unreadCount: 1,
+      sessionId: 'session-1',
     })
+  })
+
+  it('refreshes chat queries after detached activity reconciliation completes', () => {
+    expect(source).toContain("qc.invalidateQueries({ queryKey: ['chat', 'sessions'] })")
+    expect(source).toContain("qc.invalidateQueries({ queryKey: ['chat', 'history', sessionId] })")
   })
 })

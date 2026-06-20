@@ -89,6 +89,8 @@ export function ChatAgentList() {
   function handleSelect(agent: ChatAgentInfo) {
     const isSameAgent =
       selectedAgent?.instanceId === agent.instanceId && selectedAgent?.agentId === agent.agentId
+    const selectedActivity =
+      agentActivities[chatAgentActivityKey(agent.instanceId, agent.agentId)]
 
     if (!isSameAgent) {
       clearMessages({ detachActiveRun: true })
@@ -98,8 +100,13 @@ export function ChatAgentList() {
       useChatStore.getState().setActiveSessionId(null)
     }
     qc.invalidateQueries({ queryKey: chatKeys.sessions() })
+    if (selectedActivity?.sessionId) {
+      qc.invalidateQueries({ queryKey: chatKeys.history(selectedActivity.sessionId) })
+    }
     setSelectedAgent(agent)
-    clearAgentActivity(agent.instanceId, agent.agentId)
+    if (selectedActivity?.state !== "running") {
+      clearAgentActivity(agent.instanceId, agent.agentId)
+    }
   }
 
   function openRenameDialog(agent: ChatAgentInfo) {

@@ -524,19 +524,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }),
   markAgentDone: (instanceId, agentId) =>
-    set((s) => ({
-      agentActivities: {
-        ...s.agentActivities,
-        [chatAgentActivityKey(instanceId, agentId)]: { state: 'done', unreadCount: 1 },
-      },
-    })),
+    set((s) => {
+      const key = chatAgentActivityKey(instanceId, agentId)
+      const previousSessionId = s.agentActivities[key]?.sessionId
+      return {
+        agentActivities: {
+          ...s.agentActivities,
+          [key]: {
+            state: 'done',
+            unreadCount: 1,
+            ...(previousSessionId ? { sessionId: previousSessionId } : {}),
+          },
+        },
+      }
+    }),
   markAgentError: (instanceId, agentId) =>
-    set((s) => ({
-      agentActivities: {
-        ...s.agentActivities,
-        [chatAgentActivityKey(instanceId, agentId)]: { state: 'error', unreadCount: 1 },
-      },
-    })),
+    set((s) => {
+      const key = chatAgentActivityKey(instanceId, agentId)
+      const previousSessionId = s.agentActivities[key]?.sessionId
+      return {
+        agentActivities: {
+          ...s.agentActivities,
+          [key]: {
+            state: 'error',
+            unreadCount: 1,
+            ...(previousSessionId ? { sessionId: previousSessionId } : {}),
+          },
+        },
+      }
+    }),
   clearAgentActivity: (instanceId, agentId) =>
     set((s) => {
       const key = chatAgentActivityKey(instanceId, agentId)
@@ -566,6 +582,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         get().markAgentError(instanceId, agentId)
       } else {
         get().markAgentDone(instanceId, agentId)
+      }
+      try {
+        const { getQueryClient } = await import('@/components/providers')
+        const qc = getQueryClient()
+        qc.invalidateQueries({ queryKey: ['chat', 'sessions'] })
+        qc.invalidateQueries({ queryKey: ['chat', 'history', sessionId] })
+      } catch {
+        /* non-fatal */
       }
     } catch {
       /* non-critical; next poll can retry */
