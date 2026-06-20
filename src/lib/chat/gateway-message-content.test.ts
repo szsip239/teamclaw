@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractImagesFromGatewayMessage,
+  extractMediaPathsFromGatewayToolResults,
   extractTextFromGatewayMessage,
   extractThinkingFromGatewayMessage,
 } from './gateway-message-content'
@@ -47,5 +48,22 @@ describe('gateway message content extraction', () => {
       { url: 'data:image/png;base64,abc', mimeType: 'image/png', alt: 'chart' },
       { url: 'https://example.test/image.webp', mimeType: undefined, alt: undefined },
     ])
+  })
+
+  it('extracts unique MEDIA paths from recent gateway tool results', () => {
+    expect(
+      extractMediaPathsFromGatewayToolResults(
+        [
+          { role: 'toolResult', content: 'MEDIA:/tmp/old.png' },
+          { role: 'assistant', content: 'MEDIA:/tmp/ignored.png' },
+          {
+            role: 'toolResult',
+            content: [{ type: 'text', text: 'created\nMEDIA:/tmp/chart.png' }],
+          },
+          { role: 'toolResult', content: 'again\nMEDIA:/tmp/chart.png' },
+        ],
+        { tailCount: 3 },
+      ),
+    ).toEqual(['/tmp/chart.png'])
   })
 })

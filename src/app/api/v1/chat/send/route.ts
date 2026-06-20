@@ -43,6 +43,7 @@ import {
 } from '@/lib/chat/image-helpers'
 import {
   extractImagesFromGatewayMessage,
+  extractMediaPathsFromGatewayToolResults,
   extractTextFromGatewayMessage,
   extractThinkingFromGatewayMessage,
 } from '@/lib/chat/gateway-message-content'
@@ -446,23 +447,7 @@ export async function POST(req: NextRequest) {
       const historyResult = rawResult as ChatHistoryResult
       const messages = historyResult.messages ?? []
 
-      // Collect MEDIA paths from tool results in the last few messages
-      const allPaths: string[] = []
-      for (const msg of messages.slice(-20)) {
-        if (msg.role !== 'toolResult') continue
-        const text =
-          typeof msg.content === 'string'
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? (msg.content as Record<string, unknown>[])
-                  .filter((b) => b.type === 'text')
-                  .map((b) => b.text as string)
-                  .join('\n')
-              : ''
-        allPaths.push(...extractMediaPaths(text))
-      }
-
-      const uniquePaths = [...new Set(allPaths)]
+      const uniquePaths = extractMediaPathsFromGatewayToolResults(messages)
       if (uniquePaths.length === 0) return
 
       await Promise.all(

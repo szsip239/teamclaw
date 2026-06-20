@@ -1,3 +1,5 @@
+import { extractMediaPaths } from './image-helpers'
+
 export interface ExtractedGatewayImage {
   url: string
   mimeType?: string
@@ -67,4 +69,20 @@ export function extractImagesFromGatewayMessage(message: unknown): ExtractedGate
   }
 
   return images
+}
+
+export function extractMediaPathsFromGatewayToolResults(
+  messages: Array<{ role?: string; content?: unknown }>,
+  options: { tailCount?: number } = {},
+): string[] {
+  const allPaths: string[] = []
+  const tailCount = options.tailCount ?? 20
+
+  for (const message of messages.slice(-tailCount)) {
+    if (message.role !== 'toolResult') continue
+    const text = extractTextFromGatewayMessage(message)
+    allPaths.push(...extractMediaPaths(text))
+  }
+
+  return [...new Set(allPaths)]
 }
