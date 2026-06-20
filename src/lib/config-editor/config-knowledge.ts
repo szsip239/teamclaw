@@ -360,11 +360,14 @@ export const ENUM_DESCRIPTIONS: Record<string, Record<string, BiText>> = {
     low: { zh: '简短内部推理', en: 'Brief internal reasoning' },
     medium: { zh: '标准思考量', en: 'Standard thinking budget' },
     high: { zh: '最大思考预算，适合复杂任务', en: 'Maximum thinking budget, for complex tasks' },
+    xhigh: { zh: '超高思考预算', en: 'Extra-high thinking budget' },
   },
   'agents.defaults.thinkingDefault': {
     off: { zh: '关闭扩展思考', en: 'Disable extended thinking' },
     low: { zh: '简短内部推理', en: 'Brief internal reasoning' },
+    medium: { zh: '标准思考量', en: 'Standard thinking budget' },
     high: { zh: '最大思考预算，适合复杂任务', en: 'Maximum thinking budget, for complex tasks' },
+    xhigh: { zh: '超高思考预算', en: 'Extra-high thinking budget' },
   },
   'agents.defaults.timeFormat': {
     auto: { zh: '跟随系统设置（默认）', en: 'Follow system setting (default)' },

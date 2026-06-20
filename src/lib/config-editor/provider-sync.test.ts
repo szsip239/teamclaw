@@ -45,6 +45,11 @@ import {
 } from './provider-sync'
 
 const findManyMock = prisma.resource.findMany as unknown as Mock
+const thinkingMetadata = {
+  reasoning: true,
+  compat: { supportedReasoningEfforts: ['low', 'medium', 'xhigh'] },
+  thinkingLevelMap: { off: null, minimal: null, high: null },
+}
 
 describe('provider sync OpenClaw provider mapping', () => {
   beforeEach(() => {
@@ -97,7 +102,14 @@ describe('provider sync OpenClaw provider mapping', () => {
       baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
       apiKey: 'test-key',
       api: 'openai-completions',
-      models: [{ id: 'ark-code-latest', name: 'Ark Coding Plan', api: 'openai-completions' }],
+      models: [
+        {
+          id: 'ark-code-latest',
+          name: 'Ark Coding Plan',
+          api: 'openai-completions',
+          ...thinkingMetadata,
+        },
+      ],
     })
   })
 
@@ -126,6 +138,7 @@ describe('provider sync OpenClaw provider mapping', () => {
           id: 'doubao-seed-2.0-code',
           name: 'Doubao Seed 2.0 Code',
           api: 'openai-completions',
+          ...thinkingMetadata,
         },
       ],
     })
@@ -180,9 +193,48 @@ describe('provider sync OpenClaw provider mapping', () => {
             id: 'doubao-seed-2.0-pro',
             name: 'Doubao Seed 2.0 Pro',
             api: 'openai-completions',
+            ...thinkingMetadata,
           },
         ],
       },
+    })
+  })
+
+  it('adds TeamClaw thinking capability metadata to pushed model entries', () => {
+    const built = buildProviderEntryFromResource({
+      provider: 'doubao',
+      credentials: 'encrypted',
+      config: {
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+        apiType: 'openai-completions',
+        models: [
+          {
+            id: 'doubao-seed-2.0-pro',
+            name: 'Doubao Seed 2.0 Pro',
+            reasoning: true,
+            compat: {
+              thinkingFormat: 'deepseek',
+              reasoningEffortMap: { xhigh: 'max' },
+            },
+            thinkingLevelMap: {
+              low: null,
+              high: 'high',
+              xhigh: 'max',
+            },
+          },
+        ],
+      },
+    })
+
+    expect(built?.entry.models[0]).toMatchObject({
+      id: 'doubao-seed-2.0-pro',
+      reasoning: true,
+      compat: {
+        thinkingFormat: 'deepseek',
+        reasoningEffortMap: { xhigh: 'max' },
+        supportedReasoningEfforts: ['low', 'medium', 'xhigh'],
+      },
+      thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'max' },
     })
   })
 
@@ -272,7 +324,13 @@ describe('provider sync OpenClaw provider mapping', () => {
             baseUrl: 'https://api.anthropic.com',
             apiKey: 'test-key',
             api: 'anthropic-messages',
-            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+            models: [
+              {
+                id: 'claude-sonnet-4-20250514',
+                name: 'Claude Sonnet 4',
+                ...thinkingMetadata,
+              },
+            ],
           },
         },
       },

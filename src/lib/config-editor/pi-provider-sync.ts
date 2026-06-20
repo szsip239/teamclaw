@@ -1,5 +1,6 @@
 import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
 import { buildPiModelsPatchFromEntries } from './pi-models-translator'
+import type { TeamClawThinkingLevel } from './thinking-levels'
 import type { ProviderEntry } from './provider-sync'
 
 export interface PiProviderSyncResult {
@@ -13,6 +14,7 @@ export async function syncPiProviderConfig(params: {
   entries: Record<string, ProviderEntry>
   defaultProviderId?: string
   defaultModelId?: string
+  defaultThinkingLevel?: TeamClawThinkingLevel
 }): Promise<PiProviderSyncResult> {
   if (Object.keys(params.entries).length === 0) return { skipped: true }
 
@@ -26,6 +28,7 @@ export async function syncPiProviderConfig(params: {
       buildPiModelsPatchFromEntries(params.entries, {
         defaultProviderId: params.defaultProviderId,
         defaultModelId: params.defaultModelId,
+        defaultThinkingLevel: params.defaultThinkingLevel,
       }) as unknown as Record<string, unknown>,
     )
     return { ok: true }

@@ -6,6 +6,7 @@ import {
   normalizeResourceConfigForProvider,
 } from '@/lib/resources/config-normalization'
 import { syncPiProviderConfig } from './pi-provider-sync'
+import { TEAMCLAW_THINKING_LEVELS, TEAMCLAW_THINKING_LEVEL_MAP } from './thinking-levels'
 import type { ResourceConfig } from '@/types/resource'
 
 // ─── Google provider baseUrl fix ─────────────────────────────────────
@@ -95,10 +96,12 @@ interface ProviderModelEntry {
   name: string
   api?: string
   reasoning?: boolean
+  thinkingLevelMap?: Record<string, string | null>
   input?: string[]
   cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
   contextWindow?: number
   maxTokens?: number
+  compat?: Record<string, unknown>
 }
 
 export interface ProviderEntry {
@@ -112,6 +115,19 @@ interface ProviderResource {
   provider: string
   credentials: string
   config: unknown
+}
+
+function buildTeamClawThinkingLevelMap(
+  existing?: Record<string, string | null>,
+): Record<string, string | null> {
+  const next = { ...(existing ?? {}) }
+  for (const level of TEAMCLAW_THINKING_LEVELS) {
+    if (next[level] === null) delete next[level]
+  }
+  return {
+    ...next,
+    ...TEAMCLAW_THINKING_LEVEL_MAP,
+  }
 }
 
 export function buildProviderEntryFromResource(resource: ProviderResource): {
@@ -169,7 +185,12 @@ export function buildProviderEntryFromResource(resource: ProviderResource): {
       // explicitly so stale entries from earlier syncs cannot keep routing a
       // provider through the wrong transport.
       if (apiType) modelEntry.api = apiType
-      if (m.reasoning !== undefined) modelEntry.reasoning = m.reasoning
+      modelEntry.reasoning = true
+      modelEntry.compat = {
+        ...(m.compat ?? {}),
+        supportedReasoningEfforts: [...TEAMCLAW_THINKING_LEVELS],
+      }
+      modelEntry.thinkingLevelMap = buildTeamClawThinkingLevelMap(m.thinkingLevelMap)
       if (m.input) modelEntry.input = m.input
       if (m.cost) modelEntry.cost = m.cost
       if (m.contextWindow !== undefined) modelEntry.contextWindow = m.contextWindow

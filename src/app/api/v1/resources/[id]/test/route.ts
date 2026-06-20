@@ -61,7 +61,7 @@ export const POST = withAuth(
         const newModels: ModelDefinition[] = result.details.detectedModels.map((dm) => ({
           id: dm.id,
           name: dm.id,
-          reasoning: false,
+          reasoning: true,
           input: dm.multimodal ? ['text', 'image'] : ['text'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200000,

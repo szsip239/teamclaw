@@ -272,6 +272,7 @@ test('config.patch writes pi settings.json default model for new sessions', asyn
       settings: {
         defaultProvider: 'anthropic',
         defaultModel: 'claude-sonnet-4-20250514',
+        defaultThinkingLevel: 'medium',
       },
     })
 
@@ -280,6 +281,7 @@ test('config.patch writes pi settings.json default model for new sessions', asyn
     const parsed = JSON.parse(raw)
     assert.equal(parsed.defaultProvider, 'anthropic')
     assert.equal(parsed.defaultModel, 'claude-sonnet-4-20250514')
+    assert.equal(parsed.defaultThinkingLevel, 'medium')
   } finally {
     await rm(agentDir, { recursive: true, force: true })
   }
@@ -297,6 +299,7 @@ test('config.get returns pi default model settings', async () => {
       settings: {
         defaultProvider: 'anthropic',
         defaultModel: 'claude-sonnet-4-20250514',
+        defaultThinkingLevel: 'medium',
       },
     })
 
@@ -304,6 +307,7 @@ test('config.get returns pi default model settings', async () => {
     assert.deepEqual(result.settings, {
       defaultProvider: 'anthropic',
       defaultModel: 'claude-sonnet-4-20250514',
+      defaultThinkingLevel: 'medium',
     })
   } finally {
     await rm(agentDir, { recursive: true, force: true })

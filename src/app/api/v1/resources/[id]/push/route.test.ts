@@ -48,6 +48,12 @@ vi.mock('@/lib/resources/credential-utils', () => ({
 
 import { POST } from './route'
 
+const thinkingMetadata = {
+  reasoning: true,
+  compat: { supportedReasoningEfforts: ['low', 'medium', 'xhigh'] },
+  thinkingLevelMap: { off: null, minimal: null, high: null },
+}
+
 function createRequest(body: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/v1/resources/resource-1/push', {
     headers: {
@@ -126,6 +132,9 @@ describe('resource model push route pi sync', () => {
       raw: expect.stringContaining('"agents"'),
       baseHash: 'hash-1',
     })
+    const openClawPatch = JSON.parse(mocks.registry.request.mock.calls[1][2].raw)
+    expect(openClawPatch.agents.defaults.thinkingDefault).toBe('medium')
+    expect(openClawPatch.models.providers.anthropic.models[0]).toMatchObject(thinkingMetadata)
     expect(mocks.getRuntimeGatewayClient).toHaveBeenCalledWith('instance-1', 'pi')
     expect(mocks.piClient.request).toHaveBeenCalledWith('config.patch', {
       models: {
@@ -134,7 +143,13 @@ describe('resource model push route pi sync', () => {
             baseUrl: 'https://api.anthropic.com',
             apiKey: 'secret-key',
             api: 'anthropic-messages',
-            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+            models: [
+              {
+                id: 'claude-sonnet-4-20250514',
+                name: 'Claude Sonnet 4',
+                ...thinkingMetadata,
+              },
+            ],
           },
         },
       },
@@ -143,10 +158,13 @@ describe('resource model push route pi sync', () => {
   })
 
   it('pushes a Pi-only target without patching OpenClaw and sets the Pi default for new sessions', async () => {
-    const response = await POST(createRequest({
-      targets: ['pi'],
-      role: undefined,
-    }), routeCtx())
+    const response = await POST(
+      createRequest({
+        targets: ['pi'],
+        role: undefined,
+      }),
+      routeCtx(),
+    )
     const body = await response.json()
 
     expect(response.status).toBe(200)
@@ -161,13 +179,20 @@ describe('resource model push route pi sync', () => {
         providers: {
           anthropic: expect.objectContaining({
             api: 'anthropic-messages',
-            models: [{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' }],
+            models: [
+              {
+                id: 'claude-sonnet-4-20250514',
+                name: 'Claude Sonnet 4',
+                ...thinkingMetadata,
+              },
+            ],
           }),
         },
       },
       settings: {
         defaultProvider: 'anthropic',
         defaultModel: 'claude-sonnet-4-20250514',
+        defaultThinkingLevel: 'medium',
       },
     })
   })
@@ -239,9 +264,7 @@ describe('resource model push route pi sync', () => {
     expect(response.status).toBe(200)
     expect(body.successCount).toBe(1)
     expect(body.failedCount).toBe(0)
-    expect(body.outcomes).toEqual([
-      expect.objectContaining({ instanceId: 'instance-1', ok: true }),
-    ])
+    expect(body.outcomes).toEqual([expect.objectContaining({ instanceId: 'instance-1', ok: true })])
     expect(body.outcomes[0].piOk).toBeUndefined()
     expect(body.outcomes[0].piError).toBeUndefined()
     expect(mocks.piClient.request).not.toHaveBeenCalled()

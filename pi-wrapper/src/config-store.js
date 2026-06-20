@@ -143,6 +143,9 @@ function normalizeSettingsPatch(patch) {
   if (typeof settings.defaultModel === 'string') {
     result.defaultModel = settings.defaultModel
   }
+  if (typeof settings.defaultThinkingLevel === 'string') {
+    result.defaultThinkingLevel = settings.defaultThinkingLevel
+  }
   return result
 }
 

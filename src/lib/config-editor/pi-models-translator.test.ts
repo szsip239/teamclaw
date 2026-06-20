@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProviderEntry } from './provider-sync'
 import {
   buildPiModelsPatch,
+  buildPiModelsPatchFromEntries,
   mapProviderApiToPiApi,
   toPiProviderEntry,
 } from './pi-models-translator'
@@ -85,13 +86,39 @@ describe('pi models translator', () => {
   })
 
   it('can include Pi default model settings for manual Pi pushes', () => {
-    expect(buildPiModelsPatch('anthropic', providerEntry, {
-      defaultModelId: 'claude-sonnet-4-20250514',
-    })).toMatchObject({
+    expect(
+      buildPiModelsPatch('anthropic', providerEntry, {
+        defaultModelId: 'claude-sonnet-4-20250514',
+      }),
+    ).toMatchObject({
       settings: {
         defaultProvider: 'anthropic',
         defaultModel: 'claude-sonnet-4-20250514',
+        defaultThinkingLevel: 'medium',
       },
+    })
+  })
+
+  it('preserves explicit model thinking metadata without inventing provider mappings', () => {
+    const entry: ProviderEntry = {
+      ...providerEntry,
+      models: [
+        {
+          id: 'deepseek-v4-pro',
+          name: 'DeepSeek V4 Pro',
+          reasoning: true,
+          thinkingLevelMap: { high: 'high', xhigh: 'max' },
+          compat: { supportedReasoningEfforts: ['low', 'medium', 'xhigh'] },
+        },
+      ],
+    }
+
+    expect(
+      buildPiModelsPatchFromEntries({ deepseek: entry }).models.providers.deepseek.models[0],
+    ).toMatchObject({
+      id: 'deepseek-v4-pro',
+      reasoning: true,
+      thinkingLevelMap: { high: 'high', xhigh: 'max' },
     })
   })
 })

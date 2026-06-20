@@ -1,4 +1,5 @@
 import type { ProviderEntry } from './provider-sync'
+import { TEAMCLAW_DEFAULT_THINKING_LEVEL, type TeamClawThinkingLevel } from './thinking-levels'
 
 type PiModelEntry = ProviderEntry['models'][number]
 
@@ -16,6 +17,7 @@ export interface PiModelsPatch {
   settings?: {
     defaultProvider: string
     defaultModel: string
+    defaultThinkingLevel?: TeamClawThinkingLevel
   }
 }
 
@@ -52,7 +54,7 @@ export function toPiProviderEntry(entry: ProviderEntry): PiProviderEntry {
 export function buildPiModelsPatch(
   providerId: string,
   entry: ProviderEntry,
-  options: { defaultModelId?: string } = {},
+  options: { defaultModelId?: string; defaultThinkingLevel?: TeamClawThinkingLevel } = {},
 ): PiModelsPatch {
   const patch: PiModelsPatch = {
     models: {
@@ -65,6 +67,7 @@ export function buildPiModelsPatch(
     patch.settings = {
       defaultProvider: providerId,
       defaultModel: options.defaultModelId,
+      defaultThinkingLevel: options.defaultThinkingLevel ?? TEAMCLAW_DEFAULT_THINKING_LEVEL,
     }
   }
   return patch
@@ -72,19 +75,21 @@ export function buildPiModelsPatch(
 
 export function buildPiModelsPatchFromEntries(
   entries: Record<string, ProviderEntry>,
-  options: { defaultProviderId?: string; defaultModelId?: string } = {},
+  options: {
+    defaultProviderId?: string
+    defaultModelId?: string
+    defaultThinkingLevel?: TeamClawThinkingLevel
+  } = {},
 ): PiModelsPatch {
   const providers = Object.fromEntries(
-    Object.entries(entries).map(([providerId, entry]) => [
-      providerId,
-      toPiProviderEntry(entry),
-    ]),
+    Object.entries(entries).map(([providerId, entry]) => [providerId, toPiProviderEntry(entry)]),
   )
   const patch: PiModelsPatch = { models: { providers } }
   if (options.defaultProviderId && options.defaultModelId) {
     patch.settings = {
       defaultProvider: options.defaultProviderId,
       defaultModel: options.defaultModelId,
+      defaultThinkingLevel: options.defaultThinkingLevel ?? TEAMCLAW_DEFAULT_THINKING_LEVEL,
     }
   }
   return patch

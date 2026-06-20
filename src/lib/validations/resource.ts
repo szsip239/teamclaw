@@ -6,6 +6,7 @@ const modelDefinitionSchema = z.object({
   id: z.string().min(1),
   name: z.string().optional(),
   reasoning: z.boolean().optional(),
+  thinkingLevelMap: z.record(z.string(), z.union([z.string(), z.null()])).optional(),
   input: z.array(z.string()).optional(),
   cost: z.object({
     input: z.number(),
@@ -15,6 +16,7 @@ const modelDefinitionSchema = z.object({
   }).optional(),
   contextWindow: z.number().optional(),
   maxTokens: z.number().optional(),
+  compat: z.record(z.string(), z.unknown()).optional(),
 })
 
 const resourceConfigSchema = z.object({

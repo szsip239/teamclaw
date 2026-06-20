@@ -30,26 +30,28 @@ export interface ModelDefinition {
   id: string
   name: string
   reasoning?: boolean
-  input?: string[]           // ["text"] or ["text", "image"]
+  thinkingLevelMap?: Record<string, string | null>
+  input?: string[] // ["text"] or ["text", "image"]
   cost?: {
-    input: number            // per million tokens
+    input: number // per million tokens
     output: number
     cacheRead?: number
     cacheWrite?: number
   }
   contextWindow?: number
   maxTokens?: number
+  compat?: Record<string, unknown>
 }
 
 /** Non-sensitive resource config (maps to OpenClaw models.providers.X) */
 export interface ResourceConfig {
   baseUrl?: string
-  apiType?: string           // "anthropic-messages" | "openai-completions" | "openai-responses" | "google-generative-ai"
+  apiType?: string // "anthropic-messages" | "openai-completions" | "openai-responses" | "google-generative-ai"
   envVarName?: string
   /** Provider id expected by OpenClaw runtime, when it differs from TeamClaw's UI provider id */
   openClawProviderId?: string
-  authHeader?: boolean       // custom auth header handling
-  headers?: Record<string, string>  // custom HTTP headers
+  authHeader?: boolean // custom auth header handling
+  headers?: Record<string, string> // custom HTTP headers
   models?: ModelDefinition[] // available models from this provider
   /** Model id (from models[]) used as `agents.defaults.model.primary` when isDefaultModel=true */
   defaultModelId?: string

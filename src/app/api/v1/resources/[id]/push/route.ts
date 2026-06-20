@@ -10,6 +10,7 @@ import {
   type ProviderEntry,
 } from '@/lib/config-editor/provider-sync'
 import { syncPiProviderConfig } from '@/lib/config-editor/pi-provider-sync'
+import { TEAMCLAW_DEFAULT_THINKING_LEVEL } from '@/lib/config-editor/thinking-levels'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import type { ResourceConfig, ModelDefinition } from '@/types/resource'
 
@@ -53,8 +54,9 @@ function buildRolePatch(params: {
     return { agents: { defaults: { [PRIMARY_SLOT_KEY[role]]: { primary: modelRef } } } }
   }
 
-  const defaults = (currentConfig?.agents as Record<string, unknown> | undefined)
-    ?.defaults as Record<string, unknown> | undefined
+  const defaults = (currentConfig?.agents as Record<string, unknown> | undefined)?.defaults as
+    | Record<string, unknown>
+    | undefined
   const existing = (defaults?.model as Record<string, unknown> | undefined)?.fallbacks
   const existingArr =
     Array.isArray(existing) && existing.every((x) => typeof x === 'string')
@@ -62,6 +64,19 @@ function buildRolePatch(params: {
       : []
   const next = existingArr.includes(modelRef) ? existingArr : [...existingArr, modelRef]
   return { agents: { defaults: { model: { fallbacks: next } } } }
+}
+
+function buildAgentDefaultsPatch(rolePatch: Record<string, unknown>): Record<string, unknown> {
+  const agents = rolePatch.agents as Record<string, unknown> | undefined
+  const defaults = agents?.defaults as Record<string, unknown> | undefined
+  return {
+    agents: {
+      defaults: {
+        ...(defaults ?? {}),
+        thinkingDefault: TEAMCLAW_DEFAULT_THINKING_LEVEL,
+      },
+    },
+  }
 }
 
 interface PushOutcome {
@@ -84,6 +99,7 @@ async function pushPiModelsConfig(params: {
     entries: { [params.providerId]: params.providerEntry },
     defaultProviderId: params.modelId ? params.providerId : undefined,
     defaultModelId: params.modelId,
+    defaultThinkingLevel: params.modelId ? TEAMCLAW_DEFAULT_THINKING_LEVEL : undefined,
   })
   if (result.skipped) {
     return params.required
@@ -142,7 +158,9 @@ export const POST = withAuth(
       const builtProvider = buildProviderEntryFromResource(resource)
       if (!builtProvider || builtProvider.providerId !== openClawProviderId) {
         return NextResponse.json(
-          { error: `Could not build provider entry for "${resource.provider}" — ensure the resource has a baseUrl, apiKey, and at least one model` },
+          {
+            error: `Could not build provider entry for "${resource.provider}" — ensure the resource has a baseUrl, apiKey, and at least one model`,
+          },
           { status: 400 },
         )
       }
@@ -175,7 +193,7 @@ export const POST = withAuth(
               })
               const patch = {
                 models: { providers: { [openClawProviderId]: providerEntry } },
-                ...rolePatch,
+                ...buildAgentDefaultsPatch(rolePatch),
               }
               const sanitized = sanitizeProviderPatch(patch)
               await registry.request(instanceId, 'config.patch', {
