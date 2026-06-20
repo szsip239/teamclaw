@@ -3,8 +3,24 @@ import path from 'path'
 export const PI_WRAPPER_CONTAINER_PORT = 18790
 const PI_WRAPPER_MOUNT_PATH = '/opt/teamclaw/pi-wrapper'
 
-export function buildPiWrapperBind(repoRoot: string = process.cwd()): string {
-  return `${path.join(repoRoot, 'pi-wrapper')}:${PI_WRAPPER_MOUNT_PATH}:ro`
+export function resolvePiWrapperRepoRoot(
+  env: Record<string, string | undefined> = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const configuredRoot = env.TEAMCLAW_REPO_ROOT?.trim()
+  if (configuredRoot) return path.resolve(configuredRoot)
+
+  if (env.DOCKER_NETWORK) {
+    throw new Error(
+      'TEAMCLAW_REPO_ROOT must point to the host TeamClaw repo path when app runs in Docker',
+    )
+  }
+
+  return path.resolve(cwd)
+}
+
+export function buildPiWrapperBind(repoRoot: string = resolvePiWrapperRepoRoot()): string {
+  return `${path.join(path.resolve(repoRoot), 'pi-wrapper')}:${PI_WRAPPER_MOUNT_PATH}:ro`
 }
 
 export function buildOpenClawGatewayCommandWithPiWrapper(): string[] {

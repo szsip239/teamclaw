@@ -151,6 +151,9 @@ services:
       # stored instance URLs to host.docker.internal, so the app container can
       # reach OpenClaw processes running on the host loopback.
       DOCKER_NETWORK: 'data-net'
+      # Host path used by Docker daemon when TeamClaw creates managed OpenClaw
+      # containers with the pi-wrapper bind mount.
+      TEAMCLAW_REPO_ROOT: '${TEAMCLAW_REPO_ROOT:-${PWD}}'
     extra_hosts:
       # Linux needs this explicitly; Docker Desktop (Mac/Win) sets it by default.
       - 'host.docker.internal:host-gateway'

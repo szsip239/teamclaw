@@ -13,10 +13,7 @@ import {
   cleanupInstanceFiles,
 } from '@/lib/docker/config-generator'
 import type { ModelProviderConfig } from '@/lib/docker/config-generator'
-import {
-  buildProviderEntries,
-  resolveOpenClawProviderId,
-} from '@/lib/config-editor/provider-sync'
+import { buildProviderEntries, resolveOpenClawProviderId } from '@/lib/config-editor/provider-sync'
 import {
   buildOpenClawGatewayCommandWithPiWrapper,
   buildPiWrapperBind,
@@ -29,6 +26,7 @@ import type { ResourceConfig } from '@/types/resource'
 
 const GATEWAY_PORT = 18789 // Container-internal gateway port (fixed)
 const BASE_HOST_PORT = 18800 // Host port range starts here (avoids conflict with local OpenClaw on 18789)
+const FALLBACK_OPENCLAW_IMAGE = 'alpine/openclaw:2026.6.6-browser'
 
 // Simple mutex to prevent port race conditions during concurrent instance creation
 let portLock: Promise<void> = Promise.resolve()
@@ -130,10 +128,12 @@ async function connectToGateway(
           `[instance:create] Gateway connect timed out for ${instanceName}:`,
           (err as Error).message,
         )
-        await prisma.instance.update({
-          where: { id: instanceId },
-          data: { status: 'OFFLINE' },
-        }).catch(() => {})
+        await prisma.instance
+          .update({
+            where: { id: instanceId },
+            data: { status: 'OFFLINE' },
+          })
+          .catch(() => {})
         return
       }
       await new Promise((r) => setTimeout(r, 3000))
@@ -299,7 +299,10 @@ async function createDockerInstance(
       }
     } catch (err) {
       // Non-fatal: instance will be seeded via initInstanceWithDefaultResources later
-      console.warn('[instance:create] Failed to pre-build provider entries:', (err as Error).message)
+      console.warn(
+        '[instance:create] Failed to pre-build provider entries:',
+        (err as Error).message,
+      )
     }
   }
 
@@ -327,7 +330,7 @@ async function createDockerInstance(
 
   // 4. Determine Docker image
   const imageName =
-    body.docker?.imageName || process.env.DEFAULT_OPENCLAW_IMAGE || 'alpine/openclaw:latest'
+    body.docker?.imageName || process.env.DEFAULT_OPENCLAW_IMAGE || FALLBACK_OPENCLAW_IMAGE
 
   // 5. Pull image if not present, or if user requested latest
   const exists = await dockerManager.imageExists(imageName)
@@ -466,10 +469,7 @@ async function createDockerInstance(
       await dockerManager.initSandboxSupport(containerId)
       // restartContainer intentionally skipped — see comment above
     } catch (err) {
-      console.warn(
-        `[instance:create] Sandbox init failed for ${name}:`,
-        (err as Error).message,
-      )
+      console.warn(`[instance:create] Sandbox init failed for ${name}:`, (err as Error).message)
     }
   })().catch(() => {})
 
@@ -545,7 +545,7 @@ async function createExternalInstance(
       description,
       gatewayUrl,
       gatewayToken: encrypt(gatewayToken),
-      imageName: body.docker?.imageName || 'alpine/openclaw:latest',
+      imageName: body.docker?.imageName || FALLBACK_OPENCLAW_IMAGE,
       status: 'OFFLINE',
       createdById: user.id,
     },

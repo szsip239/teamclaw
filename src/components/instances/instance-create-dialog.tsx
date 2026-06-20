@@ -202,7 +202,7 @@ export function InstanceCreateDialog({
                 </Label>
                 <Input
                   id="imageName"
-                  placeholder="alpine/openclaw:latest"
+                  placeholder="alpine/openclaw:2026.6.6-browser"
                   value={imageName}
                   onChange={(e) => setImageName(e.target.value)}
                   className="font-mono text-[13px]"

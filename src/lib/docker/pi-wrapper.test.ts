@@ -3,12 +3,28 @@ import {
   buildOpenClawGatewayCommandWithPiWrapper,
   buildPiWrapperBind,
   derivePiHostPort,
+  resolvePiWrapperRepoRoot,
 } from './pi-wrapper'
 
 describe('docker pi-wrapper wiring', () => {
   it('mounts the repository pi-wrapper read-only into OpenClaw containers', () => {
     expect(buildPiWrapperBind('/repo/teamclaw')).toBe(
       '/repo/teamclaw/pi-wrapper:/opt/teamclaw/pi-wrapper:ro',
+    )
+  })
+
+  it('uses the configured host repo root when TeamClaw runs inside Docker', () => {
+    expect(
+      resolvePiWrapperRepoRoot(
+        { DOCKER_NETWORK: 'teamclaw-net', TEAMCLAW_REPO_ROOT: '/host/teamclaw' },
+        '/app',
+      ),
+    ).toBe('/host/teamclaw')
+  })
+
+  it('fails fast inside Docker when the host repo root is not configured', () => {
+    expect(() => resolvePiWrapperRepoRoot({ DOCKER_NETWORK: 'teamclaw-net' }, '/app')).toThrow(
+      'TEAMCLAW_REPO_ROOT must point to the host TeamClaw repo path',
     )
   })
 
