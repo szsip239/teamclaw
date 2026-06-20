@@ -144,13 +144,6 @@ docker compose --profile app up -d --build
 
 更细的 RAG 并发、OCR、Embedding 维度和模型预算参数请看 `.env.example`；多数用户应该优先在后台 UI 配置。
 
-### 常见开局问题
-
-- **502 或页面打不开**：先看 `docker compose -f docker-compose.prod.yml ps`，再看 `logs init` 和 `logs app`。
-- **登录页没有出现**：通常是 app 容器未启动、初始化失败，或 Nginx 反代到了错误端口。
-- **无法创建 runtime 容器**：检查 Docker daemon 权限、`DOCKER_SOCKET_PATH` 和 `DOCKER_GID`。
-- **知识库上传失败**：检查 `RAG_SERVICE_SECRET`、`RAG_SERVICE_URL`、Embedding/OCR API Key。
-- **复跑部署脚本**：当前 `setup.sh` 会保留已有密钥。不要手动改动 `ENCRYPTION_KEY`，否则已保存 API Key 可能无法解密。
 
 ## 系统架构
 
@@ -341,13 +334,6 @@ docker compose --profile app up -d --build
 
 Detailed RAG concurrency, OCR, embedding dimension, and model-budget variables live in `.env.example`. Most users should configure RAG from the admin UI first.
 
-### Common Startup Issues
-
-- **502 or app unavailable**: check `docker compose -f docker-compose.prod.yml ps`, then `logs init` and `logs app`.
-- **Login page missing**: the app container likely failed, initialization failed, or Nginx is proxying to the wrong port.
-- **Cannot create runtime containers**: check Docker daemon permissions, `DOCKER_SOCKET_PATH`, and `DOCKER_GID`.
-- **Knowledge-base upload fails**: check `RAG_SERVICE_SECRET`, `RAG_SERVICE_URL`, Embedding API key, and OCR API key.
-- **Rerunning setup**: current `setup.sh` preserves existing secrets. Do not manually rotate `ENCRYPTION_KEY` unless you plan to re-enter saved API keys.
 
 ## Architecture
 
