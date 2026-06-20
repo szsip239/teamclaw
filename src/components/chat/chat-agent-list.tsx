@@ -42,6 +42,7 @@ export function ChatAgentList() {
   const clearMessages = useChatStore((s) => s.clearMessages)
   const agentActivities = useChatStore((s) => s.agentActivities)
   const clearAgentActivity = useChatStore((s) => s.clearAgentActivity)
+  const reconcileAgentActivity = useChatStore((s) => s.reconcileAgentActivity)
   const qc = useQueryClient()
   const newConversation = useNewConversation()
   const [confirmAgent, setConfirmAgent] = useState<ChatAgentInfo | null>(null)
@@ -60,12 +61,37 @@ export function ChatAgentList() {
     }
   }, [])
 
+  useEffect(() => {
+    const runningActivities = Object.entries(agentActivities).filter(
+      ([, activity]) => activity.state === "running" && activity.sessionId,
+    )
+    if (runningActivities.length === 0) return
+
+    let cancelled = false
+    const reconcile = () => {
+      for (const [key, activity] of runningActivities) {
+        if (cancelled || !activity.sessionId) continue
+        const [instanceId, ...agentIdParts] = key.split(":")
+        const agentId = agentIdParts.join(":")
+        if (!instanceId || !agentId) continue
+        void reconcileAgentActivity(instanceId, agentId, activity.sessionId)
+      }
+    }
+
+    reconcile()
+    const timer = setInterval(reconcile, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [agentActivities, reconcileAgentActivity])
+
   function handleSelect(agent: ChatAgentInfo) {
     const isSameAgent =
       selectedAgent?.instanceId === agent.instanceId && selectedAgent?.agentId === agent.agentId
 
     if (!isSameAgent) {
-      clearMessages()
+      clearMessages({ detachActiveRun: true })
     } else {
       // Same agent clicked — reset activeSessionId so chat-main resolves
       // the freshest active session (user may be viewing a history session).
@@ -153,7 +179,7 @@ export function ChatAgentList() {
       { instanceId: confirmAgent.instanceId, agentId: confirmAgent.agentId, runtime },
       {
         onSuccess: (data) => {
-          clearMessages()
+          clearMessages({ detachActiveRun: true })
           setSelectedAgent(confirmAgent)
           setSelectedRuntime(runtime)
           useChatStore.getState().setActiveSessionId(data.session.id)

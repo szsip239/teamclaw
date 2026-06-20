@@ -200,16 +200,15 @@ export const PUT = withAuth(
         updatedList[agentIdx] = updated
       }
 
-      // OpenClaw merges agents.list arrays (union, not replace) in config.patch.
-      // Two-step: null the key to clear it, then re-fetch hash and set the new list.
+      // Replacing agents.list is destructive if entries are removed, so OpenClaw
+      // requires an explicit replacePaths confirmation for the exact array path.
       // sanitizeAgentEntry strips __OPENCLAW_REDACTED__ values to prevent crash.
       try {
-        await adapter.patchConfig(client, { agents: { list: null } }, hash)
-        const freshConfig = await adapter.getConfig(client)
         await adapter.patchConfig(
           client,
           { agents: { list: updatedList.map(sanitizeAgentEntry) } },
-          freshConfig.hash,
+          hash,
+          { replacePaths: ['agents.list'] },
         )
       } catch (err) {
         return NextResponse.json(
@@ -270,11 +269,12 @@ export const DELETE = withAuth(
 
     const updatedList = list.filter((a) => a.id !== agentId)
     try {
-      // OpenClaw merges agents.list arrays (union, not replace) in config.patch.
-      // Two-step: null the key to clear it, then re-fetch hash and set the new list.
-      await adapter.patchConfig(client, { agents: { list: null } }, hash)
-      const freshConfig = await adapter.getConfig(client)
-      await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, freshConfig.hash)
+      await adapter.patchConfig(
+        client,
+        { agents: { list: updatedList.map(sanitizeAgentEntry) } },
+        hash,
+        { replacePaths: ['agents.list'] },
+      )
     } catch (err) {
       return NextResponse.json(
         { error: `Configuration update failed:${(err as Error).message}` },

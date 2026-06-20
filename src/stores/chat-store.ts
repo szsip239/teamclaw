@@ -23,6 +23,7 @@ export type ChatAgentActivityState = 'running' | 'done' | 'error'
 export interface ChatAgentActivity {
   state: ChatAgentActivityState
   unreadCount: number
+  sessionId?: string
 }
 
 export function chatAgentActivityKey(instanceId: string, agentId: string): string {
@@ -80,10 +81,11 @@ interface ChatState {
 
   // Local per-agent activity indicators for the chat sidebar.
   agentActivities: Record<string, ChatAgentActivity>
-  markAgentRunning: (instanceId: string, agentId: string) => void
+  markAgentRunning: (instanceId: string, agentId: string, sessionId?: string | null) => void
   markAgentDone: (instanceId: string, agentId: string) => void
   markAgentError: (instanceId: string, agentId: string) => void
   clearAgentActivity: (instanceId: string, agentId: string) => void
+  reconcileAgentActivity: (instanceId: string, agentId: string, sessionId: string) => Promise<void>
 
   // Send message action
   sendMessage: (
@@ -118,7 +120,7 @@ interface ChatState {
   abortChat: () => void
 
   // Session management
-  clearMessages: () => void
+  clearMessages: (options?: { detachActiveRun?: boolean }) => void
 
   // Gateway connection status
   connectionStatus: 'ok' | 'unreachable' | 'session-lost'
@@ -502,13 +504,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setRemoteStreaming: (v) => set({ remoteStreaming: v }),
 
   agentActivities: {},
-  markAgentRunning: (instanceId, agentId) =>
-    set((s) => ({
-      agentActivities: {
-        ...s.agentActivities,
-        [chatAgentActivityKey(instanceId, agentId)]: { state: 'running', unreadCount: 0 },
-      },
-    })),
+  markAgentRunning: (instanceId, agentId, sessionId) =>
+    set((s) => {
+      const key = chatAgentActivityKey(instanceId, agentId)
+      const previousSessionId = s.agentActivities[key]?.sessionId
+      return {
+        agentActivities: {
+          ...s.agentActivities,
+          [key]: {
+            state: 'running',
+            unreadCount: 0,
+            ...(sessionId
+              ? { sessionId }
+              : previousSessionId
+                ? { sessionId: previousSessionId }
+                : {}),
+          },
+        },
+      }
+    }),
   markAgentDone: (instanceId, agentId) =>
     set((s) => ({
       agentActivities: {
@@ -531,10 +545,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
       delete next[key]
       return { agentActivities: next }
     }),
+  reconcileAgentActivity: async (instanceId, agentId, sessionId) => {
+    const key = chatAgentActivityKey(instanceId, agentId)
+    const activity = get().agentActivities[key]
+    if (activity?.state !== 'running' || activity.sessionId !== sessionId) return
+
+    try {
+      const res = await fetch(`/api/v1/chat/sessions/${sessionId}/history?polling=true`, {
+        credentials: 'include',
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as ChatHistoryResponse
+      if (data.isRunning) return
+
+      const assembled = assembleFromResponse(data)
+      if (!latestUserTurnHasFinalAssistant(assembled)) return
+
+      const latestAssistant = [...assembled].reverse().find((msg) => msg.role === 'assistant')
+      if (latestAssistant?.error || latestAssistant?.stopReason === 'error') {
+        get().markAgentError(instanceId, agentId)
+      } else {
+        get().markAgentDone(instanceId, agentId)
+      }
+    } catch {
+      /* non-critical; next poll can retry */
+    }
+  },
 
   sendMessage: async (instanceId, agentId, runtime, message, sessionId, attachments) => {
     const { addUserMessage, markAgentRunning } = get()
-    markAgentRunning(instanceId, agentId)
+    markAgentRunning(instanceId, agentId, get().activeSessionId)
     // Capture session ID at start — may be updated by the 'session' SSE event
     // when the API creates a new session (activeSessionId was null)
     let capturedSessionId = get().activeSessionId
@@ -606,6 +646,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // API sends the session ID as the first event — track it
             // so syncFromHistory works even when no sessionId was passed
             capturedSessionId = event.sessionId
+            get().markAgentRunning(instanceId, agentId, event.sessionId)
             if (!get().activeSessionId) {
               set({ activeSessionId: event.sessionId })
             }
@@ -659,6 +700,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } finally {
       clearInterval(progressTimer)
+      const detached = controller.signal.aborted && controller.signal.reason === 'detached'
+
+      if (detached) {
+        if (capturedSessionId) {
+          get().markAgentRunning(instanceId, agentId, capturedSessionId)
+        }
+        try {
+          const { getQueryClient } = await import('@/components/providers')
+          const qc = getQueryClient()
+          qc.invalidateQueries({ queryKey: ['chat', 'sessions'] })
+          if (capturedSessionId) {
+            qc.invalidateQueries({ queryKey: ['chat', 'history', capturedSessionId] })
+          }
+        } catch {
+          /* non-fatal */
+        }
+        return
+      }
 
       // 5. Sync with full history FIRST (primary path — contains complete data with tool calls).
       // Only merge streamingMessage as a fallback if sync fails (gateway unreachable / empty).
@@ -727,7 +786,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   queueMessage: (runtime, message, attachments) => {
     const { selectedAgent } = get()
     if (!selectedAgent) return
-    get().markAgentRunning(selectedAgent.instanceId, selectedAgent.agentId)
+    get().markAgentRunning(selectedAgent.instanceId, selectedAgent.agentId, get().activeSessionId)
 
     // Add to queuedMessages (NOT messages[]) — survives syncFromHistory overwrites
     const uiAttachments: ChatAttachment[] | undefined = attachments?.map((a) => ({
@@ -788,9 +847,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  clearMessages: () => {
+  clearMessages: (options) => {
     const { abortController } = get()
-    if (abortController) abortController.abort()
+    if (abortController) abortController.abort(options?.detachActiveRun ? 'detached' : undefined)
     set({
       messages: [],
       streamingMessage: null,

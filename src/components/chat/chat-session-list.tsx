@@ -40,7 +40,7 @@ export function ChatSessionList() {
     if (!availableRuntimes.includes(session.runtime)) {
       availableRuntimes.push(session.runtime)
     }
-    clearMessages()
+    clearMessages({ detachActiveRun: true })
     qc.invalidateQueries({ queryKey: chatKeys.history(session.id) })
     setActiveSessionId(session.id)
     setSelectedAgent({

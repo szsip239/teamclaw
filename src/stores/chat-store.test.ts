@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs'
 import path from 'path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chatAgentActivityKey, useChatStore } from './chat-store'
 
 const source = readFileSync(path.resolve('src/stores/chat-store.ts'), 'utf-8')
@@ -48,6 +48,10 @@ describe('chat store agent activity indicators', () => {
     useChatStore.setState({ agentActivities: {} })
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('tracks running, done, error, and cleared agent activity states', () => {
     const key = chatAgentActivityKey('inst-1', 'main')
 
@@ -71,5 +75,54 @@ describe('chat store agent activity indicators', () => {
 
     useChatStore.getState().clearAgentActivity('inst-1', 'main')
     expect(useChatStore.getState().agentActivities[key]).toBeUndefined()
+  })
+
+  it('keeps the running session id when refreshing running state', () => {
+    const key = chatAgentActivityKey('sales', 'main')
+
+    useChatStore.getState().markAgentRunning('sales', 'main', 'session-1')
+    useChatStore.getState().markAgentRunning('sales', 'main')
+
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'running',
+      unreadCount: 0,
+      sessionId: 'session-1',
+    })
+  })
+
+  it('reconciles a detached running agent to an unread done state from history', async () => {
+    const key = chatAgentActivityKey('sales', 'main')
+    useChatStore.getState().markAgentRunning('sales', 'main', 'session-1')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          snapshots: [],
+          currentMessages: [
+            { id: 'u1', role: 'user', content: 'hello', createdAt: '2026-06-20T00:00:00.000Z' },
+            {
+              id: 'a1',
+              role: 'assistant',
+              content: 'done',
+              isFinal: true,
+              createdAt: '2026-06-20T00:00:01.000Z',
+            },
+          ],
+          isActive: true,
+        }),
+      })),
+    )
+
+    await useChatStore.getState().reconcileAgentActivity('sales', 'main', 'session-1')
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/v1/chat/sessions/session-1/history?polling=true',
+      { credentials: 'include' },
+    )
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'done',
+      unreadCount: 1,
+    })
   })
 })

@@ -47,6 +47,7 @@ export interface GatewayAdapter {
     client: GatewayClient,
     patch: Record<string, unknown>,
     baseHash: string,
+    options?: { replacePaths?: string[] },
   ): Promise<void>
   applyConfig(client: GatewayClient, raw: string, baseHash: string): Promise<void>
 
@@ -158,11 +159,16 @@ export class GatewayV1Adapter implements GatewayAdapter {
     client: GatewayClient,
     patch: Record<string, unknown>,
     baseHash: string,
+    options?: { replacePaths?: string[] },
   ): Promise<void> {
-    await client.request('config.patch', {
+    const params: Record<string, unknown> = {
       raw: JSON.stringify(patch),
       baseHash,
-    })
+    }
+    if (options?.replacePaths?.length) {
+      params.replacePaths = options.replacePaths
+    }
+    await client.request('config.patch', params)
   }
 
   async applyConfig(client: GatewayClient, raw: string, baseHash: string): Promise<void> {

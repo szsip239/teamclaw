@@ -141,18 +141,18 @@ export const POST = withAuth(
             )
             filesCopied = true
           } catch (copyErr) {
-            // Phase 2 failed — rollback Phase 1 (remove agent from target config)
-            // Two-step null-then-set to handle union merge + redacted values
+            // Phase 2 failed — rollback Phase 1 (remove agent from target config).
+            // Replacing agents.list needs explicit confirmation because it can
+            // remove array entries.
             try {
               const freshConfig = await tgtAdapter.getConfig(tgtClient)
               const { list: freshList } = extractAgentsConfig(freshConfig.config)
               const rolledBackList = freshList.filter((a) => a.id !== newAgentId)
-              await tgtAdapter.patchConfig(tgtClient, { agents: { list: null } }, freshConfig.hash)
-              const afterNull = await tgtAdapter.getConfig(tgtClient)
               await tgtAdapter.patchConfig(
                 tgtClient,
                 { agents: { list: rolledBackList.map(sanitizeAgentEntry) } },
-                afterNull.hash,
+                freshConfig.hash,
+                { replacePaths: ['agents.list'] },
               )
             } catch {
               // Rollback failed — log but don't hide original error

@@ -115,13 +115,14 @@ export class GatewayRegistry {
     instanceId: string,
     patch: Record<string, unknown>,
     baseHash: string,
+    options?: { replacePaths?: string[] },
   ): Promise<void> {
     const adapter = this.getAdapter(instanceId)
     const client = this.getClient(instanceId)
     if (!adapter || !client) {
       throw new Error(`Instance ${instanceId} is not connected`)
     }
-    await adapter.patchConfig(client, patch, baseHash)
+    await adapter.patchConfig(client, patch, baseHash, options)
   }
 
   async checkHealth(instanceId: string): Promise<unknown> {

@@ -23,4 +23,22 @@ describe('GatewayV1Adapter', () => {
     expect(request).toHaveBeenCalledTimes(1)
     expect(request).toHaveBeenCalledWith('agents.list')
   })
+
+  it('passes replacePaths through config.patch for intentional array replacement', async () => {
+    const request = vi.fn(async () => ({ ok: true }))
+    const client = { request } as unknown as GatewayClient
+
+    await new GatewayV1Adapter().patchConfig(
+      client,
+      { agents: { list: [{ id: 'main', name: 'Main' }] } },
+      'hash-1',
+      { replacePaths: ['agents.list'] },
+    )
+
+    expect(request).toHaveBeenCalledWith('config.patch', {
+      raw: JSON.stringify({ agents: { list: [{ id: 'main', name: 'Main' }] } }),
+      baseHash: 'hash-1',
+      replacePaths: ['agents.list'],
+    })
+  })
 })
