@@ -173,7 +173,7 @@ model Instance {
   // Docker container
   containerId     String?
   containerName   String?
-  imageName       String         @default("alpine/openclaw:latest")
+  imageName       String         @default("alpine/openclaw:2026.6.6-browser")
   dockerConfig    Json?
 
   // External instance — host filesystem path (e.g. /Users/user/.openclaw)

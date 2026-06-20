@@ -3,6 +3,7 @@ import { Pool } from 'pg'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../src/generated/prisma'
 import bcrypt from 'bcryptjs'
+import { randomBytes } from 'crypto'
 import fs from 'fs/promises'
 import path from 'path'
 
@@ -109,21 +110,31 @@ async function main() {
   })
   console.log('Created department:', department.name)
 
-  // Create admin user
-  const passwordHash = await bcrypt.hash('Admin@123456', 12)
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@teamclaw.local' },
-    update: {},
-    create: {
-      email: 'admin@teamclaw.local',
-      name: 'System Admin',
-      passwordHash,
-      role: 'SYSTEM_ADMIN',
-      departmentId: department.id,
-      status: 'ACTIVE',
-    },
-  })
-  console.log('Created admin user:', admin.email)
+  // Create initial admin user. Never reset an existing admin password here.
+  const adminEmail = process.env.INITIAL_ADMIN_EMAIL || 'admin@teamclaw.local'
+  const initialAdminPassword =
+    process.env.INITIAL_ADMIN_PASSWORD || randomBytes(18).toString('base64url')
+  let admin = await prisma.user.findUnique({ where: { email: adminEmail } })
+
+  if (admin) {
+    console.log('Admin user already exists, password preserved:', admin.email)
+  } else {
+    const passwordHash = await bcrypt.hash(initialAdminPassword, 12)
+    admin = await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: 'System Admin',
+        passwordHash,
+        role: 'SYSTEM_ADMIN',
+        departmentId: department.id,
+        status: 'ACTIVE',
+      },
+    })
+    console.log('Created admin user:', admin.email)
+    if (!process.env.INITIAL_ADMIN_PASSWORD) {
+      console.log('Generated initial admin password:', initialAdminPassword)
+    }
+  }
 
   // Seed RAG SystemConfig defaults
   const ragConfigs = [

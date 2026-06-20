@@ -1,4 +1,4 @@
-FROM alpine/openclaw:latest
+FROM alpine/openclaw:2026.6.6-browser
 
 USER root
 

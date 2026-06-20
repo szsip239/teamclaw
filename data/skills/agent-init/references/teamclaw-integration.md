@@ -5,7 +5,7 @@
 TeamClaw manages two types of OpenClaw instances:
 
 ### Container Instance (`containerId` is set)
-- Runs in Docker container (image: `alpine/openclaw:latest`)
+- Runs in Docker container (default image: `alpine/openclaw:2026.6.6-browser`)
 - File operations via `docker exec`
 - Workspace inside container: `/home/node/.openclaw/workspace/`
 - Agent workspaces: `/workspace/{agentId}/` (Docker volume mount)
@@ -13,7 +13,7 @@ TeamClaw manages two types of OpenClaw instances:
 - Sandbox support (Docker-in-Docker) available
 
 ### External Instance (`workspacePath` is set, `containerId` is null)
-- Runs on host machine (e.g., `/Users/clawdbot/.openclaw`)
+- Runs on host machine (for example, `~/.openclaw`)
 - File operations via direct filesystem
 - Workspace at `{workspacePath}/` (the `.openclaw` directory)
 - Agent workspace MD files at `{workspacePath}/workspace/` (or `workspace-{profile}/`)

@@ -6,7 +6,9 @@ services:
       target: init
     container_name: teamclaw-init
     environment:
-      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
+      INITIAL_ADMIN_EMAIL: '${INITIAL_ADMIN_EMAIL:-admin@teamclaw.local}'
+      INITIAL_ADMIN_PASSWORD: '${INITIAL_ADMIN_PASSWORD:?Set INITIAL_ADMIN_PASSWORD in .env}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,7 +29,7 @@ services:
     ports:
       - '${APP_PORT:-3100}:3100'
     environment:
-      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
       REDIS_URL: 'redis://redis:6379'
       JWT_PRIVATE_KEY: '${JWT_PRIVATE_KEY}'
       JWT_PUBLIC_KEY: '${JWT_PUBLIC_KEY}'
@@ -41,12 +43,12 @@ services:
       DEFAULT_MODEL_API_KEY: '${DEFAULT_MODEL_API_KEY:-}'
       DEFAULT_MODEL_BASE_URL: '${DEFAULT_MODEL_BASE_URL:-https://api.anthropic.com}'
       DEFAULT_MODEL_API_TYPE: '${DEFAULT_MODEL_API_TYPE:-anthropic-messages}'
-      TEAMCLAW_DATA_DIR: '${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}'
+      TEAMCLAW_DATA_DIR: '${TEAMCLAW_DATA_DIR:-${HOME}/.teamclaw/instances}'
       TEAMCLAW_REPO_ROOT: '${TEAMCLAW_REPO_ROOT:-${PWD}}'
       DEFAULT_OPENCLAW_IMAGE: '${DEFAULT_OPENCLAW_IMAGE:-alpine/openclaw:2026.6.6-browser}'
       DOCKER_NETWORK: 'teamclaw-net'
       RAG_SERVICE_URL: 'http://rag:8000'
-      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:?Set RAG_SERVICE_SECRET in .env}'
       LLM_API_KEY: '${LLM_API_KEY:-}'
       DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
       LLM_BASE_URL: '${LLM_BASE_URL:-}'
@@ -73,7 +75,7 @@ services:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - ./data/skills:/app/data/skills
       - ${HOME}/.openclaw:${HOME}/.openclaw
-      - ${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}:${TEAMCLAW_DATA_DIR:-/Users/clawdbot/.teamclaw/instances}
+      - ${TEAMCLAW_DATA_DIR:-${HOME}/.teamclaw/instances}:${TEAMCLAW_DATA_DIR:-${HOME}/.teamclaw/instances}
       - /tmp:/tmp:ro
       # Mount for external instance MEDIA images (e.g. OpenClaw skills output).
       # Set EXTERNAL_MEDIA_DIR to the OpenClaw installation's parent directory.
@@ -88,8 +90,8 @@ services:
     container_name: teamclaw-rag
     restart: unless-stopped
     environment:
-      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}'
-      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-teamclaw}'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:?Set RAG_SERVICE_SECRET in .env}'
       LLM_API_KEY: '${LLM_API_KEY:-}'
       DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
       LLM_BASE_URL: '${LLM_BASE_URL:-}'
@@ -148,7 +150,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-teamclaw}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamclaw_dev_2024}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
     ports:
       - '${POSTGRES_PORT:-5432}:5432'

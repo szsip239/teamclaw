@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-teamclaw}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamclaw_dev_2024}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-teamclaw}
     ports:
       - '${POSTGRES_PORT:-5432}:5432'
@@ -44,8 +44,8 @@ services:
     ports:
       - '8000:8000'
     environment:
-      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}'
-      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-teamclaw}'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:?Set RAG_SERVICE_SECRET in .env}'
       LLM_API_KEY: '${LLM_API_KEY:-}'
       DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
       LLM_BASE_URL: '${LLM_BASE_URL:-}'
@@ -120,10 +120,10 @@ services:
       - '${APP_PORT:-3100}:3100'
     environment:
       # Override URLs to use docker-internal DNS instead of host:port from .env
-      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:-teamclaw_dev_2024}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-teamclaw}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-teamclaw}?schema=public'
       REDIS_URL: 'redis://redis:6379'
       RAG_SERVICE_URL: 'http://rag:8000'
-      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:-teamclaw-rag-secret-2024}'
+      RAG_SERVICE_SECRET: '${RAG_SERVICE_SECRET:?Set RAG_SERVICE_SECRET in .env}'
       LLM_API_KEY: '${LLM_API_KEY:-}'
       DASHSCOPE_API_KEY: '${DASHSCOPE_API_KEY:-}'
       LLM_BASE_URL: '${LLM_BASE_URL:-}'

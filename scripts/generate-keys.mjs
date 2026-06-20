@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate RSA key pair for JWT RS256 and AES encryption key.
+ * Generate TeamClaw local environment secrets.
  * Outputs Base64-encoded values, or writes missing placeholders with --write.
  */
 import { generateKeyPairSync, randomBytes } from 'crypto'
@@ -17,7 +17,13 @@ function needsValue(content, key) {
   const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'))
   if (!match) return true
   const value = stripQuotes(match[1].trim())
-  return !value || value.startsWith('<')
+  return !value || value.includes('<')
+}
+
+function getEnvValue(content, key, fallback = '') {
+  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'))
+  if (!match) return fallback
+  return stripQuotes(match[1].trim()) || fallback
 }
 
 function setEnvValue(content, key, value) {
@@ -26,6 +32,17 @@ function setEnvValue(content, key, value) {
     return content.replace(new RegExp(`^${key}=.*$`, 'm'), line)
   }
   return `${content.replace(/\s*$/, '')}\n${line}\n`
+}
+
+function randomSecret(bytes = 24) {
+  return randomBytes(bytes).toString('base64url')
+}
+
+function buildDatabaseUrl(content, postgresPassword) {
+  const user = getEnvValue(content, 'POSTGRES_USER', 'teamclaw')
+  const db = getEnvValue(content, 'POSTGRES_DB', 'teamclaw')
+  const port = getEnvValue(content, 'POSTGRES_PORT', '5432')
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(postgresPassword)}@localhost:${port}/${encodeURIComponent(db)}?schema=public`
 }
 
 async function readEnvContent() {
@@ -50,7 +67,7 @@ async function main() {
 
 Options:
   --write   Write missing placeholder values to .env
-  --force   Rotate existing values intentionally`)
+  --force   Rotate existing values intentionally; do not use on existing deployments unless planned`)
     return
   }
 
@@ -76,6 +93,10 @@ Options:
     let content = await readEnvContent()
     let changed = false
 
+    const postgresPassword = randomSecret(24)
+    const ragServiceSecret = randomSecret(32)
+    const initialAdminPassword = randomSecret(18)
+
     const shouldWriteJwt =
       force || needsValue(content, 'JWT_PRIVATE_KEY') || needsValue(content, 'JWT_PUBLIC_KEY')
 
@@ -87,6 +108,31 @@ Options:
 
     if (force || needsValue(content, 'ENCRYPTION_KEY')) {
       content = setEnvValue(content, 'ENCRYPTION_KEY', encryptionKey)
+      changed = true
+    }
+
+    if (force || needsValue(content, 'POSTGRES_PASSWORD')) {
+      content = setEnvValue(content, 'POSTGRES_PASSWORD', postgresPassword)
+      if (force || needsValue(content, 'DATABASE_URL')) {
+        content = setEnvValue(content, 'DATABASE_URL', buildDatabaseUrl(content, postgresPassword))
+      }
+      changed = true
+    } else if (force || needsValue(content, 'DATABASE_URL')) {
+      content = setEnvValue(
+        content,
+        'DATABASE_URL',
+        buildDatabaseUrl(content, getEnvValue(content, 'POSTGRES_PASSWORD')),
+      )
+      changed = true
+    }
+
+    if (force || needsValue(content, 'RAG_SERVICE_SECRET')) {
+      content = setEnvValue(content, 'RAG_SERVICE_SECRET', ragServiceSecret)
+      changed = true
+    }
+
+    if (force || needsValue(content, 'INITIAL_ADMIN_PASSWORD')) {
+      content = setEnvValue(content, 'INITIAL_ADMIN_PASSWORD', initialAdminPassword)
       changed = true
     }
 
@@ -105,6 +151,9 @@ Options:
   console.log(`JWT_PRIVATE_KEY="${privateB64}"`)
   console.log(`JWT_PUBLIC_KEY="${publicB64}"`)
   console.log(`ENCRYPTION_KEY="${encryptionKey}"`)
+  console.log(`POSTGRES_PASSWORD="${randomSecret(24)}"`)
+  console.log(`RAG_SERVICE_SECRET="${randomSecret(32)}"`)
+  console.log(`INITIAL_ADMIN_PASSWORD="${randomSecret(18)}"`)
 }
 
 main().catch(console.error)

@@ -66,6 +66,31 @@ needs_env_value() {
   [[ -z "$value" || "$value" == "$placeholder" || "$value" == \<*\> ]]
 }
 
+ensure_env_default() {
+  local key="$1"
+  local value="$2"
+  if [[ -z "$(get_env_var "$key")" ]]; then
+    set_env_var "$key" "$value"
+  fi
+}
+
+random_hex() {
+  local bytes="$1"
+  openssl rand -hex "$bytes"
+}
+
+build_database_url() {
+  local db_user db_password db_name db_port
+  db_user="$(get_env_var "POSTGRES_USER")"
+  db_password="$(get_env_var "POSTGRES_PASSWORD")"
+  db_name="$(get_env_var "POSTGRES_DB")"
+  db_port="$(get_env_var "POSTGRES_PORT")"
+  db_user="${db_user:-teamclaw}"
+  db_name="${db_name:-teamclaw}"
+  db_port="${db_port:-5432}"
+  printf 'postgresql://%s:%s@localhost:%s/%s?schema=public' "$db_user" "$db_password" "$db_port" "$db_name"
+}
+
 # ── Step 1: Create .env ──────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
   echo -e "${YELLOW}[!] .env already exists. Skipping copy.${NC}"
@@ -103,7 +128,41 @@ else
   echo -e "${GREEN}  -> Existing AES-256-CBC encryption key preserved${NC}"
 fi
 
-# ── Step 2b: Configure TEAMCLAW_DATA_DIR ───────────────────
+# ── Step 2b: Configure deployment secrets ─────────────────
+ensure_env_default "POSTGRES_USER" "teamclaw"
+ensure_env_default "POSTGRES_DB" "teamclaw"
+ensure_env_default "POSTGRES_PORT" "5432"
+ensure_env_default "INITIAL_ADMIN_EMAIL" "admin@teamclaw.local"
+
+if needs_env_value "POSTGRES_PASSWORD" "<generated-postgres-password>"; then
+  set_env_var "POSTGRES_PASSWORD" "$(random_hex 24)"
+  echo -e "${GREEN}  -> PostgreSQL password generated${NC}"
+else
+  echo -e "${GREEN}  -> Existing PostgreSQL password preserved${NC}"
+fi
+
+if needs_env_value "DATABASE_URL" "postgresql://teamclaw:<generated-postgres-password>@localhost:5432/teamclaw?schema=public"; then
+  set_env_var "DATABASE_URL" "$(build_database_url)"
+  echo -e "${GREEN}  -> Host DATABASE_URL generated${NC}"
+else
+  echo -e "${GREEN}  -> Existing host DATABASE_URL preserved${NC}"
+fi
+
+if needs_env_value "RAG_SERVICE_SECRET" "<generated-rag-service-secret>"; then
+  set_env_var "RAG_SERVICE_SECRET" "$(random_hex 32)"
+  echo -e "${GREEN}  -> RAG service secret generated${NC}"
+else
+  echo -e "${GREEN}  -> Existing RAG service secret preserved${NC}"
+fi
+
+if needs_env_value "INITIAL_ADMIN_PASSWORD" "<generated-initial-admin-password>"; then
+  set_env_var "INITIAL_ADMIN_PASSWORD" "$(random_hex 18)"
+  echo -e "${GREEN}  -> Initial admin password generated${NC}"
+else
+  echo -e "${GREEN}  -> Existing initial admin password preserved${NC}"
+fi
+
+# ── Step 2c: Configure TEAMCLAW_DATA_DIR ───────────────────
 TEAMCLAW_DATA_DIR_VAL=$(get_env_var "TEAMCLAW_DATA_DIR")
 if [[ -z "$TEAMCLAW_DATA_DIR_VAL" ]]; then
   DEFAULT_DATA_DIR="${HOME}/.teamclaw/instances"
@@ -114,7 +173,7 @@ else
   echo -e "${GREEN}  -> Instance data dir already set: ${TEAMCLAW_DATA_DIR_VAL}${NC}"
 fi
 
-# ── Step 2c: Configure Docker socket group on Linux ───────
+# ── Step 2d: Configure Docker socket group on Linux ───────
 DOCKER_SOCKET_VAL=$(get_env_var "DOCKER_SOCKET_PATH")
 DOCKER_SOCKET_VAL="${DOCKER_SOCKET_VAL:-/var/run/docker.sock}"
 DOCKER_GID_VAL=$(get_env_var "DOCKER_GID")
@@ -284,10 +343,13 @@ else
   echo -e "  ${CYAN}Access URL:${NC}    http://localhost:${APP_PORT}"
 fi
 
-echo -e "  ${CYAN}Admin Email:${NC}   admin@teamclaw.local"
-echo -e "  ${CYAN}Admin Password:${NC} Admin@123456"
+ADMIN_EMAIL="$(get_env_var "INITIAL_ADMIN_EMAIL")"
+ADMIN_PASSWORD="$(get_env_var "INITIAL_ADMIN_PASSWORD")"
+echo -e "  ${CYAN}Initial Admin Email:${NC}    ${ADMIN_EMAIL:-admin@teamclaw.local}"
+echo -e "  ${CYAN}Initial Admin Password:${NC} ${ADMIN_PASSWORD}"
 echo ""
-echo -e "  ${YELLOW}Please change the default password after first login!${NC}"
+echo -e "  ${YELLOW}The initial password is used only when the admin user is first created.${NC}"
+echo -e "  ${YELLOW}If this was a rerun, an existing admin password was preserved.${NC}"
 echo ""
 echo -e "  Useful commands:"
 if [ "$ENABLE_NGINX" = true ]; then

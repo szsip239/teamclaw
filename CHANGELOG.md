@@ -4,6 +4,26 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.6.2 (2026-06-21)
+
+> Patch release: removes reusable demo credentials from the published setup path and makes fresh deployments generate their own database, RAG, and initial admin secrets.
+
+### Security Hardening
+
+- `setup.sh` now generates `POSTGRES_PASSWORD`, `DATABASE_URL`, `RAG_SERVICE_SECRET`, and `INITIAL_ADMIN_PASSWORD` when `.env` is missing, blank, or still contains placeholders.
+- `scripts/generate-keys.mjs --write` now fills first-run database/RAG/admin secrets in addition to JWT and encryption keys.
+- `prisma/seed.ts` no longer ships a fixed admin password; it uses `INITIAL_ADMIN_PASSWORD` for first creation or generates and prints a one-time password.
+- Docker Compose files now require generated database and RAG secrets instead of falling back to reusable public defaults.
+- Published docs no longer advertise a shared admin password or host-specific local paths.
+- The default OpenClaw image is pinned to `alpine/openclaw:2026.6.6-browser` for repeatable new deployments.
+
+### Upgrade Notes
+
+- Existing deployments are not rotated automatically. If an environment still uses pre-v0.6.2 public defaults, rotate them manually during a planned maintenance window.
+- Re-running `setup.sh` preserves existing non-placeholder secrets to avoid breaking existing databases.
+
+---
+
 ## v0.6.1 (2026-06-21)
 
 > Patch release: hardens first-run deployment docs and setup scripts so new users can start without secret rotation or key-generation ordering issues.

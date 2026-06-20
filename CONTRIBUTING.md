@@ -17,7 +17,11 @@ Thank you for your interest in contributing! This guide will help you get starte
 git clone https://github.com/szsip239/teamclaw.git
 cd teamclaw
 
-# Start PostgreSQL and Redis
+# Set up environment
+cp .env.example .env
+node scripts/generate-keys.mjs --write
+
+# Start PostgreSQL, Redis, and RAG
 docker compose up -d
 
 # Install dependencies
@@ -25,10 +29,6 @@ npm install
 
 # Generate Prisma client
 npx prisma generate
-
-# Set up environment
-cp .env.example .env
-node scripts/generate-keys.mjs  # Generates JWT keys
 
 # Push database schema & seed
 npx prisma db push
@@ -38,7 +38,10 @@ npx tsx prisma/seed.ts
 npm run dev
 ```
 
-Visit `http://localhost:3000` — Login: `admin@teamclaw.local` / `Admin@123456`
+Visit `http://localhost:3100`. The initial admin login is in `.env`:
+
+- `INITIAL_ADMIN_EMAIL`
+- `INITIAL_ADMIN_PASSWORD`
 
 ## Project Structure
 
