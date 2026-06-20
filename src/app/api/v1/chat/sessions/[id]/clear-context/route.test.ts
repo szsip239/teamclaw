@@ -72,7 +72,6 @@ describe('chat session clear-context route', () => {
     mocks.getRuntimeGatewayClient.mockImplementation(async () => ({
       client: { request: vi.fn() },
       release: vi.fn(),
-      temporary: true,
     }))
   })
 

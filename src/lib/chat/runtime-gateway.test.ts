@@ -78,7 +78,7 @@ describe('runtime gateway client leases', () => {
     expect(mocks.ensureRegistryInitialized).toHaveBeenCalled()
     expect(mocks.registry.getClient).toHaveBeenCalledWith('inst-1')
     expect(lease?.client).toBe(mocks.registryClient)
-    expect(lease?.temporary).toBe(false)
+    expect(lease).not.toHaveProperty('temporary')
     lease?.release()
     expect(mocks.GatewayClient).not.toHaveBeenCalled()
   })
@@ -98,7 +98,7 @@ describe('runtime gateway client leases', () => {
     })
     expect(mocks.GatewayClient).toHaveBeenCalledWith('ws://127.0.0.1:18791', 'plain-token')
     expect(mocks.gatewayInstances[0].connect).toHaveBeenCalled()
-    expect(lease?.temporary).toBe(true)
+    expect(lease).not.toHaveProperty('temporary')
 
     lease?.release()
     expect(mocks.gatewayInstances[0].disconnect).toHaveBeenCalled()

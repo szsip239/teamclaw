@@ -12,4 +12,8 @@ describe('chat queue runtime routing', () => {
     expect(source).toContain('cwd: piCwd')
     expect(source).not.toContain('Pi runtime is not implemented yet')
   })
+
+  it.todo(
+    'finalizes artifacts from queued replies through history/liveMessages polling without converting queue sends into SSE',
+  )
 })

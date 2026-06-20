@@ -8,7 +8,6 @@ import { resolvePiGatewayUrl } from '@/lib/chat/pi-runtime-gateway'
 
 export interface RuntimeGatewayClientLease {
   client: GatewayClient
-  temporary: boolean
   release: () => void
 }
 
@@ -19,7 +18,7 @@ export async function getRuntimeGatewayClient(
   if (runtime === 'openclaw') {
     await ensureRegistryInitialized()
     const client = registry.getClient(instanceId)
-    return client ? { client, temporary: false, release: () => {} } : null
+    return client ? { client, release: () => {} } : null
   }
 
   const instance = await prisma.instance.findUnique({
@@ -39,7 +38,6 @@ export async function getRuntimeGatewayClient(
   await client.connect()
   return {
     client,
-    temporary: true,
     release: () => client.disconnect(),
   }
 }

@@ -255,7 +255,6 @@ describe('provider sync OpenClaw provider mapping', () => {
     mocks.getRuntimeGatewayClient.mockResolvedValue({
       ...mocks.piLease,
       client: mocks.piClient,
-      temporary: true,
     })
     mocks.piClient.request.mockResolvedValue({ ok: true })
 

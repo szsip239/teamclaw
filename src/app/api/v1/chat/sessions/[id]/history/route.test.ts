@@ -18,4 +18,8 @@ describe('chat history runtime routing', () => {
     expect(source).toContain('sourceSessionId')
     expect(source).not.toContain('`agent:${session.agentId}:tc:${session.userId}`')
   })
+
+  it.todo(
+    'trims snapshot/current overlap semantically when one side has raw canvas embed text and the other has an output download link',
+  )
 })

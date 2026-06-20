@@ -107,7 +107,6 @@ describe('resource model push route pi sync', () => {
     mocks.getRuntimeGatewayClient.mockResolvedValue({
       ...mocks.piLease,
       client: mocks.piClient,
-      temporary: true,
     })
   })
 
