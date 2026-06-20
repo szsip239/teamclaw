@@ -137,10 +137,7 @@ export const POST = withAuth(
         )
       }
 
-      const openClawProviderId = resolveOpenClawProviderId(
-        resource.provider,
-        config as Record<string, unknown> | null,
-      )
+      const openClawProviderId = resolveOpenClawProviderId(resource.provider, config)
       const modelRef = `${openClawProviderId}/${body.modelId}`
       const builtProvider = buildProviderEntryFromResource(resource)
       if (!builtProvider || builtProvider.providerId !== openClawProviderId) {

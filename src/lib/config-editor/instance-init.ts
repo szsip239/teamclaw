@@ -5,6 +5,7 @@ import {
   sanitizeProviderPatch,
 } from '@/lib/config-editor/provider-sync'
 import type { ConfigGetResult } from '@/types/gateway'
+import type { ResourceConfig } from '@/types/resource'
 
 // Tracks which instances have already been auto-initialized in this gateway
 // process, to avoid repeating the push on reconnects.
@@ -89,7 +90,7 @@ export async function initInstanceWithDefaultResources(instanceId: string): Prom
       const cfg = primarySeed.config as { defaultModelId?: string }
       const providerRef = resolveOpenClawProviderId(
         primarySeed.provider,
-        primarySeed.config as Record<string, unknown> | null,
+        primarySeed.config as ResourceConfig | null,
       )
       patch.agents = {
         defaults: { model: `${providerRef}/${cfg.defaultModelId}` },

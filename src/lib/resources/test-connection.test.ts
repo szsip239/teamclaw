@@ -89,6 +89,36 @@ describe('testConnection volcengine coding plan', () => {
       }),
     )
   })
+
+  it('keeps the bare agent plan endpoint for anthropic-compatible testing', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 'msg-test' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await testConnection('doubao', 'encrypted', {
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/plan',
+      apiType: 'anthropic-messages',
+      models: [{ id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro' }],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://ark.cn-beijing.volces.com/api/plan/v1/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-api-key': 'test-key',
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        }),
+        body: expect.stringContaining('"model":"doubao-seed-2.0-pro"'),
+      }),
+    )
+  })
 })
 
 describe('testConnection anthropic-compatible resources', () => {

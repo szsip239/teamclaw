@@ -25,6 +25,7 @@ import {
 } from '@/lib/docker/pi-wrapper'
 import { auditLog } from '@/lib/audit'
 import type { InstanceStatus, Prisma } from '@/generated/prisma'
+import type { ResourceConfig } from '@/types/resource'
 
 const GATEWAY_PORT = 18789 // Container-internal gateway port (fixed)
 const BASE_HOST_PORT = 18800 // Host port range starts here (avoids conflict with local OpenClaw on 18789)
@@ -290,7 +291,7 @@ async function createDockerInstance(
             const cfg = primarySeed.config as { defaultModelId?: string }
             const providerRef = resolveOpenClawProviderId(
               primarySeed.provider,
-              primarySeed.config as Record<string, unknown> | null,
+              primarySeed.config as ResourceConfig | null,
             )
             defaultModelRef = `${providerRef}/${cfg.defaultModelId}`
           }

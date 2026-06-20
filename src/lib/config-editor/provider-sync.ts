@@ -1,7 +1,12 @@
 import { prisma } from '@/lib/db'
 import { decryptCredential } from '@/lib/resources/credential-utils'
 import { getProvider } from '@/lib/resources/providers'
+import {
+  normalizeProviderBaseUrl,
+  normalizeResourceConfigForProvider,
+} from '@/lib/resources/config-normalization'
 import { syncPiProviderConfig } from './pi-provider-sync'
+import type { ResourceConfig } from '@/types/resource'
 
 // ─── Google provider baseUrl fix ─────────────────────────────────────
 // pi-ai's Google provider createClient() sets apiVersion="" when baseUrl
@@ -10,14 +15,8 @@ import { syncPiProviderConfig } from './pi-provider-sync'
 // preview models. Fix: append /v1beta so the full path is correct.
 const GOOGLE_GENAI_BARE_ENDPOINT = 'https://generativelanguage.googleapis.com'
 const GOOGLE_GENAI_PROVIDER_IDS = new Set(['google', 'google-gemini-cli'])
-const VOLCENGINE_CODING_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
-const VOLCENGINE_AGENT_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3'
 
-function fixGoogleProviderBaseUrl(
-  providerId: string,
-  baseUrl: string,
-  apiType?: string,
-): string {
+function fixGoogleProviderBaseUrl(providerId: string, baseUrl: string, apiType?: string): string {
   const isGoogleGenAI =
     GOOGLE_GENAI_PROVIDER_IDS.has(providerId) || apiType === 'google-generative-ai'
   if (!isGoogleGenAI) return baseUrl
@@ -29,30 +28,13 @@ function fixGoogleProviderBaseUrl(
   return baseUrl
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '')
-}
-
-function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
-  if (providerId !== 'doubao') return baseUrl
-
-  const normalized = normalizeBaseUrl(baseUrl)
-  if (normalized === 'https://ark.cn-beijing.volces.com/api/coding') {
-    return VOLCENGINE_CODING_PLAN_BASE_URL
-  }
-  if (normalized === 'https://ark.cn-beijing.volces.com/api/plan') {
-    return VOLCENGINE_AGENT_PLAN_BASE_URL
-  }
-
-  return baseUrl
-}
-
 export function resolveOpenClawProviderId(
   providerId: string,
-  resourceConfig?: Record<string, unknown> | null,
+  resourceConfig?: ResourceConfig | null,
 ): string {
   if (providerId === 'doubao') {
-    const baseUrl = typeof resourceConfig?.baseUrl === 'string' ? resourceConfig.baseUrl : ''
+    const normalizedConfig = normalizeResourceConfigForProvider(providerId, resourceConfig)
+    const baseUrl = normalizedConfig?.baseUrl ?? ''
     if (baseUrl.includes('/api/plan')) {
       return 'volcengine-agent-plan'
     }
@@ -79,9 +61,7 @@ export function resolveOpenClawProviderId(
  * issues before sending to the gateway. Currently handles:
  * - Google provider: appends /v1beta to bare default endpoint
  */
-export function sanitizeProviderPatch(
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
+export function sanitizeProviderPatch(patch: Record<string, unknown>): Record<string, unknown> {
   const models = patch.models as Record<string, unknown> | undefined
   if (!models?.providers || typeof models.providers !== 'object') return patch
 
@@ -143,11 +123,18 @@ export function buildProviderEntryFromResource(resource: ProviderResource): {
   if (providerDef?.apiType === 'ollama') return null
 
   // baseUrl is required by OpenClaw schema
-  const resourceConfig = resource.config as Record<string, unknown> | null
+  const resourceConfig = normalizeResourceConfigForProvider(
+    resource.provider,
+    resource.config as ResourceConfig | null,
+  )
   const effectiveProviderId = resolveOpenClawProviderId(resource.provider, resourceConfig)
-  const rawBaseUrl = (resourceConfig?.baseUrl as string) || providerDef?.baseUrl
+  const rawBaseUrl = resourceConfig?.baseUrl || providerDef?.baseUrl
   const baseUrl = rawBaseUrl
-    ? normalizeProviderBaseUrl(resource.provider, rawBaseUrl)
+    ? normalizeProviderBaseUrl(
+        resource.provider,
+        rawBaseUrl,
+        resourceConfig?.apiType || providerDef?.apiType,
+      )
     : rawBaseUrl
   if (!baseUrl) return null
 
@@ -155,9 +142,12 @@ export function buildProviderEntryFromResource(resource: ProviderResource): {
   // Priority: resource config models (user-configured) → registry defaultModels (built-in fallback)
   const registryModels = providerDef?.defaultModels
   const resourceModels = resourceConfig?.models as ProviderModelEntry[] | undefined
-  const models = (resourceModels && resourceModels.length > 0)
-    ? resourceModels
-    : (registryModels && registryModels.length > 0 ? registryModels : null)
+  const models =
+    resourceModels && resourceModels.length > 0
+      ? resourceModels
+      : registryModels && registryModels.length > 0
+        ? registryModels
+        : null
   if (!models) return null
 
   // Decrypt API key
@@ -168,11 +158,11 @@ export function buildProviderEntryFromResource(resource: ProviderResource): {
     return null
   }
 
-  const apiType = (resourceConfig?.apiType as string) || providerDef?.apiType
+  const apiType = resourceConfig?.apiType || providerDef?.apiType
   const entry: ProviderEntry = {
     baseUrl: fixGoogleProviderBaseUrl(resource.provider, baseUrl, apiType),
     apiKey,
-    models: models.map(m => {
+    models: models.map((m) => {
       const modelEntry: ProviderModelEntry = { id: m.id, name: m.name }
       if (m.reasoning !== undefined) modelEntry.reasoning = m.reasoning
       if (m.input) modelEntry.input = m.input
@@ -223,7 +213,7 @@ export async function buildProviderEntries(
     },
     orderBy: [
       { isDefault: 'desc' },
-      { status: 'asc' },    // ACTIVE < UNTESTED alphabetically
+      { status: 'asc' }, // ACTIVE < UNTESTED alphabetically
       { updatedAt: 'desc' },
     ],
     select: {
@@ -311,12 +301,13 @@ export async function syncProviderToInstances(providerId: string): Promise<void>
   // Push to each instance that already uses this provider
   const results = await Promise.allSettled(
     connectedIds.map(async (instanceId) => {
-      const configResult = await registry.request(instanceId, 'config.get') as {
+      const configResult = (await registry.request(instanceId, 'config.get')) as {
         config?: Record<string, unknown>
         hash?: string
       }
-      const providers = (configResult.config?.models as Record<string, unknown>)
-        ?.providers as Record<string, unknown> | undefined
+      const providers = (configResult.config?.models as Record<string, unknown>)?.providers as
+        | Record<string, unknown>
+        | undefined
       if (!providers) return
 
       const patchProviders = Object.fromEntries(
@@ -334,7 +325,10 @@ export async function syncProviderToInstances(providerId: string): Promise<void>
         entries: patchProviders as Record<string, ProviderEntry>,
       })
       if (piResult.ok === false) {
-        console.warn(`[resource-sync] Failed to sync pi provider config to ${instanceId}:`, piResult.error)
+        console.warn(
+          `[resource-sync] Failed to sync pi provider config to ${instanceId}:`,
+          piResult.error,
+        )
       }
       console.log(
         `[resource-sync] Synced provider "${Object.keys(patchProviders).join(',')}" to instance ${instanceId}`,
@@ -344,7 +338,10 @@ export async function syncProviderToInstances(providerId: string): Promise<void>
 
   for (const [i, r] of results.entries()) {
     if (r.status === 'rejected') {
-      console.warn(`[resource-sync] Failed to sync to ${connectedIds[i]}:`, (r.reason as Error)?.message)
+      console.warn(
+        `[resource-sync] Failed to sync to ${connectedIds[i]}:`,
+        (r.reason as Error)?.message,
+      )
     }
   }
 }

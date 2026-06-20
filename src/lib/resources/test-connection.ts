@@ -1,11 +1,16 @@
 import { getProvider, type ProviderDef } from './providers'
 import { decryptCredential } from './credential-utils'
 import { isKnownMultimodal } from './model-capabilities'
+import {
+  normalizeBaseUrl,
+  normalizeProviderBaseUrl,
+  normalizeResourceConfigForProvider,
+  VOLCENGINE_AGENT_PLAN_BASE_URL,
+  VOLCENGINE_CODING_BASE_URL,
+} from './config-normalization'
 import type { TestConnectionResult, ResourceConfig, DetectedModelInfo } from '@/types/resource'
 
 const TEST_TIMEOUT_MS = 10_000
-const VOLCENGINE_CODING_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
-const VOLCENGINE_AGENT_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3'
 
 /**
  * Test connectivity for a resource by calling its provider's test endpoint.
@@ -37,9 +42,11 @@ async function executeTest(
   config?: ResourceConfig | null,
 ): Promise<TestConnectionResult> {
   const { testEndpoint } = providerDef
+  const effectiveConfig = normalizeResourceConfigForProvider(providerDef.id, config)
   const baseUrl = normalizeProviderBaseUrl(
     providerDef.id,
-    config?.baseUrl || providerDef.baseUrl || '',
+    effectiveConfig?.baseUrl || providerDef.baseUrl || '',
+    effectiveConfig?.apiType || providerDef.apiType,
   )
 
   // Resolve URL
@@ -49,7 +56,7 @@ async function executeTest(
       return { ok: false, latencyMs: 0, error: '需要提供 API 地址 (baseUrl)' }
     }
     url = testEndpoint.url(baseUrl)
-  } else if (config?.baseUrl && providerDef.baseUrl && baseUrl !== providerDef.baseUrl) {
+  } else if (effectiveConfig?.baseUrl && providerDef.baseUrl && baseUrl !== providerDef.baseUrl) {
     url = testEndpoint.url.replace(providerDef.baseUrl, baseUrl)
   } else {
     url = testEndpoint.url
@@ -64,12 +71,12 @@ async function executeTest(
   let method = testEndpoint.method
   let headers = testEndpoint.headers(apiKey)
   let body = testEndpoint.body ? JSON.stringify(testEndpoint.body(apiKey, baseUrl)) : undefined
-  const apiType = config?.apiType || providerDef.apiType
+  const apiType = effectiveConfig?.apiType || providerDef.apiType
 
   if (apiType === 'anthropic-messages') {
     const modelId = normalizeModelId(
-      config?.defaultModelId ||
-        config?.models?.[0]?.id ||
+      effectiveConfig?.defaultModelId ||
+        effectiveConfig?.models?.[0]?.id ||
         providerDef.defaultModels?.[0]?.id ||
         'claude-sonnet-4-5-20250929',
     )
@@ -84,7 +91,9 @@ async function executeTest(
   } else if (isVolcenginePlanChatEndpoint(providerDef.id, baseUrl)) {
     const normalized = normalizeBaseUrl(baseUrl)
     const modelId = normalizeModelId(
-      config?.defaultModelId || config?.models?.[0]?.id || getDefaultVolcenginePlanModel(baseUrl),
+      effectiveConfig?.defaultModelId ||
+        effectiveConfig?.models?.[0]?.id ||
+        getDefaultVolcenginePlanModel(baseUrl),
     )
     url = `${normalized}/chat/completions`
     method = 'POST'
@@ -118,7 +127,7 @@ async function executeTest(
     if (!response.ok) {
       let errorMsg: string
       try {
-        const errData = await response.json() as Record<string, unknown>
+        const errData = (await response.json()) as Record<string, unknown>
         errorMsg = extractErrorMessage(errData) || `HTTP ${response.status}`
       } catch {
         errorMsg = `HTTP ${response.status} ${response.statusText}`
@@ -135,7 +144,7 @@ async function executeTest(
     // Try to extract model list from response
     const details: TestConnectionResult['details'] = {}
     try {
-      const data = await response.json() as Record<string, unknown>
+      const data = (await response.json()) as Record<string, unknown>
       const { models, detectedModels } = extractModelsWithCapabilities(data)
       if (models.length > 0) {
         details.models = models
@@ -148,38 +157,21 @@ async function executeTest(
     return { ok: true, latencyMs, details }
   } catch (err) {
     const latencyMs = Date.now() - start
-    const error = err instanceof Error
-      ? (err.name === 'AbortError' ? '连接超时 (10s)' : err.message)
-      : '连接失败'
+    const error =
+      err instanceof Error
+        ? err.name === 'AbortError'
+          ? '连接超时 (10s)'
+          : err.message
+        : '连接失败'
     return { ok: false, latencyMs, error }
   } finally {
     clearTimeout(timeout)
   }
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '')
-}
-
 function versionedEndpoint(baseUrl: string, path: string): string {
   const normalized = normalizeBaseUrl(baseUrl)
-  return normalized.endsWith('/v1')
-    ? `${normalized}/${path}`
-    : `${normalized}/v1/${path}`
-}
-
-function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
-  if (providerId !== 'doubao') return baseUrl
-
-  const normalized = normalizeBaseUrl(baseUrl)
-  if (normalized === 'https://ark.cn-beijing.volces.com/api/coding') {
-    return VOLCENGINE_CODING_BASE_URL
-  }
-  if (normalized === 'https://ark.cn-beijing.volces.com/api/plan') {
-    return VOLCENGINE_AGENT_PLAN_BASE_URL
-  }
-
-  return baseUrl
+  return normalized.endsWith('/v1') ? `${normalized}/${path}` : `${normalized}/v1/${path}`
 }
 
 function bearerHeaders(key: string): Record<string, string> {
@@ -217,9 +209,11 @@ function getDefaultVolcenginePlanModel(baseUrl: string): string {
 function isBillingError(status: number, message: string): boolean {
   if (status === 402) return true
   const lower = message.toLowerCase()
-  return /insufficient.*(balance|credit|fund|quota)/i.test(lower)
-    || /quota.*exceeded/i.test(lower)
-    || /payment.*required/i.test(lower)
+  return (
+    /insufficient.*(balance|credit|fund|quota)/i.test(lower) ||
+    /quota.*exceeded/i.test(lower) ||
+    /payment.*required/i.test(lower)
+  )
 }
 
 function extractErrorMessage(data: Record<string, unknown>): string | undefined {
@@ -311,8 +305,8 @@ function detectMultimodalFromApiResponse(model: Record<string, unknown>): boolea
 
   // input_modalities array (some providers)
   if (Array.isArray(model.input_modalities)) {
-    return model.input_modalities.some((m: unknown) =>
-      typeof m === 'string' && (m === 'image' || m === 'vision'),
+    return model.input_modalities.some(
+      (m: unknown) => typeof m === 'string' && (m === 'image' || m === 'vision'),
     )
   }
 

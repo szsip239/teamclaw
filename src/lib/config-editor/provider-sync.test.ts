@@ -189,6 +189,28 @@ describe('provider sync OpenClaw provider mapping', () => {
     expect(built?.entry.baseUrl).toBe('https://ark.cn-beijing.volces.com/api/plan/v3')
   })
 
+  it('keeps bare agent plan baseUrl for anthropic-compatible provider entries', () => {
+    const built = buildProviderEntryFromResource({
+      provider: 'doubao',
+      credentials: 'encrypted',
+      config: {
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/plan',
+        apiType: 'anthropic-messages',
+        envVarName: 'ARK_CODING_API_KEY',
+        models: [{ id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro' }],
+      },
+    })
+
+    expect(built).toMatchObject({
+      providerId: 'volcengine-agent-plan',
+      entry: {
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/plan',
+        api: 'anthropic-messages',
+        models: [{ id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro' }],
+      },
+    })
+  })
+
   it('auto-syncs Pi provider config without changing the Pi default model', async () => {
     findManyMock.mockResolvedValue([
       {
