@@ -26,9 +26,7 @@ let cachedPublicKey: CryptoKey | null = null
 
 async function getPublicKey(): Promise<CryptoKey> {
   if (cachedPublicKey) return cachedPublicKey
-  const pem = Buffer.from(process.env.JWT_PUBLIC_KEY!, 'base64').toString(
-    'utf-8'
-  )
+  const pem = Buffer.from(process.env.JWT_PUBLIC_KEY!, 'base64').toString('utf-8')
   cachedPublicKey = await importSPKI(pem, ALG)
   return cachedPublicKey
 }
@@ -53,7 +51,7 @@ async function extractToken(req: NextRequest): Promise<string | null> {
   return null
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   if (isPublicPath(pathname)) {
@@ -88,10 +86,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next({ request: { headers } })
   } catch {
     if (isApiRoute(pathname)) {
-      return NextResponse.json(
-        { error: 'Invalid or expired token' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const loginUrl = new URL('/login', req.url)
     return NextResponse.redirect(loginUrl)

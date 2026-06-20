@@ -5,12 +5,15 @@ import type { SkillFileEntry } from '@/types/skill'
 
 /** Base directory for skill file storage */
 export function getSkillsBaseDir(): string {
-  return process.env.TEAMCLAW_SKILLS_DIR || join(process.cwd(), 'data', 'skills')
+  return (
+    process.env.TEAMCLAW_SKILLS_DIR ||
+    join(/* turbopackIgnore: true */ process.cwd(), 'data', 'skills')
+  )
 }
 
 /** Get the directory path for a specific skill (local filesystem) */
 export function getSkillDir(slug: string): string {
-  return join(getSkillsBaseDir(), slug)
+  return join(/* turbopackIgnore: true */ getSkillsBaseDir(), slug)
 }
 
 /**
@@ -24,12 +27,14 @@ export async function findInstanceSkillDir(slug: string): Promise<string | null>
       select: { workspacePath: true },
     })
     const candidates = [
-      ...instances.map((i) => join(i.workspacePath!, 'skills', slug)),
-      ...instances.map((i) => join(i.workspacePath!, 'workspace', 'skills', slug)),
+      ...instances.map((i) => join(/* turbopackIgnore: true */ i.workspacePath!, 'skills', slug)),
+      ...instances.map((i) =>
+        join(/* turbopackIgnore: true */ i.workspacePath!, 'workspace', 'skills', slug),
+      ),
     ]
     for (const dir of candidates) {
       try {
-        await access(join(dir, 'SKILL.md'))
+        await access(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ dir, 'SKILL.md'))
         return dir
       } catch {
         continue
@@ -56,20 +61,13 @@ export function isSkillPathSafe(_slug: string, filePath: string): boolean {
 /** Ensure a skill directory exists */
 export async function ensureSkillDir(slug: string): Promise<string> {
   const dir = getSkillDir(slug)
-  await mkdir(dir, { recursive: true })
+  await mkdir(/* turbopackIgnore: true */ dir, { recursive: true })
   return dir
 }
 
 /** Create default SKILL.md content */
-export function generateDefaultSkillMd(
-  name: string,
-  description?: string,
-  emoji?: string,
-): string {
-  const lines = [
-    '---',
-    `name: "${name}"`,
-  ]
+export function generateDefaultSkillMd(name: string, description?: string, emoji?: string): string {
+  const lines = ['---', `name: "${name}"`]
   if (emoji) lines.push(`emoji: "${emoji}"`)
   if (description) lines.push(`description: "${description.replace(/"/g, '\\"')}"`)
   lines.push('---', '', `# ${name}`, '')
@@ -78,25 +76,22 @@ export function generateDefaultSkillMd(
 }
 
 /** List files in a skill directory (recursive, relative paths) */
-export async function listSkillFiles(
-  slug: string,
-  subdir?: string,
-): Promise<SkillFileEntry[]> {
+export async function listSkillFiles(slug: string, subdir?: string): Promise<SkillFileEntry[]> {
   const baseDir = getSkillDir(slug)
-  const targetDir = subdir ? join(baseDir, subdir) : baseDir
+  const targetDir = subdir ? join(/* turbopackIgnore: true */ baseDir, subdir) : baseDir
 
   try {
-    const entries = await readdir(targetDir, { withFileTypes: true })
+    const entries = await readdir(/* turbopackIgnore: true */ targetDir, { withFileTypes: true })
     const files: SkillFileEntry[] = []
 
     for (const entry of entries) {
-      const fullPath = join(targetDir, entry.name)
+      const fullPath = join(/* turbopackIgnore: true */ targetDir, entry.name)
       const relPath = relative(baseDir, fullPath)
 
       if (entry.isDirectory()) {
         files.push({ name: entry.name, path: relPath, type: 'directory' })
       } else {
-        const st = await stat(fullPath).catch(() => null)
+        const st = await stat(/* turbopackIgnore: true */ fullPath).catch(() => null)
         files.push({
           name: entry.name,
           path: relPath,
@@ -124,14 +119,11 @@ function assertSafePath(slug: string, filePath: string): void {
 }
 
 /** Read a file from a skill directory */
-export async function readSkillFile(
-  slug: string,
-  filePath: string,
-): Promise<string> {
+export async function readSkillFile(slug: string, filePath: string): Promise<string> {
   assertSafePath(slug, filePath)
   const dir = await resolveSkillDir(slug)
-  const fullPath = join(dir, filePath)
-  return readFile(fullPath, 'utf-8')
+  const fullPath = join(/* turbopackIgnore: true */ dir, filePath)
+  return readFile(/* turbopackIgnore: true */ fullPath, 'utf-8')
 }
 
 /** Write a file to a skill directory */
@@ -142,34 +134,31 @@ export async function writeSkillFile(
 ): Promise<void> {
   assertSafePath(slug, filePath)
   const dir = await resolveSkillDir(slug)
-  const fullPath = join(dir, filePath)
-  const parent = join(fullPath, '..')
-  await mkdir(parent, { recursive: true })
-  await writeFile(fullPath, content, 'utf-8')
+  const fullPath = join(/* turbopackIgnore: true */ dir, filePath)
+  const parent = join(/* turbopackIgnore: true */ fullPath, '..')
+  await mkdir(/* turbopackIgnore: true */ parent, { recursive: true })
+  await writeFile(/* turbopackIgnore: true */ fullPath, content, 'utf-8')
 }
 
 /** Delete a file from a skill directory */
-export async function deleteSkillFile(
-  slug: string,
-  filePath: string,
-): Promise<void> {
+export async function deleteSkillFile(slug: string, filePath: string): Promise<void> {
   assertSafePath(slug, filePath)
   const dir = await resolveSkillDir(slug)
-  const fullPath = join(dir, filePath)
-  await rm(fullPath, { recursive: true })
+  const fullPath = join(/* turbopackIgnore: true */ dir, filePath)
+  await rm(/* turbopackIgnore: true */ fullPath, { recursive: true })
 }
 
 /** Delete entire skill directory */
 export async function deleteSkillDir(slug: string): Promise<void> {
   const dir = getSkillDir(slug)
-  await rm(dir, { recursive: true, force: true })
+  await rm(/* turbopackIgnore: true */ dir, { recursive: true, force: true })
 }
 
 /** Rename a skill directory (when slug changes) */
 export async function renameSkillDir(oldSlug: string, newSlug: string): Promise<void> {
   const oldDir = getSkillDir(oldSlug)
   const newDir = getSkillDir(newSlug)
-  await rename(oldDir, newDir)
+  await rename(/* turbopackIgnore: true */ oldDir, /* turbopackIgnore: true */ newDir)
 }
 
 /** Parse YAML frontmatter from SKILL.md content */
@@ -186,7 +175,10 @@ export function parseFrontmatter(content: string): Record<string, unknown> | nul
     const key = line.slice(0, colonIdx).trim()
     let value: string | boolean | number = line.slice(colonIdx + 1).trim()
     // Remove surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
       value = value.slice(1, -1)
     }
     if (value === 'true') value = true

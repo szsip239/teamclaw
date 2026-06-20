@@ -41,8 +41,8 @@ export const GET = withAuth(
       let files: SkillFileEntry[]
       if (skill.source === 'INSTANCE') {
         const base = await resolveSkillDir(skill.slug)
-        const target = dir ? join(base, dir) : base
-        const entries = await readdir(target, { withFileTypes: true })
+        const target = dir ? join(/* turbopackIgnore: true */ base, dir) : base
+        const entries = await readdir(/* turbopackIgnore: true */ target, { withFileTypes: true })
         files = await Promise.all(
           entries
             .sort((a, b) => {
@@ -50,13 +50,20 @@ export const GET = withAuth(
               return a.name.localeCompare(b.name)
             })
             .map(async (ent) => {
-              const relPath = relative(base, join(target, ent.name))
-              const entry: SkillFileEntry = { name: ent.name, path: relPath, type: ent.isDirectory() ? 'directory' : 'file' }
+              const entryPath = join(/* turbopackIgnore: true */ target, ent.name)
+              const relPath = relative(base, entryPath)
+              const entry: SkillFileEntry = {
+                name: ent.name,
+                path: relPath,
+                type: ent.isDirectory() ? 'directory' : 'file',
+              }
               if (!ent.isDirectory()) {
                 try {
-                  const st = await stat(join(target, ent.name))
+                  const st = await stat(/* turbopackIgnore: true */ entryPath)
                   entry.size = st.size
-                } catch { /* ignore */ }
+                } catch {
+                  /* ignore */
+                }
               }
               return entry
             }),
