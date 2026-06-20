@@ -4,6 +4,32 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.6.0 (2026-06-21)
+
+> 正式发布：多 runtime Chat、Pi Agent Runtime、OpenClaw 6.6/v4 协议适配、产物归一化、模型资源同步、RAG/法规/工具箱和生产部署稳定性集中升级。
+
+### Highlights
+
+- **Enterprise positioning refresh**: TeamClaw is now positioned as an enterprise AI Agent operations platform for multi-instance, multi-tenant, multi-agent, multi-runtime deployments.
+- **Multi-runtime Chat**: OpenClaw-compatible runtime and Pi runtime can be switched from the chat composer, with normal/fast naming, runtime icons, current model display, and background run status.
+- **Pi Agent Runtime**: Added `pi-wrapper`, runtime gateway mapping, Pi session storage, secured gateway access, chart/file artifact handling, and model config sync.
+- **OpenClaw 6.6 / protocol v4**: Upgraded gateway negotiation to v4, refactored chat streaming, staged replies, tool calls, hidden thinking, and stop/error handling.
+- **Artifact output reliability**: Generated files are normalized into canonical session output, duplicate names are auto-numbered, and deterministic download links are rendered in chat history and live streams.
+- **Chat history and queue consistency**: Shared message normalization and artifact finalization across send, history, and queue paths; fixed cross-runtime ordering, duplicate merges, and archived-session ordering.
+- **Model/resource operations**: Added provider variant normalization, Agent Plan endpoint fixes, model push to OpenClaw/Pi, provider sync, current model display, and selectable `low / medium / xhigh` thinking levels.
+- **Agent workspace UX**: Added long-press rename, running indicators, unread/error badges, and background completion reconciliation when switching agents.
+- **RAG and business tools**: Improved FTS + pgvector + RRF retrieval, PDF page preview, Excel field-aware retrieval, regulation tracking, and toolbox navigation.
+- **Deployment/build hardening**: Added Pi wrapper orchestration, production init via `prisma migrate deploy`, larger Nginx upload body support, Next proxy migration, and clean Turbopack build tracing.
+
+### Upgrade Notes
+
+- Existing OpenClaw managed instances should run OpenClaw 6.6+ with gateway protocol v4.
+- Pi runtime deployments require the bundled `pi-wrapper` service to be available in the managed container setup.
+- Production deployments should run migrations with `prisma migrate deploy`.
+- If model resources are pushed to both OpenClaw and Pi, choose a thinking level at push time; provider-specific mapping is handled by the target runtime/provider layer.
+
+---
+
 ## v0.5.2 (2026-05-25)
 
 > 分支 `codex/teamclaw-kb-rag-skills-updates` — 法规追踪、Skill 同步、认证增强。

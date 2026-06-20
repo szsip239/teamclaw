@@ -4,8 +4,8 @@
 
 <p align="center">
   <h1 align="center">TeamClaw</h1>
-  <p align="center">Enterprise OpenClaw AI Agent Management Platform</p>
-  <p align="center">企业级 OpenClaw AI Agent 管理平台</p>
+  <p align="center">Enterprise AI Agent Operations Platform</p>
+  <p align="center">企业级多实例 · 多租户 · 多 Agent · 多 Runtime 管理平台</p>
 </p>
 
 <p align="center">
@@ -24,32 +24,60 @@
 
 ## TeamClaw 是什么？
 
-TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）构建的全功能管理平台，提供 OpenClaw 目前不具备的企业级能力。
+TeamClaw 是面向企业内部 AI Agent 落地的 operations control plane。它把运行时实例、Agent、Skills、模型资源、知识库、权限、审计和对话体验收口到一个多租户平台里，让团队可以在同一套界面里管理多个实例、多个部门、多个 Agent 和多个 runtime。
+
+[OpenClaw](https://github.com/anthropics/openclaw)、Pi 等能力在 TeamClaw 中被视为可插拔 runtime：普通/快速模式可以在 Chat 输入区随时切换，模型资源与 Skills 可以按实例、runtime、Agent 同步，而平台层负责权限、会话、产物、审计和运维。
+
+### v0.6.0 更新重点
+
+- **多 Runtime Chat** — OpenClaw 与 Pi runtime 在同一对话界面切换，普通/快速模式、runtime 图标、当前模型展示和后台运行状态统一接入。
+- **Pi Agent Runtime** — 新增 `pi-wrapper`，支持独立 Pi 会话、流式回复、图表/产物文件、模型配置同步和安全 gateway 接入。
+- **OpenClaw 6.6 / v4 协议** — 锁定 v4 gateway 协议，重构 chat 流处理，支持 staged reply、工具过程、隐藏 thinking 和稳定的 stop/error 状态。
+- **产物与历史稳定性** — 生成文件归一化到 session output，自动编号避免覆盖，确定性下载链接，send/history/queue 共用归一化与去重路径。
+- **模型与资源同步** — 支持 provider variants、Agent Plan/Anthropic/OpenAI-compatible 端点修正、模型推送到 OpenClaw 与 Pi，并可选择 `low / medium / xhigh` 思考档位。
+- **Agent 工作台体验** — Agent 长按重命名、运行中指示、未读/错误状态、后台对话完成提醒和最近会话排序修复。
+- **RAG、法规与工具箱** — 知识库升级为 FTS + pgvector + RRF 混合检索，PDF 页码预览、Excel 字段化检索、法规追踪和工具箱入口完善。
+- **部署与构建** — Docker/Nginx/Pi wrapper 编排更新，生产初始化改用 `prisma migrate deploy`，Next 16 proxy 迁移并清理 Turbopack trace warning。
 
 ### 核心功能
 
-**AI 对话**
+**Runtime 与实例运维**
 
-- 多会话管理 — 每个 Agent 支持创建多个独立对话
+- 多 runtime — OpenClaw-compatible runtime、Pi runtime 统一接入，Chat 内普通/快速模式切换
+- 多实例 — Docker 托管实例与外部 gateway 并存，支持跨实例 Agent 浏览、部署和健康监控
+- 生命周期 — 创建、启动、停止、重启、日志查看、健康恢复和 Nginx 大请求/SSE 配置
+- 配置编辑 — Schema 驱动的配置表单，模型、provider、Agent、Skills 和 runtime 资源统一管理
+
+**AI 对话工作台**
+
+- 多会话管理 — 每个 Agent 支持创建多个独立对话，支持最近会话归档与排序
 - 流式输出 — 逐 Token 实时显示回复内容
-- 思考过程 — 可折叠展示 LLM 的推理链路
+- 工具过程 — 工具调用、阶段回复、最终回复分层展示，隐藏内部 thinking
 - 图片附件 — 支持发送图片（PNG/JPEG/GIF/WebP，最大 5MB）
-- 上下文管理 — 对话历史快照与上下文重置
+- 文件产物 — 生成文件自动进入 session output，聊天中给出可下载链接，重名文件自动编号
+- 后台状态 — 切换 Agent 后保留运行状态，完成/错误后显示未读提示
 
 **Agent 管理**
 
-- 跨实例 Agent 浏览与创建，支持克隆到不同实例
+- 跨实例 Agent 浏览与创建，支持克隆到不同实例和长按改名
 - 分类体系 — DEFAULT / DEPARTMENT / PERSONAL 三级分类
 - 文件管理 — 树形浏览与在线编辑 Agent 配置文件
-- 可视化配置编辑器 — Schema 驱动的表单，覆盖所有 OpenClaw 模块
+- 运行状态 — 在线、运行中、完成未读、错误未读在 Agent 列表中直接可见
 
 **Skills 市场**
 
 - ClawHub 集成 — 从公共市场搜索、安装和更新技能包
-- 实例自动发现 — 通过 OpenClaw 对话或 CLI 安装的 skill 自动同步到管理页面，无需手动导入
+- 实例自动发现 — 通过 runtime 对话或 CLI 安装的 skill 自动同步到管理页面，无需手动导入
 - 技能开发 — IDE 风格的文件编辑器，本地开发后发布到 ClawHub
 - 版本管理 — 安装追踪、版本检查与一键升级
 - 作用域控制 — PERSONAL / DEPARTMENT / GLOBAL 三级作用域，新增 INSTANCE 来源标签
+
+**模型与资源管理**
+
+- Provider variants — 支持 Anthropic、OpenAI、DeepSeek、Qwen、Volcengine Agent Plan、MiniMax、Doubao、Moonshot、Groq、xAI、Mistral、Ollama、vLLM 等
+- 模型推送 — 资源详情页可把模型推送到 OpenClaw-compatible runtime 和 Pi runtime
+- 思考档位 — 推送时选择 `low / medium / xhigh`，由目标 runtime/provider 负责映射到实际参数
+- 资源同步 — provider 配置自动同步到相关 runtime，避免不同实例配置漂移
 
 **知识库 (RAG)**
 
@@ -66,15 +94,8 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 
 - 统一入口 — 侧边栏「工具箱」聚合所有内置辅助工具，卡片式网格展示
 - 可扩展 — 单文件 `TOOLS` 数组配置，新工具通过 `available: false` 标记"即将推出"
-- **法规追踪** — 绑定知识库为追踪条目，自动提取关键词并通过博查 API 搜索法规/标准更新，发现新版本后写入待办清单。配套 OpenClaw skill 可一键运行检查流水线
+- **法规追踪** — 绑定知识库为追踪条目，自动提取关键词并通过博查 API 搜索法规/标准更新，发现新版本后写入待办清单。配套 skill 可一键运行检查流水线
 - **舆情监控** — 聚合关键词、来源和风险信号的占位页，可接入搜索 / 社媒 / RSS 数据源
-
-**多实例管理**
-
-- Docker 一键创建 — 配置镜像、端口、绑定即可部署
-- 外部网关接入 — 通过 URL + Token 连接已有 OpenClaw 实例
-- 健康监控 — 60 秒周期检查，自动故障检测与实例恢复
-- 生命周期管理 — 启动、停止、重启，实时日志查看
 
 **组织与权限**
 
@@ -87,7 +108,6 @@ TeamClaw 是基于 [OpenClaw](https://github.com/anthropics/openclaw)（🦞）�
 - 完整国际化 — 中英文界面一键切换
 - 移动端适配 — 手机浏览器完整对话体验，侧边栏和文件面板以抽屉形式展开
 - PWA 支持 — 支持添加到主屏幕，独立窗口运行
-- 多模型支持 — Anthropic、OpenAI、MiniMax、Groq 等
 - Docker 部署 — 一条命令启动全栈服务
 
 ## 快速开始
@@ -262,14 +282,14 @@ RAG 凭据有两种配置方式：
 | `MULTI_DOC_PER_DOC_PAGE_LIMIT`                  | `6`        | 多文档回答时单文档页面上限           |
 | `MULTI_DOC_SINGLE_DOC_PAGE_LIMIT`               | `30`       | 单文档回答时页面上限                 |
 
-### Docker 与 OpenClaw 实例
+### Docker 与 Runtime 实例
 
-| 变量                     | macOS Docker Desktop     | Linux                               | 说明                                              |
-| ------------------------ | ------------------------ | ----------------------------------- | ------------------------------------------------- |
-| `DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`   | `/var/run/docker.sock`              | TeamClaw 管理 OpenClaw 容器需要访问 Docker socket |
-| `DOCKER_GID`             | `0`                      | `stat -c '%g' /var/run/docker.sock` | app 容器访问 Docker socket 的 group id            |
-| `TEAMCLAW_DATA_DIR`      | `~/.teamclaw/instances`  | 自定义绝对路径                      | OpenClaw 实例数据挂载目录                         |
-| `DEFAULT_OPENCLAW_IMAGE` | `alpine/openclaw:latest` | 同左                                | 新建实例默认镜像                                  |
+| 变量                     | macOS Docker Desktop     | Linux                               | 说明                                                         |
+| ------------------------ | ------------------------ | ----------------------------------- | ------------------------------------------------------------ |
+| `DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`   | `/var/run/docker.sock`              | TeamClaw 管理托管 runtime 容器需要访问 Docker socket         |
+| `DOCKER_GID`             | `0`                      | `stat -c '%g' /var/run/docker.sock` | app 容器访问 Docker socket 的 group id                       |
+| `TEAMCLAW_DATA_DIR`      | `~/.teamclaw/instances`  | 自定义绝对路径                      | 托管 runtime 实例数据挂载目录                                |
+| `DEFAULT_OPENCLAW_IMAGE` | `alpine/openclaw:latest` | 同左                                | 新建普通 runtime 的默认 OpenClaw-compatible gateway 镜像     |
 
 ## 配置校验
 
@@ -334,13 +354,13 @@ npm run dev
 开箱即用，无需在 Config Editor 手配
 ```
 
-### 3. 部署 OpenClaw 实例
+### 3. 部署 Runtime 实例
 
 进入 **实例管理** 页面，选择以下任一方式：
 
-**Docker 容器（推荐）** — 点击"创建实例"，选择 Docker 模式，填写实例名称，选择镜像（默认 `alpine/openclaw:latest`），点击创建即可自动部署。实例上线后会**自动**使用步骤 2 中你标记的默认资源与默认模型。
+**Docker 容器（推荐）** — 点击"创建实例"，选择 Docker 模式，填写实例名称，选择镜像（默认 `alpine/openclaw:latest`），点击创建即可自动部署普通 runtime。启用 Pi runtime 的部署会同时挂载 `pi-wrapper`，实例上线后会**自动**使用步骤 2 中你标记的默认资源与默认模型。
 
-**外部网关** — 如果已有运行中的 OpenClaw，选择外部网关模式，填入 WebSocket URL 和 Token 即可连接。已有模型配置的实例不会被覆盖，你可以通过 Config Editor 手动切换默认模型。
+**外部网关** — 如果已有运行中的 OpenClaw-compatible gateway，选择外部网关模式，填入 WebSocket URL 和 Token 即可连接。已有模型配置的实例不会被覆盖，你可以通过 Config Editor 手动切换默认模型。
 
 等待实例状态变为 🟢 **ONLINE**（通常 5-10 秒）。
 
@@ -394,10 +414,10 @@ graph TB
 
     RAG["RAG Service<br/>FTS + Vector + RRF 混合检索<br/>PaddleOCR + jieba 中文分词"]
 
-    subgraph Instances["OpenClaw 实例"]
-        OC1["实例 1 (Docker)"]
-        OC2["实例 2 (Docker)"]
-        OCN["实例 N (外部网关)"]
+    subgraph Runtime["Runtime 实例"]
+        OC1["OpenClaw Runtime<br/>(Docker)"]
+        PI1["Pi Runtime<br/>(pi-wrapper)"]
+        OCN["外部 Gateway"]
     end
 
     DK["Docker Engine"]
@@ -411,18 +431,18 @@ graph TB
     RAG --> PG
     GW --> Health
     GW -- "WebSocket" --> OC1
-    GW -- "WebSocket" --> OC2
+    GW -- "WebSocket" --> PI1
     GW -- "WebSocket" --> OCN
     API -. "容器管理" .-> DK
     DK -. "创建/启停" .-> OC1
-    DK -. "创建/启停" .-> OC2
+    DK -. "创建/启停" .-> PI1
 
     style Client fill:#e3f2fd
     style NextJS fill:#fff3e0
     style Backend fill:#e8f5e9
     style Storage fill:#fce4ec
     style RAG fill:#fff9c4
-    style Instances fill:#f3e5f5
+    style Runtime fill:#f3e5f5
 ```
 
 ### 技术栈
@@ -436,17 +456,17 @@ graph TB
 | RAG      | Python FastAPI + asyncpg + pgvector + tsvector + jieba（混合检索，无 LlamaIndex/LangChain） |
 | 缓存     | Redis 7 (ioredis)                                                                           |
 | 认证     | RS256 JWT (jose) + bcryptjs                                                                 |
-| 网关通信 | WebSocket (ws) + Docker API (dockerode)                                                     |
+| 网关通信 | WebSocket (ws) + Pi wrapper + Docker API (dockerode)                                        |
 | 数据验证 | Zod 4                                                                                       |
 
 ### 功能概览
 
 | 模块   | 路由数 | 核心能力                                                                                  |
 | ------ | ------ | ----------------------------------------------------------------------------------------- |
-| 对话   | 8      | 多会话、流式输出、思考展示、图片附件                                                      |
+| 对话   | 8      | 多会话、多 runtime 切换、流式输出、工具阶段、产物下载、图片附件                           |
 | Agent  | 6      | CRUD、克隆、分类、文件管理                                                                |
 | Skills | 12     | ClawHub 市场、安装/发布、版本管理、IDE 编辑                                               |
-| 实例   | 13     | Docker 创建、外部接入、健康监控、配置编辑                                                 |
+| 实例   | 13     | Docker 创建、外部接入、OpenClaw/Pi runtime 编排、健康监控、配置编辑                       |
 | 知识库 | 10     | PDF/DOCX/Excel 上传、PaddleOCR、FTS+向量+RRF 混合检索、PDF 页面预览、多文档路由、流式问答 |
 | 工具箱 | 3      | 卡片式工具集合、法规追踪、舆情监控等内置工具入口                                          |
 | 认证   | 5      | JWT 登录、Token 轮转、限流                                                                |
@@ -486,32 +506,60 @@ graph TB
 
 ## What is TeamClaw?
 
-TeamClaw is a full-featured management platform built on top of [OpenClaw](https://github.com/anthropics/openclaw) — 🦞the open-source AI Agent gateway🦞. It provides enterprise-grade capabilities that OpenClaw's native dashboard doesn't offer.
+TeamClaw is an enterprise operations control plane for internal AI Agent deployments. It brings runtime instances, agents, skills, model resources, knowledge bases, permissions, audit logs, and chat workflows into one multi-tenant platform, so teams can manage many instances, departments, agents, and runtimes from a single console.
+
+[OpenClaw](https://github.com/anthropics/openclaw), Pi, and future execution engines are treated as pluggable runtimes in TeamClaw. Users can switch between normal and fast runtime modes directly in the chat composer, while the platform layer manages permissions, sessions, artifacts, model resources, skills, and observability.
+
+### v0.6.0 Highlights
+
+- **Multi-runtime Chat** — OpenClaw and Pi runtimes now share one chat surface with normal/fast switching, runtime icons, current model display, and background activity status.
+- **Pi Agent Runtime** — Added `pi-wrapper` for independent Pi sessions, streaming replies, chart/file artifacts, model config sync, and secured gateway access.
+- **OpenClaw 6.6 / v4 protocol** — Locked to gateway protocol v4, refactored chat streaming, staged replies, tool progress, hidden thinking, and reliable stop/error states.
+- **Artifact and history reliability** — Generated files are normalized into session output, duplicate names are auto-numbered, deterministic download links are rendered, and send/history/queue share the same normalization path.
+- **Model and resource sync** — Provider variants, Agent Plan endpoint fixes, OpenClaw/Pi model push, and selectable `low / medium / xhigh` thinking levels.
+- **Agent workspace UX** — Long-press rename, running indicators, unread/error badges, background completion notifications, and recent-session ordering fixes.
+- **RAG, regulations, and toolbox** — FTS + pgvector + RRF hybrid retrieval, PDF page preview, Excel field-aware retrieval, regulation tracking, and the toolbox entry.
+- **Deployment and build polish** — Docker/Nginx/Pi wrapper orchestration, production init via `prisma migrate deploy`, Next 16 proxy migration, and clean Turbopack build tracing.
 
 ### Core Features
 
-**AI Chat**
+**Runtime And Instance Operations**
 
-- Multi-conversation — create multiple independent sessions per agent
+- Multi-runtime — OpenClaw-compatible runtime and Pi runtime in one chat surface, with normal/fast switching
+- Multi-instance — managed Docker instances and external gateways, with cross-instance agent discovery and health monitoring
+- Lifecycle control — create, start, stop, restart, log streaming, recovery checks, and Nginx/SSE large-request tuning
+- Config editor — schema-driven configuration for models, providers, agents, skills, and runtime resources
+
+**AI Chat Workspace**
+
+- Multi-conversation — multiple independent sessions per agent, with recent-session archiving and ordering
 - Streaming responses — real-time token-by-token display
-- Thinking process — collapsible LLM reasoning chain display
+- Tool progress — tool calls, staged replies, and final replies are separated; internal thinking is hidden
 - Image attachments — send images with messages (PNG/JPEG/GIF/WebP, max 5MB)
-- Context management — conversation snapshots and context reset
+- File artifacts — generated files land in session output, download links are rendered in chat, duplicate filenames are auto-numbered
+- Background status — switching agents keeps active runs alive and shows unread completion/error badges
 
 **Agent Management**
 
-- Cross-instance agent browsing and creation, with cloning to other instances
+- Cross-instance agent browsing and creation, with cloning and long-press rename
 - Classification — DEFAULT / DEPARTMENT / PERSONAL categories
 - File management — tree view with online editing of agent config files
-- Visual config editor — schema-driven forms covering all OpenClaw modules
+- Runtime status — online, running, done-unread, and error-unread states appear in the agent list
 
 **Skills Marketplace**
 
 - ClawHub integration — search, install, and update skill packages from public marketplace
-- Instance auto-discovery — skills installed via OpenClaw chat or CLI automatically sync to the management page
+- Instance auto-discovery — skills installed via runtime chat or CLI automatically sync to the management page
 - Skill development — IDE-style file editor, develop locally and publish to ClawHub
 - Version management — installation tracking, version checks, and one-click upgrades
 - Scope control — PERSONAL / DEPARTMENT / GLOBAL skill scopes + INSTANCE source badge
+
+**Models And Resources**
+
+- Provider variants — Anthropic, OpenAI, DeepSeek, Qwen, Volcengine Agent Plan, MiniMax, Doubao, Moonshot, Groq, xAI, Mistral, Ollama, vLLM, and more
+- Model push — push selected models to OpenClaw-compatible runtime and Pi runtime from the resource detail page
+- Thinking levels — choose `low / medium / xhigh` at push time; target runtimes/providers map these levels to real request parameters
+- Provider sync — runtime provider configs are synchronized to avoid drift across instances
 
 **Knowledge Base (RAG)**
 
@@ -524,12 +572,12 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 - Scope management — PERSONAL / DEPARTMENT / GLOBAL knowledge base isolation
 - Multi-tenant storage — all RAG data lives under the `rag` schema, every SQL query takes `kb_id` as the isolation axis
 
-**Multi-Instance Management**
+**Toolbox**
 
-- One-click Docker creation — configure image, ports, bind settings and deploy
-- External gateway — connect existing OpenClaw instances via URL + token
-- Health monitoring — 60-second periodic checks with automatic fault detection and recovery
-- Lifecycle control — start, stop, restart, with real-time log streaming
+- Unified entry — the sidebar Toolbox groups built-in operational tools in a card grid
+- Extensible — new tools are registered through a single `TOOLS` definition, with `available: false` for coming-soon entries
+- **Regulation tracking** — bind a knowledge base to a tracked item, extract keywords, search regulation/standard updates, and write pending updates
+- **Public opinion monitoring** — placeholder workflow for keyword, source, and risk-signal aggregation
 
 **Organization & Permissions**
 
@@ -542,7 +590,6 @@ TeamClaw is a full-featured management platform built on top of [OpenClaw](https
 - Full i18n — English and Chinese interface with one-click switching
 - Mobile-responsive — full chat experience on mobile browsers with sidebar and file panel as slide-in drawers
 - PWA support — add to home screen, runs in standalone mode
-- Multi-model support — Anthropic, OpenAI, MiniMax, Groq, and more
 - Docker deployment — one-command full-stack setup
 
 ## Quick Start
@@ -717,14 +764,14 @@ If you change the embedding model and its dimension is not 1024, clean or migrat
 | `MULTI_DOC_PER_DOC_PAGE_LIMIT`                  | `6`        | Per-document page cap for multi-document answers   |
 | `MULTI_DOC_SINGLE_DOC_PAGE_LIMIT`               | `30`       | Page cap for single-document answers               |
 
-### Docker And OpenClaw Instances
+### Docker And Runtime Instances
 
-| Variable                 | macOS Docker Desktop     | Linux                               | Notes                                                             |
-| ------------------------ | ------------------------ | ----------------------------------- | ----------------------------------------------------------------- |
-| `DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`   | `/var/run/docker.sock`              | TeamClaw needs Docker socket access to manage OpenClaw containers |
-| `DOCKER_GID`             | `0`                      | `stat -c '%g' /var/run/docker.sock` | Group id used by the app container for Docker socket access       |
-| `TEAMCLAW_DATA_DIR`      | `~/.teamclaw/instances`  | absolute host path                  | Host directory for OpenClaw instance data                         |
-| `DEFAULT_OPENCLAW_IMAGE` | `alpine/openclaw:latest` | same                                | Default image for new instances                                   |
+| Variable                 | macOS Docker Desktop     | Linux                               | Notes                                                                 |
+| ------------------------ | ------------------------ | ----------------------------------- | --------------------------------------------------------------------- |
+| `DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`   | `/var/run/docker.sock`              | TeamClaw needs Docker socket access to manage hosted runtime services |
+| `DOCKER_GID`             | `0`                      | `stat -c '%g' /var/run/docker.sock` | Group id used by the app container for Docker socket access           |
+| `TEAMCLAW_DATA_DIR`      | `~/.teamclaw/instances`  | absolute host path                  | Host directory for hosted runtime instance data                       |
+| `DEFAULT_OPENCLAW_IMAGE` | `alpine/openclaw:latest` | same                                | Default OpenClaw-compatible gateway image for normal runtime          |
 
 ## Configuration Check
 
@@ -768,10 +815,10 @@ graph TB
 
     RAG["RAG Service<br/>FTS + Vector + RRF Hybrid<br/>PaddleOCR + jieba CJK tokenization"]
 
-    subgraph Instances["OpenClaw Instances"]
-        OC1["Instance 1 (Docker)"]
-        OC2["Instance 2 (Docker)"]
-        OCN["Instance N (External)"]
+    subgraph Runtime["Runtime Instances"]
+        OC1["OpenClaw Runtime<br/>(Docker)"]
+        PI1["Pi Runtime<br/>(pi-wrapper)"]
+        OCN["External Gateway"]
     end
 
     DK["Docker Engine"]
@@ -785,18 +832,18 @@ graph TB
     RAG --> PG
     GW --> Health
     GW -- "WebSocket" --> OC1
-    GW -- "WebSocket" --> OC2
+    GW -- "WebSocket" --> PI1
     GW -- "WebSocket" --> OCN
     API -. "Container Mgmt" .-> DK
     DK -. "Create/Control" .-> OC1
-    DK -. "Create/Control" .-> OC2
+    DK -. "Create/Control" .-> PI1
 
     style Client fill:#e3f2fd
     style NextJS fill:#fff3e0
     style Backend fill:#e8f5e9
     style Storage fill:#fce4ec
     style RAG fill:#fff9c4
-    style Instances fill:#f3e5f5
+    style Runtime fill:#f3e5f5
 ```
 
 ### Tech Stack
@@ -810,17 +857,17 @@ graph TB
 | RAG        | Python FastAPI + asyncpg + pgvector + tsvector + jieba (hybrid retrieval, no LlamaIndex/LangChain) |
 | Cache      | Redis 7 (ioredis)                                                                                  |
 | Auth       | RS256 JWT (jose) + bcryptjs                                                                        |
-| Gateway    | WebSocket (ws) + Docker API (dockerode)                                                            |
+| Gateway    | WebSocket (ws) + Pi wrapper + Docker API (dockerode)                                               |
 | Validation | Zod 4                                                                                              |
 
 ### Feature Overview
 
 | Module         | Routes | Key Capabilities                                                                                                      |
 | -------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
-| Chat           | 8      | Multi-conversation, streaming, thinking display, image attachments                                                    |
+| Chat           | 8      | Multi-conversation, multi-runtime switching, streaming, tool stages, artifact downloads, image attachments            |
 | Agents         | 6      | CRUD, clone, classify, file management                                                                                |
 | Skills         | 12     | ClawHub marketplace, install/publish, version management, IDE editor                                                  |
-| Instances      | 13     | Docker create, external gateway, health monitoring, config editor                                                     |
+| Instances      | 13     | Docker create, external gateway, OpenClaw/Pi runtime orchestration, health monitoring, config editor                  |
 | Knowledge Base | 10     | PDF/DOCX/Excel upload, PaddleOCR, FTS+vector+RRF hybrid retrieval, PDF page preview, multi-doc routing, streaming Q&A |
 | Auth           | 5      | JWT login, token rotation, rate limiting                                                                              |
 | Org            | 5      | User/department CRUD, RBAC                                                                                            |
@@ -877,13 +924,13 @@ First WebSocket connect → teamclaw auto-injects models.providers + primary
 Works out of the box — no manual Config Editor setup needed
 ```
 
-### 3. Deploy an OpenClaw Instance
+### 3. Deploy a Runtime Instance
 
 Navigate to the **Instances** page and choose one of:
 
-**Docker Container (Recommended)** — Click "Create Instance", select Docker mode, enter a name, choose an image (default: `alpine/openclaw:latest`), and create. Once online, it **automatically** uses the default resource + default model you marked in Step 2.
+**Docker Container (Recommended)** — Click "Create Instance", select Docker mode, enter a name, choose an image (default: `alpine/openclaw:latest`), and create the normal runtime. Deployments with Pi enabled also wire `pi-wrapper`. Once online, the instance **automatically** uses the default resource + default model you marked in Step 2.
 
-**External Gateway** — If you already have a running OpenClaw, select external gateway mode, enter the WebSocket URL and token to connect. Existing model configurations are not overwritten — use the Config Editor to switch models if needed.
+**External Gateway** — If you already have a running OpenClaw-compatible gateway, select external gateway mode, enter the WebSocket URL and token to connect. Existing model configurations are not overwritten — use the Config Editor to switch models if needed.
 
 Wait for instance status to become 🟢 **ONLINE** (typically 5-10 seconds).
 
