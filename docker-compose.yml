@@ -191,5 +191,6 @@ volumes:
 networks:
   data-net:
     driver: bridge
+    name: teamclaw-net
   gateway-net:
     driver: bridge

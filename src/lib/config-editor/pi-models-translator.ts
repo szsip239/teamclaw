@@ -42,7 +42,10 @@ export function toPiProviderEntry(entry: ProviderEntry): PiProviderEntry {
     baseUrl: entry.baseUrl,
     apiKey: entry.apiKey,
     api: mapProviderApiToPiApi(entry.api),
-    models: entry.models.map((model) => ({ ...model })),
+    models: entry.models.map((model) => {
+      const { api: _api, ...rest } = model
+      return rest
+    }),
   }
 }
 

@@ -97,7 +97,7 @@ describe('provider sync OpenClaw provider mapping', () => {
       baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
       apiKey: 'test-key',
       api: 'openai-completions',
-      models: [{ id: 'ark-code-latest', name: 'Ark Coding Plan' }],
+      models: [{ id: 'ark-code-latest', name: 'Ark Coding Plan', api: 'openai-completions' }],
     })
   })
 
@@ -121,7 +121,13 @@ describe('provider sync OpenClaw provider mapping', () => {
       baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
       apiKey: 'test-key',
       api: 'openai-completions',
-      models: [{ id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code' }],
+      models: [
+        {
+          id: 'doubao-seed-2.0-code',
+          name: 'Doubao Seed 2.0 Code',
+          api: 'openai-completions',
+        },
+      ],
     })
   })
 
@@ -169,7 +175,13 @@ describe('provider sync OpenClaw provider mapping', () => {
         baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
         apiKey: 'test-key',
         api: 'openai-completions',
-        models: [{ id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro' }],
+        models: [
+          {
+            id: 'doubao-seed-2.0-pro',
+            name: 'Doubao Seed 2.0 Pro',
+            api: 'openai-completions',
+          },
+        ],
       },
     })
   })
@@ -206,7 +218,13 @@ describe('provider sync OpenClaw provider mapping', () => {
       entry: {
         baseUrl: 'https://ark.cn-beijing.volces.com/api/plan',
         api: 'anthropic-messages',
-        models: [{ id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro' }],
+        models: [
+          {
+            id: 'doubao-seed-2.0-pro',
+            name: 'Doubao Seed 2.0 Pro',
+            api: 'anthropic-messages',
+          },
+        ],
       },
     })
   })

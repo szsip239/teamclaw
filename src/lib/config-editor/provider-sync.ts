@@ -93,6 +93,7 @@ export function sanitizeProviderPatch(patch: Record<string, unknown>): Record<st
 interface ProviderModelEntry {
   id: string
   name: string
+  api?: string
   reasoning?: boolean
   input?: string[]
   cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
@@ -164,6 +165,10 @@ export function buildProviderEntryFromResource(resource: ProviderResource): {
     apiKey,
     models: models.map((m) => {
       const modelEntry: ProviderModelEntry = { id: m.id, name: m.name }
+      // OpenClaw resolves model-level api before provider-level api. Set it
+      // explicitly so stale entries from earlier syncs cannot keep routing a
+      // provider through the wrong transport.
+      if (apiType) modelEntry.api = apiType
       if (m.reasoning !== undefined) modelEntry.reasoning = m.reasoning
       if (m.input) modelEntry.input = m.input
       if (m.cost) modelEntry.cost = m.cost

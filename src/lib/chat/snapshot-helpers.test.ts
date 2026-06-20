@@ -210,6 +210,32 @@ describe('live snapshot append-only merge', () => {
     })
   })
 
+  it('clears stale stream errors when gateway history has a successful final reply', () => {
+    const cached = [
+      chatMessage('user', 'create report'),
+      chatMessage('assistant', 'done', {
+        error: '⚠️ ✍️ Write failed',
+        isFinal: true,
+        stopReason: 'stop',
+      }),
+    ]
+    const gateway = [
+      chatMessage('user', 'create report'),
+      chatMessage('assistant', 'done', { isFinal: true, stopReason: 'stop' }),
+    ]
+
+    const merged = mergeLiveMessagesAppendOnly(cached, gateway)
+
+    expect(merged).toHaveLength(2)
+    expect(merged[1]).toMatchObject({
+      role: 'assistant',
+      content: 'done',
+      isFinal: true,
+      stopReason: 'stop',
+    })
+    expect(merged[1].error).toBeUndefined()
+  })
+
   it('falls back to liveMessages when only local artifact links are missing from gateway history', () => {
     const gateway = [
       chatMessage('user', 'create a report'),
@@ -247,6 +273,48 @@ describe('live snapshot append-only merge', () => {
     expect(merged[1].content).toBe(
       '页面已生成：worldcup.html\n\n[worldcup-2.html](output/worldcup-2.html)',
     )
+  })
+
+  it('preserves canvas embed output links when gateway history keeps the raw shortcode', () => {
+    const gateway = [
+      chatMessage('user', '做一张世界杯可视化表'),
+      chatMessage(
+        'assistant',
+        [
+          '为您做好了 2026 世界杯出线状态可视化表，48 队 12 组完整版：',
+          '',
+          '[embed ref="worldcup-2026-standings" title="2026 FIFA 世界杯 · 出线状态表" height="900" /]',
+          '',
+          '**表格特点：**',
+          '- 完整 12 组',
+        ].join('\n'),
+        { isFinal: true, stopReason: 'stop' },
+      ),
+    ]
+    const cached = [
+      chatMessage('user', '做一张世界杯可视化表'),
+      chatMessage(
+        'assistant',
+        [
+          '为您做好了 2026 世界杯出线状态可视化表，48 队 12 组完整版：',
+          '',
+          '**表格特点：**',
+          '- 完整 12 组',
+          '',
+          '[worldcup-2026-standings.html](output/worldcup-2026-standings.html)',
+        ].join('\n'),
+        { isFinal: true, stopReason: 'stop' },
+      ),
+    ]
+
+    expect(shouldUseLiveMessagesFallback(gateway, cached, true)).toBe(true)
+
+    const merged = mergeLiveMessagesAppendOnly(cached, gateway)
+    expect(merged).toHaveLength(2)
+    expect(merged[1].content).toContain(
+      '[worldcup-2026-standings.html](output/worldcup-2026-standings.html)',
+    )
+    expect(merged[1].content).not.toContain('[embed ref=')
   })
 
   it('rebuilds from full gateway history when cached live messages contain duplicate tails', () => {
@@ -699,6 +767,178 @@ describe('transformToLiveMessages', () => {
     ])
 
     expect(messages[0].content).toBe('已制作完成：google-okf-news.html')
+  })
+
+  it('hides terminal OpenClaw internal task failures and finalizes the tool turn', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'user',
+        content: '做一张世界杯可视化的"出线状态表"',
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '我帮您做一张世界杯出线状态表。' },
+          {
+            type: 'toolCall',
+            name: 'image_generate',
+            arguments: { prompt: 'World Cup table' },
+          },
+        ],
+        stopReason: 'toolUse',
+      },
+      {
+        role: 'toolResult',
+        toolName: 'image_generate',
+        content:
+          'Background task started for image generation (task-1). Do not call image_generate again.',
+      },
+      {
+        role: 'user',
+        content: `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+OpenClaw runtime context (internal):
+
+[Internal task completion event]
+source: image_generation
+status: failed
+<prompt-data>
+Blocked: resolves to private/internal/special-use IP address
+</prompt-data>
+<<<END_OPENCLAW_INTERNAL_CONTEXT>>>`,
+      },
+    ])
+
+    expect(messages.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '我帮您做一张世界杯出线状态表。',
+      stopReason: 'error',
+      isFinal: true,
+      error:
+        'Agent image generation task failed before reply: Blocked: resolves to private/internal/special-use IP address',
+    })
+    expect(messages[1].toolCalls?.[0]).toMatchObject({
+      toolName: 'image_generate',
+      toolOutput:
+        'Background task started for image generation (task-1). Do not call image_generate again.',
+    })
+  })
+
+  it('keeps terminal task failures when OpenClaw appends a non-chat custom message', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', name: 'image_generate', arguments: {} }],
+        stopReason: 'toolUse',
+      },
+      {
+        role: 'toolResult',
+        toolName: 'image_generate',
+        content: 'Background task started for image generation (task-1).',
+      },
+      {
+        role: 'user',
+        content: `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+[Internal task completion event]
+source: image_generation
+status: failed
+<prompt-data>
+Blocked: resolves to private/internal/special-use IP address
+</prompt-data>
+<<<END_OPENCLAW_INTERNAL_CONTEXT>>>`,
+      },
+      {
+        role: 'custom_message',
+        content: 'Image generation started; wait for the generated image completion event.',
+      } as unknown as ChatHistoryMessage,
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      stopReason: 'error',
+      isFinal: true,
+      error:
+        'Agent image generation task failed before reply: Blocked: resolves to private/internal/special-use IP address',
+    })
+  })
+
+  it('finalizes any unsuccessful internal task completion, not only image generation failures', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '正在启动子任务。' },
+          { type: 'toolCall', name: 'sessions_spawn', arguments: { agent: 'research' } },
+        ],
+        stopReason: 'toolUse',
+      },
+      {
+        role: 'toolResult',
+        toolName: 'sessions_spawn',
+        content: 'Background task started for subagent (task-2).',
+      },
+      {
+        role: 'user',
+        content: `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+[Internal task completion event]
+source: subagent
+status: timed_out
+<prompt-data>
+Exceeded the configured timeout
+</prompt-data>
+<<<END_OPENCLAW_INTERNAL_CONTEXT>>>`,
+      },
+      {
+        role: 'custom_message',
+        content: 'Subagent task is still tracked by the runtime.',
+      } as unknown as ChatHistoryMessage,
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      content: '正在启动子任务。',
+      stopReason: 'error',
+      isFinal: true,
+      error: 'Agent subagent task timed out before reply: Exceeded the configured timeout',
+    })
+    expect(messages[0].toolCalls?.[0]).toMatchObject({
+      toolName: 'sessions_spawn',
+      toolOutput: 'Background task started for subagent (task-2).',
+    })
+  })
+
+  it('does not mark the tool turn failed when OpenClaw writes a later visible reply', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', name: 'image_generate', arguments: {} }],
+        stopReason: 'toolUse',
+      },
+      {
+        role: 'user',
+        content: `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+[Internal task completion event]
+source: image_generation
+status: failed
+<<<END_OPENCLAW_INTERNAL_CONTEXT>>>`,
+      },
+      {
+        role: 'assistant',
+        content: '图像生成失败，我改为输出 HTML 表格。',
+        stopReason: 'stop',
+      },
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toMatchObject({ stopReason: 'toolUse', isFinal: false })
+    expect(messages[0].error).toBeUndefined()
+    expect(messages[1]).toMatchObject({
+      content: '图像生成失败，我改为输出 HTML 表格。',
+      stopReason: 'stop',
+      isFinal: true,
+    })
   })
 
   it('collapses OpenClaw reasoning-only retry user duplicates', () => {

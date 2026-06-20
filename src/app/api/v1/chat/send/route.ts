@@ -561,6 +561,7 @@ export async function POST(req: NextRequest) {
             chatSessionId,
             runStartedAt,
             execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
+            assistantText: lastTextContent,
             outputSnapshot: containerOutputSnapshot,
           })
         } catch (err) {
@@ -576,6 +577,7 @@ export async function POST(req: NextRequest) {
           agentId,
           chatSessionId,
           runStartedAt,
+          assistantText: lastTextContent,
           outputSnapshot: externalOutputSnapshot,
         })
       }

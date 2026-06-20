@@ -20,6 +20,7 @@ export interface NormalizeExternalSessionArtifactsOptions {
   agentId: string
   chatSessionId: string
   runStartedAt: Date
+  assistantText?: string
   outputSnapshot?: SessionOutputSnapshot | null
 }
 
@@ -29,6 +30,7 @@ export interface NormalizeContainerSessionArtifactsOptions {
   chatSessionId: string
   runStartedAt: Date
   execWithOutput: (containerId: string, cmd: string[]) => Promise<string>
+  assistantText?: string
   outputSnapshot?: SessionOutputSnapshot | null
 }
 
@@ -80,6 +82,9 @@ const RESERVED_ROOT_FILES = new Set([
 ])
 
 const RUN_CLOCK_SKEW_MS = 2_000
+const EMBED_SHORTCODE_RE = /\[embed\b([^\]]*)\]/gi
+const EMBED_REF_ATTR_RE = /\bref\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s\]/]+))/i
+const SAFE_CANVAS_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 
 function isArtifactFileName(fileName: string): boolean {
   if (fileName.startsWith('.')) return false
@@ -88,6 +93,33 @@ function isArtifactFileName(fileName: string): boolean {
 
 function isRecent(stat: { mtimeMs: number }, runStartedAt: Date): boolean {
   return stat.mtimeMs >= runStartedAt.getTime() - RUN_CLOCK_SKEW_MS
+}
+
+function sanitizeCanvasRef(ref: string): string | null {
+  const trimmed = ref.trim()
+  if (!SAFE_CANVAS_REF_RE.test(trimmed)) return null
+  if (trimmed.includes('..')) return null
+  return trimmed
+}
+
+function extractCanvasEmbedRefs(content: string | undefined): string[] {
+  if (!content) return []
+  const refs: string[] = []
+  const seen = new Set<string>()
+  for (const match of content.matchAll(EMBED_SHORTCODE_RE)) {
+    const attrs = match[1] ?? ''
+    const refMatch = EMBED_REF_ATTR_RE.exec(attrs)
+    const ref = sanitizeCanvasRef(refMatch?.[1] ?? refMatch?.[2] ?? refMatch?.[3] ?? '')
+    if (!ref || seen.has(ref)) continue
+    refs.push(ref)
+    seen.add(ref)
+  }
+  return refs
+}
+
+function canvasOutputRelativePath(ref: string): string {
+  const ext = path.posix.extname(ref).toLowerCase()
+  return ext === '.html' || ext === '.htm' ? ref : `${ref}.html`
 }
 
 function externalWorkspaceDir(workspacePath: string, agentId: string): string {
@@ -189,12 +221,35 @@ async function listRecentWorkspaceRootFiles(
   return results
 }
 
+async function listRecentExternalCanvasEmbedFiles(
+  workspacePath: string,
+  assistantText: string | undefined,
+  runStartedAt: Date,
+): Promise<{ absolutePath: string; relativePath: string }[]> {
+  const refs = extractCanvasEmbedRefs(assistantText)
+  if (refs.length === 0) return []
+
+  const documentsDir = path.join(workspacePath, 'canvas', 'documents')
+  const results: { absolutePath: string; relativePath: string }[] = []
+  for (const ref of refs) {
+    const absolutePath = path.join(documentsDir, ref, 'index.html')
+    assertInside(documentsDir, absolutePath)
+    const stat = await fs.stat(absolutePath).catch(() => null)
+    if (!stat?.isFile() || !isRecent(stat, runStartedAt)) continue
+    results.push({ absolutePath, relativePath: canvasOutputRelativePath(ref) })
+  }
+  return results
+}
+
 function splitExtension(fileName: string): { base: string; ext: string } {
   const ext = path.extname(fileName)
   return { base: fileName.slice(0, fileName.length - ext.length), ext }
 }
 
-async function uniqueOutputRelativePath(outputDir: string, desiredRelativePath: string): Promise<string> {
+async function uniqueOutputRelativePath(
+  outputDir: string,
+  desiredRelativePath: string,
+): Promise<string> {
   const normalized = desiredRelativePath.split('/').filter(Boolean)
   const dir = normalized.slice(0, -1).join('/')
   const fileName = normalized.at(-1)
@@ -300,7 +355,7 @@ export async function normalizeExternalSessionArtifacts(
       const backupPath = opts.outputSnapshot
         ? backupFilePath(opts.outputSnapshot, file.relativePath)
         : null
-      if (backupPath && await pathExists(backupPath)) {
+      if (backupPath && (await pathExists(backupPath))) {
         const copiedPath = await copyIntoOutput(file.absolutePath, outputDir, file.relativePath)
         await restoreExternalSnapshotFile(opts.outputSnapshot!, outputDir, file.relativePath)
         addArtifact(copiedPath)
@@ -318,9 +373,19 @@ export async function normalizeExternalSessionArtifacts(
       const copiedPath = await copyIntoOutput(file.absolutePath, outputDir, file.relativePath)
       addArtifact(copiedPath)
     }
+
+    for (const file of await listRecentExternalCanvasEmbedFiles(
+      opts.workspacePath,
+      opts.assistantText,
+      opts.runStartedAt,
+    )) {
+      const copiedPath = await copyIntoOutput(file.absolutePath, outputDir, file.relativePath)
+      addArtifact(copiedPath)
+    }
   } finally {
     if (opts.outputSnapshot?.backupDir) {
-      await fs.rm(path.dirname(opts.outputSnapshot.backupDir), { recursive: true, force: true })
+      await fs
+        .rm(path.dirname(opts.outputSnapshot.backupDir), { recursive: true, force: true })
         .catch(() => {})
     }
   }
@@ -374,6 +439,7 @@ output_dir="$2"
 legacy_output_dir="$3"
 threshold="$4"
 backup_dir="$5"
+canvas_refs="${'${'}6:-}"
 
 mkdir -p -- "$output_dir"
 
@@ -476,9 +542,27 @@ scan_root() {
   done
 }
 
+scan_canvas_refs() {
+  [ -n "$canvas_refs" ] || return 0
+  canvas_documents_dir="${'${'}OPENCLAW_STATE_DIR:-/home/node/.openclaw}/canvas/documents"
+  printf '%s\n' "$canvas_refs" | while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    src="$canvas_documents_dir/$ref/index.html"
+    [ -f "$src" ] || continue
+    mtime=$(file_mtime "$src")
+    [ "$mtime" -lt "$threshold" ] && continue
+    case "$ref" in
+      *.html|*.htm) rel="$ref" ;;
+      *) rel="$ref.html" ;;
+    esac
+    copy_unique "$src" "$rel"
+  done
+}
+
 scan_recursive "$output_dir" canonical
 scan_recursive "$legacy_output_dir" copy
 scan_root
+scan_canvas_refs
 `
 
 export async function createContainerSessionOutputSnapshot(
@@ -507,6 +591,7 @@ export async function normalizeContainerSessionArtifacts(
   const workspaceDir = containerWorkspaceDir(opts.agentId)
   const legacyOutputDir = path.posix.join(workspaceDir, 'output')
   const thresholdSeconds = Math.floor((opts.runStartedAt.getTime() - RUN_CLOCK_SKEW_MS) / 1000)
+  const canvasRefs = extractCanvasEmbedRefs(opts.assistantText).join('\n')
   let output: string
   try {
     output = await opts.execWithOutput(opts.containerId, [
@@ -519,15 +604,18 @@ export async function normalizeContainerSessionArtifacts(
       legacyOutputDir,
       String(thresholdSeconds),
       opts.outputSnapshot?.backupDir ?? '',
+      canvasRefs,
     ])
   } finally {
     if (opts.outputSnapshot?.backupDir) {
-      await opts.execWithOutput(opts.containerId, [
-        'rm',
-        '-rf',
-        '--',
-        path.posix.dirname(opts.outputSnapshot.backupDir),
-      ]).catch(() => {})
+      await opts
+        .execWithOutput(opts.containerId, [
+          'rm',
+          '-rf',
+          '--',
+          path.posix.dirname(opts.outputSnapshot.backupDir),
+        ])
+        .catch(() => {})
     }
   }
 
@@ -589,6 +677,14 @@ export function stripOutputArtifactLinksToLabels(content: string): string {
   )
 }
 
+export function stripCanvasEmbedDirectives(content: string): string {
+  return content
+    .replace(EMBED_SHORTCODE_RE, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd()
+}
+
 export function artifactLinksMarkdown(artifacts: SessionArtifact[]): string {
   const lines = artifacts.map((artifact) => {
     const href = encodeOutputHref(artifact.relativePath)
@@ -598,7 +694,7 @@ export function artifactLinksMarkdown(artifacts: SessionArtifact[]): string {
 }
 
 export function appendArtifactLinks(content: string, artifacts: SessionArtifact[]): string {
-  const baseContent = stripOutputArtifactLinksToLabels(content)
+  const baseContent = stripCanvasEmbedDirectives(stripOutputArtifactLinksToLabels(content))
   const missing = artifacts.filter((artifact) => {
     const href = encodeOutputHref(artifact.relativePath)
     return !baseContent.includes(`](${href})`)

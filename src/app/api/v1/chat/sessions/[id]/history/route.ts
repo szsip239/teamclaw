@@ -14,7 +14,9 @@ import {
   shouldUseLiveMessagesFallback,
   gatewayMessageCreatedAt,
   filterRetryDuplicateUserMessages,
+  filterOpenClawInternalContextMessages,
   markNonDeliverableTerminalTurn,
+  markTerminalTaskFailure,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
 import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
@@ -77,13 +79,15 @@ function completeToolCall(
 
 function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
+  const { messages: displayRawMessages, terminalTaskError } =
+    filterOpenClawInternalContextMessages(raw)
   // Use index-based IDs so the same message gets the same ID across polls.
   // Random UUIDs would change every poll → React key changes → component
   // unmount/remount → collapsible sections (thinking, tools) lose their
   // expanded state.
   let orderIndex = 0
 
-  for (const msg of filterRetryDuplicateUserMessages(raw)) {
+  for (const msg of filterRetryDuplicateUserMessages(displayRawMessages)) {
     if (msg.role === 'user') {
       const contentBlocks = extractContentBlocks(msg.content)
       const id = `current-${orderIndex}`
@@ -164,6 +168,7 @@ function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
     }
   }
 
+  markTerminalTaskFailure(result, terminalTaskError)
   return result
 }
 

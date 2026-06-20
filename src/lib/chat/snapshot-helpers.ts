@@ -15,6 +15,7 @@ import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import { parseSessionMessage } from '@/lib/chat/session-message'
 import {
   sanitizeOutputArtifactLinks,
+  stripCanvasEmbedDirectives,
   stripOutputArtifactLinksToLabels,
 } from '@/lib/session-files/artifacts'
 import { buildChatRuntimeSessionKey, type ChatRuntime } from '@/lib/chat/runtime'
@@ -258,6 +259,55 @@ export function filterRetryDuplicateUserMessages(
 const NON_DELIVERABLE_LENGTH_ERROR =
   'Agent failed before reply: incomplete terminal response (stopReason=length)'
 
+const OPENCLAW_INTERNAL_CONTEXT_MARKER = '<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>'
+const OPENCLAW_UNSUCCESSFUL_TASK_STATUSES = new Set(['failed', 'timed_out', 'cancelled', 'lost'])
+
+function taskStatusLabel(status: string): string {
+  return status.replace(/_/g, ' ')
+}
+
+function extractInternalTaskTerminalError(message: ChatHistoryMessage): string | undefined {
+  if (message.role !== 'user') return undefined
+
+  const text = extractText(message.content)
+  if (!text.includes(OPENCLAW_INTERNAL_CONTEXT_MARKER)) return undefined
+  if (!text.includes('[Internal task completion event]')) return undefined
+
+  const status = text.match(/^status:\s*([a-z_]+)\s*$/im)?.[1]?.trim()
+  if (!status || !OPENCLAW_UNSUCCESSFUL_TASK_STATUSES.has(status)) return undefined
+
+  const source = text.match(/^source:\s*([^\n\r]+)/im)?.[1]?.trim()
+  const detail = text.match(/<prompt-data>\s*([\s\S]*?)\s*<\/prompt-data>/i)?.[1]?.trim()
+  const taskLabel = source ? source.replace(/_/g, ' ') : 'internal'
+  return `Agent ${taskLabel} task ${taskStatusLabel(status)} before reply${detail ? `: ${detail}` : ''}`
+}
+
+export function filterOpenClawInternalContextMessages(rawMessages: ChatHistoryMessage[]): {
+  messages: ChatHistoryMessage[]
+  terminalTaskError?: string
+} {
+  const messages: ChatHistoryMessage[] = []
+  let terminalTaskError: string | undefined
+
+  for (const message of rawMessages) {
+    const text = message.role === 'user' ? extractText(message.content) : ''
+    if (text.includes(OPENCLAW_INTERNAL_CONTEXT_MARKER)) {
+      terminalTaskError = extractInternalTaskTerminalError(message)
+      continue
+    }
+
+    if (message.role === 'assistant' && rawMessageHasDeliverableContent(message)) {
+      terminalTaskError = undefined
+    }
+    messages.push(message)
+  }
+
+  return {
+    messages,
+    ...(terminalTaskError ? { terminalTaskError } : {}),
+  }
+}
+
 export function markNonDeliverableTerminalTurn(
   messages: ChatMessage[],
   error = NON_DELIVERABLE_LENGTH_ERROR,
@@ -281,6 +331,18 @@ export function markNonDeliverableTerminalTurn(
 
   lastAssistant.error = error
   lastAssistant.isFinal = true
+}
+
+export function markTerminalTaskFailure(messages: ChatMessage[], error: string | undefined): void {
+  if (!error) return
+
+  const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant')
+  if (!lastAssistant) return
+  if (lastAssistant.isFinal === true && lastAssistant.stopReason === 'stop') return
+
+  lastAssistant.error = error
+  lastAssistant.isFinal = true
+  lastAssistant.stopReason = 'error'
 }
 
 // ─── Snapshot building ───────────────────────────────────────────────
@@ -570,8 +632,10 @@ export async function archiveSession(
 export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): ChatMessage[] {
   const result: ChatMessage[] = []
   const fallbackBaseMs = Date.now()
+  const { messages: displayRawMessages, terminalTaskError } =
+    filterOpenClawInternalContextMessages(rawMessages)
 
-  for (const msg of filterRetryDuplicateUserMessages(rawMessages)) {
+  for (const msg of filterRetryDuplicateUserMessages(displayRawMessages)) {
     const messageSeq = result.length
     const createdAt =
       gatewayMessageCreatedAt(msg) ?? new Date(fallbackBaseMs + messageSeq).toISOString()
@@ -648,6 +712,7 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
   }
 
   markNonDeliverableTerminalTurn(result)
+  markTerminalTaskFailure(result, terminalTaskError)
   return result
 }
 
@@ -721,12 +786,18 @@ function containsOutputLink(content: string): boolean {
 }
 
 function comparableContent(content: string): string {
-  return stripOutputArtifactLinksToLabels(stripMediaReferences(content)).replace(/\s+/g, ' ').trim()
+  return stripCanvasEmbedDirectives(stripOutputArtifactLinksToLabels(stripMediaReferences(content)))
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function isLocalArtifactAugmentedContent(localContent: string, gatewayContent: string): boolean {
-  const local = sanitizeOutputArtifactLinks(stripMediaReferences(localContent))
-  const gateway = sanitizeOutputArtifactLinks(stripMediaReferences(gatewayContent))
+  const local = stripCanvasEmbedDirectives(
+    sanitizeOutputArtifactLinks(stripMediaReferences(localContent)),
+  )
+  const gateway = stripCanvasEmbedDirectives(
+    sanitizeOutputArtifactLinks(stripMediaReferences(gatewayContent)),
+  )
   if (local === gateway) return false
 
   if (containsOutputLink(local) && comparableContent(local) === comparableContent(gateway)) {
@@ -978,6 +1049,10 @@ function mergeMessagePreservingOldData(
   const createdAt = validMessageCreatedAt(newMessage.createdAt)
     ? newMessage.createdAt
     : oldMessage.createdAt
+  const newMessageSucceeded =
+    newMessage.stopReason === 'stop' ||
+    (newMessage.isFinal === true && newMessage.stopReason !== 'error')
+  const error = newMessage.error ?? (newMessageSucceeded ? undefined : oldMessage.error)
 
   return {
     ...newMessage,
@@ -988,9 +1063,7 @@ function mergeMessagePreservingOldData(
     ...(oldMessage.thinking || newMessage.thinking
       ? { thinking: oldMessage.thinking || newMessage.thinking }
       : {}),
-    ...(oldMessage.error || newMessage.error
-      ? { error: oldMessage.error || newMessage.error }
-      : {}),
+    ...(error ? { error } : {}),
     ...(oldMessage.attachments || newMessage.attachments
       ? { attachments: oldMessage.attachments ?? newMessage.attachments }
       : {}),

@@ -100,6 +100,101 @@ describe('session artifact normalization', () => {
     expect(artifacts).toEqual([])
   })
 
+  it('copies OpenClaw canvas embed documents into canonical session output', async () => {
+    const workspacePath = await makeWorkspace()
+    const runStartedAt = new Date()
+    await fs.mkdir(
+      path.join(workspacePath, 'canvas', 'documents', 'worldcup-2026-standings'),
+      { recursive: true },
+    )
+    await fs.writeFile(
+      path.join(workspacePath, 'canvas', 'documents', 'worldcup-2026-standings', 'index.html'),
+      '<html>standings</html>',
+    )
+
+    const artifacts = await normalizeExternalSessionArtifacts({
+      workspacePath,
+      agentId: 'telecom',
+      chatSessionId: 'chat-1',
+      runStartedAt,
+      assistantText:
+        '[embed ref="worldcup-2026-standings" title="2026 FIFA 世界杯 · 出线状态表" height="900" /]',
+    })
+
+    const outputPath = resolveExternalSessionFilePath(
+      workspacePath,
+      'telecom',
+      'chat-1',
+      'output',
+      'worldcup-2026-standings.html',
+    )
+    await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('<html>standings</html>')
+    expect(artifacts).toEqual([
+      {
+        fileName: 'worldcup-2026-standings.html',
+        relativePath: 'worldcup-2026-standings.html',
+      },
+    ])
+  })
+
+  it('does not collect canvas documents unless the current assistant text references them', async () => {
+    const workspacePath = await makeWorkspace()
+    const runStartedAt = new Date()
+    await fs.mkdir(path.join(workspacePath, 'canvas', 'documents', 'old-view'), {
+      recursive: true,
+    })
+    await fs.writeFile(
+      path.join(workspacePath, 'canvas', 'documents', 'old-view', 'index.html'),
+      '<html>old</html>',
+    )
+
+    const artifacts = await normalizeExternalSessionArtifacts({
+      workspacePath,
+      agentId: 'telecom',
+      chatSessionId: 'chat-1',
+      runStartedAt,
+      assistantText: 'done',
+    })
+
+    expect(artifacts).toEqual([])
+  })
+
+  it('does not collect stale canvas documents even when the current assistant text references them', async () => {
+    const workspacePath = await makeWorkspace()
+    const old = new Date('2026-01-01T00:00:00.000Z')
+    const canvasPath = path.join(
+      workspacePath,
+      'canvas',
+      'documents',
+      'old-view',
+      'index.html',
+    )
+    await fs.mkdir(path.dirname(canvasPath), { recursive: true })
+    await fs.writeFile(canvasPath, '<html>old</html>')
+    await fs.utimes(canvasPath, old, old)
+
+    const artifacts = await normalizeExternalSessionArtifacts({
+      workspacePath,
+      agentId: 'telecom',
+      chatSessionId: 'chat-1',
+      runStartedAt: new Date('2026-06-20T00:00:00.000Z'),
+      assistantText: '[embed ref="old-view" title="Old" /]',
+    })
+
+    expect(artifacts).toEqual([])
+  })
+
+  it('strips OpenClaw embed directives when appending normalized output links', () => {
+    expect(
+      appendArtifactLinks('页面已生成：\n[embed ref="worldcup-2026-standings" title="Status" /]', [
+        {
+          fileName: 'worldcup-2026-standings.html',
+          relativePath: 'worldcup-2026-standings.html',
+        },
+      ]),
+    ).toBe('页面已生成：\n\n[worldcup-2026-standings.html](output/worldcup-2026-standings.html)')
+  })
+
   it('renames a direct canonical output overwrite and restores the previous file', async () => {
     const workspacePath = await makeWorkspace()
     const outputPath = resolveExternalSessionFilePath(
@@ -191,6 +286,56 @@ describe('session artifact normalization', () => {
       'new report',
     )
     expect(artifacts).toEqual([{ fileName: 'report-2.html', relativePath: 'report-2.html' }])
+  })
+
+  it('copies container OpenClaw canvas embed documents into canonical session output', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'teamclaw-container-artifacts-'))
+    tempDirs.push(root)
+    const openclawStateDir = path.join(root, 'home/node/.openclaw')
+    const mapPath = (value: string) => {
+      if (value.startsWith('/workspace')) return path.join(root, value.slice(1))
+      if (value.startsWith('/home/node/.openclaw')) {
+        return path.join(root, 'home/node/.openclaw', value.slice('/home/node/.openclaw'.length))
+      }
+      return value
+    }
+    const execWithOutput = async (_containerId: string, cmd: string[]) => {
+      const mapped = cmd.map(mapPath)
+      return execFileSync(mapped[0], mapped.slice(1), {
+        encoding: 'utf8',
+        env: { ...process.env, OPENCLAW_STATE_DIR: openclawStateDir },
+      })
+    }
+
+    await fs.mkdir(
+      path.join(openclawStateDir, 'canvas/documents/worldcup-2026-standings'),
+      { recursive: true },
+    )
+    await fs.writeFile(
+      path.join(openclawStateDir, 'canvas/documents/worldcup-2026-standings/index.html'),
+      '<html>standings</html>',
+    )
+
+    const artifacts = await normalizeContainerSessionArtifacts({
+      containerId: 'container-1',
+      agentId: 'sales',
+      chatSessionId: 'chat-1',
+      runStartedAt: new Date(),
+      execWithOutput,
+      assistantText: '[embed ref="worldcup-2026-standings" title="Status" /]',
+    })
+
+    const outputPath = path.join(
+      mapPath(buildSessionOutputPath('sales', 'chat-1')),
+      'worldcup-2026-standings.html',
+    )
+    await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('<html>standings</html>')
+    expect(artifacts).toEqual([
+      {
+        fileName: 'worldcup-2026-standings.html',
+        relativePath: 'worldcup-2026-standings.html',
+      },
+    ])
   })
 
   it('appends deterministic output links without duplicating existing links', () => {

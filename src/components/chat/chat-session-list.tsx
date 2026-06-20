@@ -92,6 +92,7 @@ export function ChatSessionList() {
     <div className="flex flex-col gap-0.5">
       {sorted.map((session) => {
         const isCurrentSession = activeSessionId === session.id
+        const agentName = resolveAgentName(session)
         return (
           <div
             key={session.id}
@@ -108,14 +109,17 @@ export function ChatSessionList() {
                   "truncate text-sm",
                   !session.isActive && "text-muted-foreground",
                 )}>
-                  {session.title || resolveAgentName(session)}
+                  {session.title || agentName}
                 </p>
                 {session.isActive && (
                   <span className="size-1.5 shrink-0 rounded-full bg-green-500" />
                 )}
               </div>
               <p className="text-muted-foreground truncate text-[10px]">
-                {session.instanceName}
+                {agentName}
+                {session.instanceName && (
+                  <> &middot; {session.instanceName}</>
+                )}
                 {session.lastMessageAt && (
                   <> &middot; {formatRelative(session.lastMessageAt, t)}</>
                 )}
