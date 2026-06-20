@@ -1,6 +1,6 @@
 {
   "name": "teamclaw",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Enterprise AI Agent operations platform for multi-instance, multi-tenant, multi-runtime deployments",
   "author": "TeamClaw Contributors",
   "license": "MIT",

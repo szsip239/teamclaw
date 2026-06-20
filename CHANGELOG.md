@@ -4,6 +4,20 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.6.1 (2026-06-21)
+
+> Patch release: hardens first-run deployment docs and setup scripts so new users can start without secret rotation or key-generation ordering issues.
+
+### Fixed
+
+- `setup.sh` now preserves existing JWT and encryption secrets on rerun; it only generates values when `.env` is missing, blank, or still contains placeholders.
+- `setup.sh` now auto-detects `DOCKER_GID` on Linux when possible, reducing Docker socket permission issues for managed runtime containers.
+- `scripts/generate-keys.mjs --write` now writes missing `.env` placeholders directly, uses only Node built-ins, preserves existing secrets by default, and updates JWT private/public keys as a pair.
+- README deployment guidance is shorter and focused on first successful startup: production setup, local dev setup, first-use checklist, required config, and common startup failures.
+- `.env.example` comments now point to the current setup scripts and the 6.6 browser runtime image.
+
+---
+
 ## v0.6.0 (2026-06-21)
 
 > 正式发布：多 runtime Chat、Pi Agent Runtime、OpenClaw 6.6/v4 协议适配、产物归一化、模型资源同步、RAG/法规/工具箱和生产部署稳定性集中升级。
@@ -195,7 +209,7 @@ All notable changes since `v0.3.0` (2026-03-30).
 - **PDF 来源页面预览**: 对话回答里 PDF 引用旁出现可点击的「第 N 页」chip，点击右侧抽屉打开原始 PDF 并自动跳转到对应页（浏览器原生 PDF 查看器，`#page=N` 锚点跳转）。
 - **Excel 字段化检索（后端就绪）**: 新增 `/api/excel/preview` + `/api/excel/config` 两个端点，自动识别表头并按"标题 / 正文 / 过滤字段 / 来源字段"做字段化分块。前端 UI 下一期接入。
 - **Docker 全栈一体化**: `docker compose --profile app up -d` 一键起 postgres + redis + rag + Next.js 四个容器，host 端不需要 `npm run dev`。原 host 模式（基础设施 docker + Next.js 本地）保留为可选。
-- **RAG 镜像瘦身 82%**: 从 6.31GB → 1.12GB（去掉 llama-index-* / dashscope / psycopg2 等约 1.2GB 依赖）。
+- **RAG 镜像瘦身 82%**: 从 6.31GB → 1.12GB（去掉 llama-index-\* / dashscope / psycopg2 等约 1.2GB 依赖）。
 
 ---
 
@@ -325,14 +339,14 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 以下 15 个 skill 随 clone 一起分发：
 
-| 类别 | Skills |
-|---|---|
-| 浏览器自动化 | `agent-browser`, `browserwing`, `playwright-scraper-skill` |
-| 搜索 | `baidu-search`, `multi-search-engine`, `vane-search` |
-| 内容创作 | `anygen-skill`, `content-skills`（含包鱼 markdown→HTML / markdown→公众号） |
-| 数据分析 | `data-analyst` |
-| 工作流辅助 | `agent-init`, `multi-agent-cn`, `self-improving`, `skill-creator`, `summarize` |
-| 商务 | `qcc-cli`（企查查） |
+| 类别         | Skills                                                                         |
+| ------------ | ------------------------------------------------------------------------------ |
+| 浏览器自动化 | `agent-browser`, `browserwing`, `playwright-scraper-skill`                     |
+| 搜索         | `baidu-search`, `multi-search-engine`, `vane-search`                           |
+| 内容创作     | `anygen-skill`, `content-skills`（含包鱼 markdown→HTML / markdown→公众号）     |
+| 数据分析     | `data-analyst`                                                                 |
+| 工作流辅助   | `agent-init`, `multi-agent-cn`, `self-improving`, `skill-creator`, `summarize` |
+| 商务         | `qcc-cli`（企查查）                                                            |
 
 安装方法：登录后进入 **Skills 管理** 页面，点击"安装到实例"。
 
