@@ -10,7 +10,11 @@ import {
   type ProviderEntry,
 } from '@/lib/config-editor/provider-sync'
 import { syncPiProviderConfig } from '@/lib/config-editor/pi-provider-sync'
-import { TEAMCLAW_DEFAULT_THINKING_LEVEL } from '@/lib/config-editor/thinking-levels'
+import {
+  TEAMCLAW_DEFAULT_THINKING_LEVEL,
+  TEAMCLAW_THINKING_LEVELS,
+  type TeamClawThinkingLevel,
+} from '@/lib/config-editor/thinking-levels'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
 import type { ResourceConfig, ModelDefinition } from '@/types/resource'
 
@@ -31,6 +35,10 @@ const pushSchema = z.object({
   instanceIds: z.array(z.string().min(1)).min(1),
   role: z.enum(PUSH_ROLES).optional().default('primary'),
   targets: z.array(z.enum(PUSH_TARGETS)).min(1).optional().default(['openclaw']),
+  thinkingLevel: z
+    .enum(TEAMCLAW_THINKING_LEVELS)
+    .optional()
+    .default(TEAMCLAW_DEFAULT_THINKING_LEVEL),
 })
 
 interface ConfigGetResult {
@@ -66,14 +74,17 @@ function buildRolePatch(params: {
   return { agents: { defaults: { model: { fallbacks: next } } } }
 }
 
-function buildAgentDefaultsPatch(rolePatch: Record<string, unknown>): Record<string, unknown> {
+function buildAgentDefaultsPatch(
+  rolePatch: Record<string, unknown>,
+  thinkingLevel: TeamClawThinkingLevel,
+): Record<string, unknown> {
   const agents = rolePatch.agents as Record<string, unknown> | undefined
   const defaults = agents?.defaults as Record<string, unknown> | undefined
   return {
     agents: {
       defaults: {
         ...(defaults ?? {}),
-        thinkingDefault: TEAMCLAW_DEFAULT_THINKING_LEVEL,
+        thinkingDefault: thinkingLevel,
       },
     },
   }
@@ -92,6 +103,7 @@ async function pushPiModelsConfig(params: {
   providerId: string
   providerEntry: ProviderEntry
   modelId?: string
+  thinkingLevel: TeamClawThinkingLevel
   required?: boolean
 }): Promise<Pick<PushOutcome, 'piOk' | 'piError'>> {
   const result = await syncPiProviderConfig({
@@ -99,7 +111,7 @@ async function pushPiModelsConfig(params: {
     entries: { [params.providerId]: params.providerEntry },
     defaultProviderId: params.modelId ? params.providerId : undefined,
     defaultModelId: params.modelId,
-    defaultThinkingLevel: params.modelId ? TEAMCLAW_DEFAULT_THINKING_LEVEL : undefined,
+    defaultThinkingLevel: params.modelId ? params.thinkingLevel : undefined,
   })
   if (result.skipped) {
     return params.required
@@ -169,6 +181,7 @@ export const POST = withAuth(
       const targets = Array.from(new Set(body.targets)) as ModelPushTarget[]
       const wantsOpenClaw = targets.includes('openclaw')
       const wantsPi = targets.includes('pi')
+      const thinkingLevel = body.thinkingLevel as TeamClawThinkingLevel
       let connected = new Set<string>()
       if (wantsOpenClaw) {
         await ensureRegistryInitialized()
@@ -193,7 +206,7 @@ export const POST = withAuth(
               })
               const patch = {
                 models: { providers: { [openClawProviderId]: providerEntry } },
-                ...buildAgentDefaultsPatch(rolePatch),
+                ...buildAgentDefaultsPatch(rolePatch, thinkingLevel),
               }
               const sanitized = sanitizeProviderPatch(patch)
               await registry.request(instanceId, 'config.patch', {
@@ -206,6 +219,7 @@ export const POST = withAuth(
               providerId: openClawProviderId,
               providerEntry,
               modelId: wantsPi ? body.modelId : undefined,
+              thinkingLevel,
               required: wantsPi,
             })
             const ok = wantsPi && piResult.piOk !== true ? false : true
@@ -237,6 +251,7 @@ export const POST = withAuth(
           modelRef,
           role: body.role,
           targets: targets.join(','),
+          thinkingLevel,
           successInstanceIds: successIds.join(','),
           failedInstanceIds: failedOutcomes.map((o) => o.instanceId).join(','),
         },
@@ -249,6 +264,7 @@ export const POST = withAuth(
         modelRef,
         role: body.role,
         targets,
+        thinkingLevel,
         outcomes,
         successCount: successIds.length,
         failedCount: failedOutcomes.length,

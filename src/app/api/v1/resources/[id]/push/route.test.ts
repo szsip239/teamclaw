@@ -125,6 +125,7 @@ describe('resource model push route pi sync', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
+    expect(body.thinkingLevel).toBe('medium')
     expect(body.outcomes).toEqual([
       expect.objectContaining({ instanceId: 'instance-1', ok: true, piOk: true }),
     ])
@@ -155,6 +156,33 @@ describe('resource model push route pi sync', () => {
       },
     })
     expect(mocks.piLease.release).toHaveBeenCalled()
+  })
+
+  it('uses the selected thinking level for OpenClaw and Pi defaults', async () => {
+    const response = await POST(
+      createRequest({ targets: ['openclaw', 'pi'], thinkingLevel: 'xhigh' }),
+      routeCtx(),
+    )
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.thinkingLevel).toBe('xhigh')
+    const openClawPatch = JSON.parse(mocks.registry.request.mock.calls[1][2].raw)
+    expect(openClawPatch.agents.defaults.thinkingDefault).toBe('xhigh')
+    expect(mocks.piClient.request).toHaveBeenCalledWith('config.patch', {
+      models: {
+        providers: {
+          anthropic: expect.objectContaining({
+            api: 'anthropic-messages',
+          }),
+        },
+      },
+      settings: {
+        defaultProvider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-20250514',
+        defaultThinkingLevel: 'xhigh',
+      },
+    })
   })
 
   it('pushes a Pi-only target without patching OpenClaw and sets the Pi default for new sessions', async () => {

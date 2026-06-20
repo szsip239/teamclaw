@@ -19,11 +19,37 @@ import { chatKeys } from "@/hooks/use-chat"
 import { useInstances } from "@/hooks/use-instances"
 import { useT } from "@/stores/language-store"
 import type { TranslationKey } from "@/locales/zh-CN"
+import {
+  TEAMCLAW_DEFAULT_THINKING_LEVEL,
+  type TeamClawThinkingLevel,
+} from "@/lib/config-editor/thinking-levels"
 import { toast } from "sonner"
 import type { ModelDefinition } from "@/types/resource"
 
 type PushRole = "primary" | "fallbacks" | "imageModel" | "imageGenerationModel"
 type PushTarget = "openclaw" | "pi"
+
+const THINKING_LEVEL_OPTIONS: Array<{
+  value: TeamClawThinkingLevel
+  labelKey: TranslationKey
+  hintKey: TranslationKey
+}> = [
+  {
+    value: "low",
+    labelKey: "resource.pushModelThinkingLow",
+    hintKey: "resource.pushModelThinkingLowHint",
+  },
+  {
+    value: "medium",
+    labelKey: "resource.pushModelThinkingMedium",
+    hintKey: "resource.pushModelThinkingMediumHint",
+  },
+  {
+    value: "xhigh",
+    labelKey: "resource.pushModelThinkingXHigh",
+    hintKey: "resource.pushModelThinkingXHighHint",
+  },
+]
 
 interface PushOutcome {
   instanceId: string
@@ -37,6 +63,7 @@ interface PushResponse {
   modelRef: string
   role: PushRole
   targets: PushTarget[]
+  thinkingLevel: TeamClawThinkingLevel
   outcomes: PushOutcome[]
   successCount: number
   failedCount: number
@@ -70,6 +97,9 @@ export function ModelPushDialog({
     new Set(["openclaw", "pi"]),
   )
   const [role, setRole] = useState<PushRole>("primary")
+  const [thinkingLevel, setThinkingLevel] = useState<TeamClawThinkingLevel>(
+    TEAMCLAW_DEFAULT_THINKING_LEVEL,
+  )
   const [submitting, setSubmitting] = useState(false)
 
   // Reset selection whenever the dialog reopens or the target model changes.
@@ -78,6 +108,7 @@ export function ModelPushDialog({
       setSelectedIds(new Set())
       setSelectedTargets(new Set(["openclaw", "pi"]))
       setRole("primary")
+      setThinkingLevel(TEAMCLAW_DEFAULT_THINKING_LEVEL)
     }
   }, [open, model?.id])
 
@@ -113,6 +144,7 @@ export function ModelPushDialog({
           modelId: model.id,
           instanceIds: Array.from(selectedIds),
           targets: Array.from(selectedTargets),
+          thinkingLevel,
           role: selectedTargets.has("openclaw") ? role : undefined,
         },
       )
@@ -165,6 +197,8 @@ export function ModelPushDialog({
       hintKey: "resource.pushModelRoleImageGenHint",
     },
   ]
+  const selectedThinkingOption =
+    THINKING_LEVEL_OPTIONS.find((opt) => opt.value === thinkingLevel) ?? THINKING_LEVEL_OPTIONS[1]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -222,6 +256,35 @@ export function ModelPushDialog({
                 </label>
               ))}
             </div>
+          </div>
+
+          {/* Thinking depth */}
+          <div className="space-y-2">
+            <Label className="text-[13px] font-medium">
+              {t('resource.pushModelThinkingLabel')}
+            </Label>
+            <div className="grid grid-cols-3 gap-1 rounded-lg border bg-muted/30 p-1">
+              {THINKING_LEVEL_OPTIONS.map((opt) => {
+                const isSelected = thinkingLevel === opt.value
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setThinkingLevel(opt.value)}
+                    className={`h-8 rounded-md px-2 text-[13px] font-medium transition-colors ${
+                      isSelected
+                        ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                        : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                    }`}
+                  >
+                    {t(opt.labelKey)}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {t(selectedThinkingOption.hintKey)}
+            </p>
           </div>
 
           {/* Role */}
