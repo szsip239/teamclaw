@@ -41,12 +41,12 @@ import {
   readImageAsDataUrl,
   readContainerImageAsDataUrl,
 } from '@/lib/chat/image-helpers'
+import { extractMediaPathsFromGatewayToolResults } from '@/lib/chat/gateway-message-content'
 import {
-  extractImagesFromGatewayMessage,
-  extractMediaPathsFromGatewayToolResults,
-  extractTextFromGatewayMessage,
-  extractThinkingFromGatewayMessage,
-} from '@/lib/chat/gateway-message-content'
+  initialChatSendStreamState,
+  reduceChatMessageStreamUpdate,
+  type ChatSendStreamUpdateInput,
+} from '@/lib/chat/chat-send-stream-reducer'
 import { computeTextDelta } from '@/lib/chat/stream-delta'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
@@ -370,9 +370,7 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder()
 
   let closed = false
-  let lastTextContent = ''
-  let lastThinkingContent = ''
-  let lastImageCount = 0
+  let streamState = initialChatSendStreamState()
   let finishStarted = false
   const pendingImageReads: Promise<void>[] = []
   // Resolved in the async IIFE below; used by fetchAndEmitImages + tool result handler
@@ -478,7 +476,7 @@ export async function POST(req: NextRequest) {
         agentId,
         chatSessionId,
         runStartedAt,
-        assistantText: lastTextContent,
+        assistantText: streamState.lastTextContent,
         containerId,
         workspacePath: instanceWorkspacePath,
         execWithOutput: dockerManager.execWithOutput.bind(dockerManager),
@@ -487,7 +485,7 @@ export async function POST(req: NextRequest) {
       })
       if (!result) return undefined
       const augmented = result.content
-      const previous = lastTextContent.trimEnd()
+      const previous = streamState.lastTextContent.trimEnd()
       const streamContent =
         previous && augmented.startsWith(previous)
           ? augmented.slice(previous.length)
@@ -496,7 +494,7 @@ export async function POST(req: NextRequest) {
             : augmented
       if (streamContent.trim()) {
         write({ type: 'text', content: streamContent })
-        lastTextContent = augmented
+        streamState = { ...streamState, lastTextContent: augmented }
         return augmented
       }
     } catch (err) {
@@ -560,6 +558,13 @@ export async function POST(req: NextRequest) {
     await cleanup()
   }
 
+  function applyChatStreamUpdate(input: ChatSendStreamUpdateInput) {
+    const update = reduceChatMessageStreamUpdate(streamState, input)
+    streamState = update.state
+    for (const event of update.events) write(event)
+    capturedImages.push(...update.capturedImages)
+  }
+
   const unsubChat = client.on('chat', (payload: unknown) => {
     const evt = payload as Record<string, unknown> | undefined
     if (!evt) return
@@ -568,40 +573,14 @@ export async function POST(req: NextRequest) {
     const state = evt.state as string
 
     if (state === 'delta') {
-      const textContent = extractTextFromGatewayMessage(evt.message)
-      const thinkingContent = extractThinkingFromGatewayMessage(evt.message)
-
-      if (thinkingContent && thinkingContent !== lastThinkingContent) {
-        const newThinking = thinkingContent.slice(lastThinkingContent.length)
-        if (newThinking) write({ type: 'thinking', content: newThinking })
-        lastThinkingContent = thinkingContent
-      }
-
-      // When preamble events already delivered the text incrementally,
-      // the chat delta is a duplicate. Skip it.
-      if (textContent !== lastTextContent) {
-        const tdelta = computeTextDelta({
-          deltaText: evt.deltaText as string | undefined,
-          replace: evt.replace as boolean | undefined,
-          cumulative: textContent,
-          lastEmitted: lastTextContent,
-        })
-        if (tdelta.text) write({ type: 'text', content: tdelta.text })
-        lastTextContent = tdelta.nextLast
-      }
-
-      // Capture inline image blocks if OpenClaw embeds them in chat events
-      const images = extractImagesFromGatewayMessage(evt.message)
-      for (let i = lastImageCount; i < images.length; i++) {
-        write({
-          type: 'image',
-          imageUrl: images[i].url,
-          mimeType: images[i].mimeType,
-          alt: images[i].alt,
-        })
-        capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
-      }
-      lastImageCount = images.length
+      applyChatStreamUpdate({
+        message: evt.message,
+        deltaText: evt.deltaText as string | undefined,
+        replace: evt.replace as boolean | undefined,
+        // When preamble events already delivered the text incrementally,
+        // the chat delta is a duplicate. Skip it.
+        skipDuplicateText: true,
+      })
     } else if (state === 'final') {
       // Chat final arrived — cancel the lifecycle fallback timer
       if (lifecycleEndTimer) {
@@ -612,35 +591,11 @@ export async function POST(req: NextRequest) {
       // isRunning=true during the (potentially slow) post-run cleanup.
       activeRuns.delete(chatSessionId)
 
-      const textContent = extractTextFromGatewayMessage(evt.message)
-      const thinkingContent = extractThinkingFromGatewayMessage(evt.message)
-
-      if (thinkingContent && thinkingContent !== lastThinkingContent) {
-        const newThinking = thinkingContent.slice(lastThinkingContent.length)
-        if (newThinking) write({ type: 'thinking', content: newThinking })
-      }
-
-      // v4: computeTextDelta handles deltaText/replace/cumulative-slice uniformly
-      const tdelta = computeTextDelta({
+      applyChatStreamUpdate({
+        message: evt.message,
         deltaText: evt.deltaText as string | undefined,
         replace: evt.replace as boolean | undefined,
-        cumulative: textContent,
-        lastEmitted: lastTextContent,
       })
-      if (tdelta.text) write({ type: 'text', content: tdelta.text })
-      lastTextContent = tdelta.nextLast
-
-      // Capture any remaining inline image blocks from final message
-      const images = extractImagesFromGatewayMessage(evt.message)
-      for (let i = lastImageCount; i < images.length; i++) {
-        write({
-          type: 'image',
-          imageUrl: images[i].url,
-          mimeType: images[i].mimeType,
-          alt: images[i].alt,
-        })
-        capturedImages.push({ imageUrl: images[i].url, mimeType: images[i].mimeType })
-      }
 
       // Scan chat.history for MEDIA paths in tool results and emit as image events.
       // Must run before 'done' so frontend displays images in the same streaming session.
@@ -720,10 +675,10 @@ export async function POST(req: NextRequest) {
         if (progressText) {
           const d = computeTextDelta({
             cumulative: progressText,
-            lastEmitted: lastTextContent,
+            lastEmitted: streamState.lastTextContent,
           })
           if (d.text) write({ type: 'text', content: d.text })
-          lastTextContent = d.nextLast
+          streamState = { ...streamState, lastTextContent: d.nextLast }
         }
         return
       }
