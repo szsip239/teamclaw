@@ -41,6 +41,11 @@ import {
   readImageAsDataUrl,
   readContainerImageAsDataUrl,
 } from '@/lib/chat/image-helpers'
+import {
+  extractImagesFromGatewayMessage,
+  extractTextFromGatewayMessage,
+  extractThinkingFromGatewayMessage,
+} from '@/lib/chat/gateway-message-content'
 import { computeTextDelta } from '@/lib/chat/stream-delta'
 import { activeRuns } from '@/lib/chat/active-runs'
 import type { ChatStreamEvent, ChatContentBlock } from '@/types/chat'
@@ -50,27 +55,6 @@ const PI_CONNECTION_LOST_ERROR = 'Pi agent connection lost'
 
 function encodeSSE(event: ChatStreamEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`
-}
-
-function extractTextFromMessage(message: unknown): string {
-  if (!message || typeof message !== 'object') return ''
-  const record = message as Record<string, unknown>
-  const content = record.content
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  const parts: string[] = []
-  for (const block of content) {
-    if (!block || typeof block !== 'object') continue
-    const rec = block as Record<string, unknown>
-    if (rec.type === 'text' && typeof rec.text === 'string') parts.push(rec.text)
-  }
-  return parts.join('\n').trim()
-}
-
-interface ExtractedImage {
-  url: string
-  mimeType?: string
-  alt?: string
 }
 
 interface GatewayAttachment {
@@ -97,51 +81,6 @@ function dedupeAttachments<T extends Pick<GatewayAttachment, 'mimeType' | 'conte
   }
 
   return unique
-}
-
-function extractImagesFromMessage(message: unknown): ExtractedImage[] {
-  if (!message || typeof message !== 'object') return []
-  const record = message as Record<string, unknown>
-  const content = record.content
-  if (!Array.isArray(content)) return []
-  const images: ExtractedImage[] = []
-  for (const block of content) {
-    if (!block || typeof block !== 'object') continue
-    const rec = block as Record<string, unknown>
-    if (rec.type !== 'image') continue
-
-    let imageUrl = ''
-    const source = rec.source as Record<string, unknown> | undefined
-    if (source?.type === 'base64' && typeof source.data === 'string') {
-      const mediaType = (source.media_type as string) || 'image/png'
-      imageUrl = `data:${mediaType};base64,${source.data}`
-    } else if (typeof rec.url === 'string') {
-      imageUrl = rec.url
-    }
-
-    if (imageUrl) {
-      images.push({
-        url: imageUrl,
-        mimeType: source?.media_type as string | undefined,
-        alt: typeof rec.alt === 'string' ? rec.alt : undefined,
-      })
-    }
-  }
-  return images
-}
-
-function extractThinkingFromMessage(message: unknown): string {
-  if (!message || typeof message !== 'object') return ''
-  const record = message as Record<string, unknown>
-  const content = record.content
-  if (!Array.isArray(content)) return ''
-  const parts: string[] = []
-  for (const block of content) {
-    if (!block || typeof block !== 'object') continue
-    const rec = block as Record<string, unknown>
-    if (rec.type === 'thinking' && typeof rec.thinking === 'string') parts.push(rec.thinking)
-  }
-  return parts.join('\n').trim()
 }
 
 /**
@@ -644,8 +583,8 @@ export async function POST(req: NextRequest) {
     const state = evt.state as string
 
     if (state === 'delta') {
-      const textContent = extractTextFromMessage(evt.message)
-      const thinkingContent = extractThinkingFromMessage(evt.message)
+      const textContent = extractTextFromGatewayMessage(evt.message)
+      const thinkingContent = extractThinkingFromGatewayMessage(evt.message)
 
       if (thinkingContent && thinkingContent !== lastThinkingContent) {
         const newThinking = thinkingContent.slice(lastThinkingContent.length)
@@ -667,7 +606,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Capture inline image blocks if OpenClaw embeds them in chat events
-      const images = extractImagesFromMessage(evt.message)
+      const images = extractImagesFromGatewayMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
         write({
           type: 'image',
@@ -688,8 +627,8 @@ export async function POST(req: NextRequest) {
       // isRunning=true during the (potentially slow) post-run cleanup.
       activeRuns.delete(chatSessionId)
 
-      const textContent = extractTextFromMessage(evt.message)
-      const thinkingContent = extractThinkingFromMessage(evt.message)
+      const textContent = extractTextFromGatewayMessage(evt.message)
+      const thinkingContent = extractThinkingFromGatewayMessage(evt.message)
 
       if (thinkingContent && thinkingContent !== lastThinkingContent) {
         const newThinking = thinkingContent.slice(lastThinkingContent.length)
@@ -707,7 +646,7 @@ export async function POST(req: NextRequest) {
       lastTextContent = tdelta.nextLast
 
       // Capture any remaining inline image blocks from final message
-      const images = extractImagesFromMessage(evt.message)
+      const images = extractImagesFromGatewayMessage(evt.message)
       for (let i = lastImageCount; i < images.length; i++) {
         write({
           type: 'image',
