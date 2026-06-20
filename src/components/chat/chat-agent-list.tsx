@@ -385,11 +385,13 @@ function AgentStatusIndicator({
   if (isRunning) {
     return (
       <span
-        className="relative ml-1 flex size-3 shrink-0 items-center justify-center"
+        className="ml-1 flex size-5 shrink-0 items-center justify-center"
         title={labels.running}
       >
-        <span className="absolute inset-0 rounded-full border border-green-300 border-t-green-600 animate-spin" />
-        <span className="size-1 rounded-full bg-green-500" />
+        <span className="relative flex size-3 items-center justify-center">
+          <span className="absolute inset-0 rounded-full border border-green-300 border-t-green-600 animate-spin" />
+          <span className="size-1 rounded-full bg-green-500" />
+        </span>
       </span>
     )
   }
@@ -397,10 +399,12 @@ function AgentStatusIndicator({
   if (activity?.state === "error") {
     return (
       <span
-        className="ml-1 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[8px] font-semibold leading-none text-white"
+        className="ml-1 flex size-5 shrink-0 items-center justify-center"
         title={labels.error}
       >
-        {activity.unreadCount}
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-semibold leading-none text-white">
+          {activity.unreadCount}
+        </span>
       </span>
     )
   }
@@ -408,22 +412,29 @@ function AgentStatusIndicator({
   if (activity?.state === "done") {
     return (
       <span
-        className="ml-1 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[8px] font-semibold leading-none text-white"
+        className="ml-1 flex size-5 shrink-0 items-center justify-center"
         title={labels.unread}
       >
-        {activity.unreadCount}
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-green-500 text-[8px] font-semibold leading-none text-white">
+          {activity.unreadCount}
+        </span>
       </span>
     )
   }
 
   if (isOnline) {
     return (
-      <span className="relative ml-1 flex size-1.5 shrink-0" title={labels.online}>
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-400 opacity-75" />
-        <span className="relative inline-flex size-1.5 rounded-full bg-green-500" />
+      <span
+        className="ml-1 flex size-5 shrink-0 items-center justify-center"
+        title={labels.online}
+      >
+        <span className="relative flex size-1.5">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-400 opacity-75" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-green-500" />
+        </span>
       </span>
     )
   }
 
-  return null
+  return <span className="ml-1 size-5 shrink-0" aria-hidden="true" />
 }

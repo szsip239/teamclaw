@@ -19,6 +19,7 @@ describe('ChatAgentList', () => {
     expect(source).toContain('chat.agentRunningStatus')
     expect(source).toContain('chat.agentUnreadStatus')
     expect(source).toContain('chat.agentErrorStatus')
+    expect(source).toContain('flex size-5 shrink-0 items-center justify-center')
   })
 
   it('does not infer running state from active chat sessions', () => {
