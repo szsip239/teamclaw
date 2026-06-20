@@ -19,7 +19,8 @@ describe('chat history runtime routing', () => {
     expect(source).not.toContain('`agent:${session.agentId}:tc:${session.userId}`')
   })
 
-  it.todo(
-    'trims snapshot/current overlap semantically when one side has raw canvas embed text and the other has an output download link',
-  )
+  it('trims snapshot/current overlap through the shared semantic helper', () => {
+    expect(source).toContain('trimCurrentMessagesOverlappingSnapshot(snapshots, currentMessages)')
+    expect(source).not.toContain('lastBatch[i].content === currentMessages[i].content')
+  })
 })

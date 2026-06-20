@@ -20,7 +20,7 @@ import {
 } from '@/lib/session-files/artifacts'
 import { buildChatRuntimeSessionKey, type ChatRuntime } from '@/lib/chat/runtime'
 import type { ChatHistoryMessage, ChatHistoryResult } from '@/types/gateway'
-import type { ChatToolCall, ChatContentBlock, ChatMessage } from '@/types/chat'
+import type { ChatToolCall, ChatContentBlock, ChatMessage, ChatSnapshotBatch } from '@/types/chat'
 import type { GatewayClient } from '@/lib/gateway/client'
 
 export const LIVE_HISTORY_LIMIT = 500
@@ -625,11 +625,28 @@ export async function archiveSession(
 
 // ─── Live messages (post-run auto-snapshot) ─────────────────────────
 
+interface TransformToLiveMessagesOptions {
+  idForMessage?: (context: {
+    message: ChatHistoryMessage
+    messageSeq: number
+    role: 'user' | 'assistant'
+  }) => string
+  fallbackCreatedAt?: (context: {
+    message: ChatHistoryMessage
+    messageSeq: number
+    role: 'user' | 'assistant'
+  }) => string
+  markNonDeliverableTerminal?: boolean
+}
+
 /**
- * Transform gateway raw messages to frontend ChatMessage[] format for liveMessages storage.
- * Similar to the history route's transformMessages but without file system image loading.
+ * Transform gateway raw messages to frontend ChatMessage[] format for display
+ * and liveMessages storage.
  */
-export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): ChatMessage[] {
+export function transformToLiveMessages(
+  rawMessages: ChatHistoryMessage[],
+  options: TransformToLiveMessagesOptions = {},
+): ChatMessage[] {
   const result: ChatMessage[] = []
   const fallbackBaseMs = Date.now()
   const { messages: displayRawMessages, terminalTaskError } =
@@ -637,12 +654,16 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
 
   for (const msg of filterRetryDuplicateUserMessages(displayRawMessages)) {
     const messageSeq = result.length
-    const createdAt =
-      gatewayMessageCreatedAt(msg) ?? new Date(fallbackBaseMs + messageSeq).toISOString()
     if (msg.role === 'user') {
+      const context = { message: msg, messageSeq, role: 'user' as const }
+      const id = options.idForMessage?.(context) ?? randomUUID()
+      const createdAt =
+        gatewayMessageCreatedAt(msg) ??
+        options.fallbackCreatedAt?.(context) ??
+        new Date(fallbackBaseMs + messageSeq).toISOString()
       const contentBlocks = extractContentBlocks(msg.content)
       result.push({
-        id: randomUUID(),
+        id,
         role: 'user',
         content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
         ...(contentBlocks ? { contentBlocks } : {}),
@@ -650,8 +671,14 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
         createdAt,
       })
     } else if (msg.role === 'assistant') {
+      const context = { message: msg, messageSeq, role: 'assistant' as const }
+      const id = options.idForMessage?.(context) ?? randomUUID()
+      const createdAt =
+        gatewayMessageCreatedAt(msg) ??
+        options.fallbackCreatedAt?.(context) ??
+        new Date(fallbackBaseMs + messageSeq).toISOString()
       const parsed = parseSessionMessage({
-        messageId: randomUUID(),
+        messageId: id,
         messageSeq,
         message: msg,
       })
@@ -670,7 +697,7 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
       }
 
       result.push({
-        id: randomUUID(),
+        id,
         role: 'assistant',
         content: text,
         ...(contentBlocks ? { contentBlocks } : {}),
@@ -711,7 +738,9 @@ export function transformToLiveMessages(rawMessages: ChatHistoryMessage[]): Chat
     }
   }
 
-  markNonDeliverableTerminalTurn(result)
+  if (options.markNonDeliverableTerminal ?? true) {
+    markNonDeliverableTerminalTurn(result)
+  }
   markTerminalTaskFailure(result, terminalTaskError)
   return result
 }
@@ -826,12 +855,39 @@ function messagesMatch(a: ChatMessage, b: ChatMessage): boolean {
   const aProcessOnly = a.stopReason === 'toolUse' || (a.toolCalls?.length ?? 0) > 0
   const bProcessOnly = b.stopReason === 'toolUse' || (b.toolCalls?.length ?? 0) > 0
   if ((!aComparable || !bComparable) && (aProcessOnly || bProcessOnly)) return false
+  if (!aComparable || !bComparable) return false
   if (aComparable === bComparable) return true
 
   return (
     isLocalArtifactAugmentedContent(a.content, b.content) ||
     isLocalArtifactAugmentedContent(b.content, a.content)
   )
+}
+
+export function chatMessagesSemanticallyMatch(a: ChatMessage, b: ChatMessage): boolean {
+  return messagesMatch(a, b)
+}
+
+export function trimCurrentMessagesOverlappingSnapshot(
+  snapshots: ChatSnapshotBatch[],
+  currentMessages: ChatMessage[],
+): ChatMessage[] {
+  if (snapshots.length === 0 || currentMessages.length === 0) return currentMessages
+
+  const lastBatch = snapshots[snapshots.length - 1].messages
+  let overlap = 0
+  for (let i = 0; i < Math.min(lastBatch.length, currentMessages.length); i++) {
+    if (messagesMatch(lastBatch[i], currentMessages[i])) {
+      overlap++
+    } else {
+      break
+    }
+  }
+
+  if (overlap === lastBatch.length && overlap > 0) {
+    return currentMessages.slice(overlap)
+  }
+  return currentMessages
 }
 
 function validMessageCreatedAt(createdAt: string | undefined): boolean {

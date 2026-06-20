@@ -2,27 +2,17 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param } from '@/lib/middleware/auth'
 import {
-  extractText,
-  extractThinking,
-  extractContentBlocks,
-  stripUserMetadata,
-  stripFinalTags,
-  splitThinkingFallback,
   mergeExistingContentBlocks,
   mergeLiveMessagesAppendOnly,
   mergeToolInputs,
   shouldUseLiveMessagesFallback,
-  gatewayMessageCreatedAt,
-  filterRetryDuplicateUserMessages,
-  filterOpenClawInternalContextMessages,
   markNonDeliverableTerminalTurn,
-  markTerminalTaskFailure,
+  transformToLiveMessages,
+  trimCurrentMessagesOverlappingSnapshot,
 } from '@/lib/chat/snapshot-helpers'
 import { computeImageId } from '@/lib/chat/image-helpers'
-import { stripRagContextForDisplay } from '@/lib/chat/rag-user-message'
 import { activeRuns } from '@/lib/chat/active-runs'
 import { imageBlockDisplayKey, imageIdFromHistoryUrl } from '@/lib/chat/image-blocks'
-import { parseSessionMessage } from '@/lib/chat/session-message'
 import { sanitizeOutputArtifactLinks } from '@/lib/session-files/artifacts'
 import { buildChatRuntimeSessionKey, fromDbChatRuntime } from '@/lib/chat/runtime'
 import { getRuntimeGatewayClient } from '@/lib/chat/runtime-gateway'
@@ -40,136 +30,16 @@ import type {
   ChatContentBlock,
 } from '@/types/chat'
 
-/**
- * Strip MEDIA:/Image saved:/file:/// references from assistant text.
- * These paths are only meaningful on the server — the actual images
- * are extracted separately and delivered as contentBlocks.
- */
-function stripMediaReferences(text: string): string {
-  return text
-    .replace(/\n*MEDIA:\s*\S+/gi, '')
-    .replace(/\n*Image saved:\s*\S+/gi, '')
-    .replace(/!\[[^\]]*\]\(file:\/\/\/[^)]+\)/gi, '')
-    .replace(/file:\/\/\/\S+?\.(?:png|jpg|jpeg|gif|webp|bmp)(?=[)\s\]"]|$)/gi, '')
-    .trim()
-}
-
-function hasValue(value: unknown): boolean {
-  return value != null && value !== ''
-}
-
-function completeToolCall(
-  toolCalls: ChatToolCall[] | undefined,
-  result: ChatToolCall,
-): ChatToolCall[] {
-  const next = [...(toolCalls ?? [])]
-  for (let i = next.length - 1; i >= 0; i--) {
-    if (next[i].toolName !== result.toolName) continue
-    if (next[i].toolOutput != null) continue
-    next[i] = {
-      ...next[i],
-      toolInput: hasValue(next[i].toolInput) ? next[i].toolInput : result.toolInput,
-      toolOutput: result.toolOutput,
-    }
-    return next
-  }
-  next.push(result)
-  return next
-}
-
 function transformMessages(raw: ChatHistoryMessage[]): ChatMessage[] {
-  const result: ChatMessage[] = []
-  const { messages: displayRawMessages, terminalTaskError } =
-    filterOpenClawInternalContextMessages(raw)
   // Use index-based IDs so the same message gets the same ID across polls.
   // Random UUIDs would change every poll → React key changes → component
   // unmount/remount → collapsible sections (thinking, tools) lose their
   // expanded state.
-  let orderIndex = 0
-
-  for (const msg of filterRetryDuplicateUserMessages(displayRawMessages)) {
-    if (msg.role === 'user') {
-      const contentBlocks = extractContentBlocks(msg.content)
-      const id = `current-${orderIndex}`
-      result.push({
-        id,
-        role: 'user',
-        content: stripRagContextForDisplay(stripUserMetadata(extractText(msg.content))),
-        ...(contentBlocks ? { contentBlocks } : {}),
-        messageSeq: orderIndex,
-        createdAt: gatewayMessageCreatedAt(msg) ?? '',
-      })
-      orderIndex++
-    } else if (msg.role === 'assistant') {
-      const id = `current-${orderIndex}`
-      const messageSeq = orderIndex
-      const parsed = parseSessionMessage({
-        messageId: id,
-        messageSeq,
-        message: msg,
-      })
-      const rawText = extractText(msg.content) || parsed.text
-      let text = sanitizeOutputArtifactLinks(stripFinalTags(stripMediaReferences(rawText)))
-      let thinking = parsed.thinking ?? extractThinking(msg.content)
-      const contentBlocks = extractContentBlocks(msg.content)
-
-      if (!text && thinking) {
-        const split = splitThinkingFallback(thinking)
-        if (split.text) {
-          text = split.text
-          thinking = split.thinking
-        }
-      }
-
-      result.push({
-        id,
-        role: 'assistant',
-        content: text,
-        ...(contentBlocks ? { contentBlocks } : {}),
-        ...(thinking ? { thinking } : {}),
-        ...(parsed.toolCalls ? { toolCalls: parsed.toolCalls } : {}),
-        ...(parsed.stopReason
-          ? {
-              messageSeq: parsed.messageSeq,
-              stopReason: parsed.stopReason,
-              isFinal: parsed.isFinal,
-            }
-          : { messageSeq }),
-        createdAt: gatewayMessageCreatedAt(msg) ?? '',
-      })
-      orderIndex++
-    } else if (msg.role === 'toolResult') {
-      const last = result[result.length - 1]
-      if (last?.role === 'assistant') {
-        const outputText = extractText(msg.content)
-        const tc: ChatToolCall = {
-          toolName: msg.toolName ?? 'tool',
-          toolInput: null,
-          toolOutput: outputText,
-        }
-        last.toolCalls = completeToolCall(last.toolCalls, tc)
-      }
-    }
-  }
-
-  // Post-process: assistant messages that have tool calls are intermediate
-  // process narration (e.g. "Let me calculate that"), not final answers.
-  // Move their text content into the thinking field so it renders in the
-  // collapsible thinking block instead of as prominent chat text.
-  for (const msg of result) {
-    if (
-      msg.role === 'assistant' &&
-      msg.stopReason == null &&
-      msg.toolCalls?.length &&
-      msg.content
-    ) {
-      msg.thinking = msg.content + (msg.thinking ? '\n\n' + msg.thinking : '')
-      msg.content = ''
-    }
-  }
-
-  markTerminalTaskFailure(result, terminalTaskError)
-  return result
+  return transformToLiveMessages(raw, {
+    idForMessage: ({ messageSeq }) => `current-${messageSeq}`,
+    fallbackCreatedAt: () => '',
+    markNonDeliverableTerminal: false,
+  })
 }
 
 /**
@@ -438,26 +308,9 @@ export const GET = withAuth(
     }
     currentMessages = sortChatMessagesForDisplay(currentMessages)
 
-    // Deduplicate: if sessions.delete failed during clear-context,
-    // the gateway still has old messages that were already snapshotted.
-    // Detect and trim the overlapping prefix from currentMessages.
-    if (snapshots.length > 0 && currentMessages.length > 0) {
-      const lastBatch = snapshots[snapshots.length - 1].messages
-      let overlap = 0
-      for (let i = 0; i < Math.min(lastBatch.length, currentMessages.length); i++) {
-        if (
-          lastBatch[i].role === currentMessages[i].role &&
-          lastBatch[i].content === currentMessages[i].content
-        ) {
-          overlap++
-        } else {
-          break
-        }
-      }
-      if (overlap === lastBatch.length && overlap > 0) {
-        currentMessages = currentMessages.slice(overlap)
-      }
-    }
+    // Deduplicate: if sessions.delete failed during clear-context, the gateway
+    // can still return old messages that were already snapshotted.
+    currentMessages = trimCurrentMessagesOverlappingSnapshot(snapshots, currentMessages)
 
     replaceInlineImagesBySource(currentMessages, conversationGroupId)
     for (const batch of snapshots) {

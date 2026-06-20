@@ -42,11 +42,13 @@ vi.mock('@/lib/chat/image-helpers', () => ({
 import {
   appendLiveMessages,
   archiveSession,
+  chatMessagesSemanticallyMatch,
   MAX_LIVE_MESSAGES,
   mergeLiveMessagesAppendOnly,
   mergeToolCalls,
   saveLiveSnapshot,
   shouldUseLiveMessagesFallback,
+  trimCurrentMessagesOverlappingSnapshot,
   transformToLiveMessages,
 } from './snapshot-helpers'
 
@@ -398,6 +400,65 @@ describe('live snapshot append-only merge', () => {
     expect(merged[1].content).toContain('[google-okf-news.html](output/google-okf-news.html)')
     expect(merged[3].content).toBe('')
     expect(merged[3].toolCalls?.[0].toolName).toBe('session_status')
+  })
+
+  it('does not treat media-only assistant text as an empty semantic match', () => {
+    expect(
+      chatMessagesSemanticallyMatch(
+        chatMessage(
+          'assistant',
+          '[embed ref="worldcup-2026-standings" title="2026 FIFA World Cup" height="900" /]',
+        ),
+        chatMessage('assistant', ''),
+      ),
+    ).toBe(false)
+  })
+
+  it('trims current messages when the latest snapshot already has the normalized artifact link', () => {
+    const currentMessages = [
+      chatMessage('user', '做一张世界杯可视化表'),
+      chatMessage(
+        'assistant',
+        [
+          '为您做好了 2026 世界杯出线状态可视化表，48 队 12 组完整版：',
+          '',
+          '[embed ref="worldcup-2026-standings" title="2026 FIFA 世界杯 · 出线状态表" height="900" /]',
+        ].join('\n'),
+      ),
+    ]
+    const snapshots = [
+      {
+        batchId: 'snapshot-1',
+        createdAt: '2026-06-20T00:00:00.000Z',
+        messages: [
+          chatMessage('user', '做一张世界杯可视化表'),
+          chatMessage(
+            'assistant',
+            [
+              '为您做好了 2026 世界杯出线状态可视化表，48 队 12 组完整版：',
+              '',
+              '[worldcup-2026-standings.html](output/worldcup-2026-standings.html)',
+            ].join('\n'),
+          ),
+        ],
+      },
+    ]
+
+    expect(trimCurrentMessagesOverlappingSnapshot(snapshots, currentMessages)).toEqual([])
+  })
+
+  it('supports history-style stable message ids without terminal failure marking', () => {
+    const messages = transformToLiveMessages([user('hello'), assistant('')], {
+      idForMessage: ({ messageSeq }) => `current-${messageSeq}`,
+      fallbackCreatedAt: () => '',
+      markNonDeliverableTerminal: false,
+    })
+
+    expect(messages).toMatchObject([
+      { id: 'current-0', role: 'user', content: 'hello', createdAt: '' },
+      { id: 'current-1', role: 'assistant', content: '', createdAt: '' },
+    ])
+    expect(messages[1].error).toBeUndefined()
   })
 
   it('fetches live snapshots with the unified 500 history limit', async () => {
