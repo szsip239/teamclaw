@@ -83,6 +83,7 @@ function readSessionModelRef(session: unknown): string | undefined {
   if (!isRecord(session)) return undefined
   const provider = readString(session.modelProvider)
   const model = readString(session.model)
+  if (provider === 'openclaw' && model === 'gateway-injected') return undefined
   return joinModelRef(provider, model)
 }
 

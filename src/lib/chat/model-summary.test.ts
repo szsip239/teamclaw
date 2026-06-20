@@ -56,6 +56,23 @@ describe('chat model summary', () => {
     })
   })
 
+  it('ignores OpenClaw gateway-injected session model metadata', () => {
+    expect(
+      resolveOpenClawChatModelSummary({
+        config,
+        agentId: 'main',
+        session: {
+          modelProvider: 'openclaw',
+          model: 'gateway-injected',
+        },
+      }),
+    ).toEqual({
+      ref: 'openai/gpt-primary',
+      label: 'GPT Primary',
+      source: 'default',
+    })
+  })
+
   it('uses an agent model before the default model', () => {
     expect(
       resolveOpenClawChatModelSummary({
