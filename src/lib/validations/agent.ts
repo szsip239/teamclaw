@@ -39,6 +39,7 @@ const agentSessionConfigSchema = z.object({
 // ─── Agent config update ────────────────────────────────────────────
 
 export const updateAgentConfigSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
   workspace: z.string().optional(),
   models: agentModelConfigSchema,
   sandbox: agentSandboxConfigSchema,

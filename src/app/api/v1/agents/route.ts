@@ -85,6 +85,11 @@ export const GET = withAuth(
 
           const { defaults, list } = extractAgentsConfig(configResult.config)
           const configIds = new Set(list.map((a) => a.id))
+          const configNameMap = new Map(
+            list
+              .filter((a) => typeof a.name === 'string' && a.name.trim())
+              .map((a) => [a.id, a.name!.trim()]),
+          )
 
           // Collect all agent IDs from this instance (config + live)
           const allAgentIds = new Set<string>()
@@ -123,7 +128,7 @@ export const GET = withAuth(
               id: entry.id,
               instanceId,
               instanceName: nameMap.get(instanceId) || instanceId,
-              name: liveNameMap.get(entry.id) || entry.id,
+              name: configNameMap.get(entry.id) || liveNameMap.get(entry.id) || entry.id,
               workspace: resolveWorkspacePath(entry, defaults),
               isDefault: defaultId ? entry.id === defaultId : entry.default === true,
               models: entry.models ?? defaults.models,
@@ -146,7 +151,7 @@ export const GET = withAuth(
                 id: live.id,
                 instanceId,
                 instanceName: nameMap.get(instanceId) || instanceId,
-                name: live.name || live.id,
+                name: configNameMap.get(live.id) || live.name || live.id,
                 workspace:
                   live.workspace ||
                   ((defaults as Record<string, unknown>).workspace as string) ||

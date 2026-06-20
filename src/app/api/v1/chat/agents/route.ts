@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission } from '@/lib/middleware/auth'
 import { registry, ensureRegistryInitialized } from '@/lib/gateway/registry'
-import { autoRegisterAgents, isAgentVisible } from '@/lib/agents/helpers'
+import { autoRegisterAgents, extractAgentsConfig, isAgentVisible } from '@/lib/agents/helpers'
 import { instanceSupportsPiRuntime } from '@/lib/chat/runtime'
 import type { ChatAgentInfo } from '@/types/chat'
 import type { AgentCategory } from '@/types/agent'
@@ -44,7 +44,9 @@ export const GET = withAuth(
       select: { id: true, name: true, containerId: true, workspacePath: true, dockerConfig: true },
     })
     const nameMap = new Map(instances.map((i) => [i.id, i.name]))
-    const fileAccessMap = new Map(instances.map((i) => [i.id, !!(i.containerId || i.workspacePath)]))
+    const fileAccessMap = new Map(
+      instances.map((i) => [i.id, !!(i.containerId || i.workspacePath)]),
+    )
     const piRuntimeMap = new Map(
       instances.map((i) => [i.id, instanceSupportsPiRuntime(i.dockerConfig)]),
     )
@@ -56,7 +58,17 @@ export const GET = withAuth(
         if (!adapter || !client) return
 
         try {
-          const { agents: liveAgents } = await adapter.getAgents(client)
+          const [agentsResult, configResult] = await Promise.all([
+            adapter.getAgents(client),
+            adapter.getConfig(client).catch(() => ({ config: {} as Record<string, unknown> })),
+          ])
+          const { agents: liveAgents } = agentsResult
+          const { list } = extractAgentsConfig(configResult.config)
+          const configNameMap = new Map(
+            list
+              .filter((a) => typeof a.name === 'string' && a.name.trim())
+              .map((a) => [a.id, a.name!.trim()]),
+          )
           const agentIds = liveAgents.map((a) => a.id)
 
           // Auto-register unknown agents
@@ -81,11 +93,9 @@ export const GET = withAuth(
               instanceId,
               instanceName: nameMap.get(instanceId) || instanceId,
               agentId: agent.id,
-              agentName: agent.name || agent.id,
+              agentName: configNameMap.get(agent.id) || agent.name || agent.id,
               status: agent.status || 'active',
-              availableRuntimes: piRuntimeMap.get(instanceId)
-                ? ['openclaw', 'pi']
-                : ['openclaw'],
+              availableRuntimes: piRuntimeMap.get(instanceId) ? ['openclaw', 'pi'] : ['openclaw'],
               model: agent.model,
               category: (meta?.category as AgentCategory) ?? 'DEFAULT',
               hasContainer: fileAccessMap.get(instanceId) ?? false,
@@ -98,9 +108,9 @@ export const GET = withAuth(
     )
 
     // Stable sort: instance name → agent name (alphabetical)
-    agents.sort((a, b) =>
-      a.instanceName.localeCompare(b.instanceName) ||
-      a.agentName.localeCompare(b.agentName),
+    agents.sort(
+      (a, b) =>
+        a.instanceName.localeCompare(b.instanceName) || a.agentName.localeCompare(b.agentName),
     )
 
     return NextResponse.json({ agents })

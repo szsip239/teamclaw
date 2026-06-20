@@ -153,10 +153,20 @@ export function ChatMain() {
             updates.pendingQueuedRuns = newPending
             if (newPending === 0 && !historyData.isRunning) {
               setRemoteStreaming(false)
+              const selectedAgent = useChatStore.getState().selectedAgent
+              if (selectedAgent) {
+                useChatStore
+                  .getState()
+                  .markAgentDone(selectedAgent.instanceId, selectedAgent.agentId)
+              }
             }
           } else if (latestTurnComplete && queuedMessagesRepresented) {
             updates.pendingQueuedRuns = 0
             setRemoteStreaming(false)
+            const selectedAgent = useChatStore.getState().selectedAgent
+            if (selectedAgent) {
+              useChatStore.getState().markAgentDone(selectedAgent.instanceId, selectedAgent.agentId)
+            }
           }
           if (Object.keys(updates).length > 0) {
             useChatStore.setState(updates)

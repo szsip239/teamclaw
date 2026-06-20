@@ -99,7 +99,7 @@ export async function getInstanceWithContainer(instanceId: string) {
 
 /** Known agent config fields accepted by OpenClaw's config.patch */
 const KNOWN_AGENT_FIELDS = new Set([
-  'id', 'workspace', 'agentDir', 'profile', 'default',
+  'id', 'name', 'workspace', 'agentDir', 'profile', 'default',
   'models', 'sandbox', 'tools', 'subagents', 'session', 'bindings',
 ])
 

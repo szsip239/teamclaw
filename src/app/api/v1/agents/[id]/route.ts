@@ -14,7 +14,7 @@ import {
   isAgentVisible,
 } from '@/lib/agents/helpers'
 import { dockerManager } from '@/lib/docker/manager'
-import type { GatewayAgent, AgentsListResult } from '@/types/gateway'
+import type { AgentConfigEntry, GatewayAgent, AgentsListResult } from '@/types/gateway'
 
 // GET /api/v1/agents/[id] — Agent detail (id = instanceId:agentId)
 export const GET = withAuth(
@@ -90,11 +90,16 @@ export const GET = withAuth(
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     }
 
+    const configName =
+      typeof agentConfig?.name === 'string' && agentConfig.name.trim()
+        ? agentConfig.name.trim()
+        : undefined
+
     return NextResponse.json({
       id: agentId,
       instanceId,
       instanceName: instance.name,
-      name: live?.name || agentId,
+      name: configName || live?.name || agentId,
       workspace,
       isDefault: defaultId ? agentId === defaultId : (agentConfig ? agentConfig.default === true : false),
       models: agentConfig?.models ?? defaults.models,
@@ -140,21 +145,60 @@ export const PUT = withAuth(
       const { list } = extractAgentsConfig(config)
 
       const agentIdx = list.findIndex((a) => a.id === agentId)
+      let updated: AgentConfigEntry
       if (agentIdx === -1) {
-        return NextResponse.json({ error: `Agent "${agentId}" not found` }, { status: 404 })
+        const liveAgents = await adapter
+          .getAgents(client)
+          .then((result) => result.agents)
+          .catch((): GatewayAgent[] => [])
+        if (!liveAgents.some((a) => a.id === agentId)) {
+          return NextResponse.json({ error: `Agent "${agentId}" not found` }, { status: 404 })
+        }
+        updated = { id: agentId }
+      } else {
+        updated = { ...list[agentIdx] }
       }
 
       // Merge updates into the agent entry
-      const updated = { ...list[agentIdx] }
+      if (body.name !== undefined) updated.name = body.name
       if (body.workspace !== undefined) updated.workspace = body.workspace
-      if (body.models !== undefined) updated.models = { ...updated.models, ...body.models }
-      if (body.sandbox !== undefined) updated.sandbox = { ...updated.sandbox, ...body.sandbox }
-      if (body.tools !== undefined) updated.tools = { ...updated.tools, ...body.tools }
-      if (body.subagents !== undefined) updated.subagents = { ...updated.subagents, ...body.subagents }
-      if (body.session !== undefined) updated.session = { ...updated.session, ...body.session }
+      if (body.models !== undefined) {
+        updated.models = {
+          ...((updated.models as Record<string, unknown> | undefined) ?? {}),
+          ...body.models,
+        }
+      }
+      if (body.sandbox !== undefined) {
+        updated.sandbox = {
+          ...((updated.sandbox as Record<string, unknown> | undefined) ?? {}),
+          ...body.sandbox,
+        }
+      }
+      if (body.tools !== undefined) {
+        updated.tools = {
+          ...((updated.tools as Record<string, unknown> | undefined) ?? {}),
+          ...body.tools,
+        }
+      }
+      if (body.subagents !== undefined) {
+        updated.subagents = {
+          ...((updated.subagents as Record<string, unknown> | undefined) ?? {}),
+          ...body.subagents,
+        }
+      }
+      if (body.session !== undefined) {
+        updated.session = {
+          ...((updated.session as Record<string, unknown> | undefined) ?? {}),
+          ...body.session,
+        }
+      }
 
       const updatedList = [...list]
-      updatedList[agentIdx] = updated
+      if (agentIdx === -1) {
+        updatedList.push(updated)
+      } else {
+        updatedList[agentIdx] = updated
+      }
 
       // OpenClaw merges agents.list arrays (union, not replace) in config.patch.
       // Two-step: null the key to clear it, then re-fetch hash and set the new list.
@@ -162,7 +206,11 @@ export const PUT = withAuth(
       try {
         await adapter.patchConfig(client, { agents: { list: null } }, hash)
         const freshConfig = await adapter.getConfig(client)
-        await adapter.patchConfig(client, { agents: { list: updatedList.map(sanitizeAgentEntry) } }, freshConfig.hash)
+        await adapter.patchConfig(
+          client,
+          { agents: { list: updatedList.map(sanitizeAgentEntry) } },
+          freshConfig.hash,
+        )
       } catch (err) {
         return NextResponse.json(
           { error: `Configuration update failed:${(err as Error).message}` },
@@ -233,7 +281,6 @@ export const DELETE = withAuth(
         { status: 500 },
       )
     }
-
 
     // Delete agent workspace directory (only if agent-specific, not the shared default)
     // Best-effort: don't fail the overall deletion if workspace cleanup fails

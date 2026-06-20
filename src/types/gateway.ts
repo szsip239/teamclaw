@@ -114,6 +114,7 @@ export interface AgentDefaults {
 /** agents.list[] entry — per-agent config */
 export interface AgentConfigEntry {
   id: string
+  name?: string
   workspace?: string
   agentDir?: string
   profile?: string

@@ -1,8 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { Bot, Loader2, Plus, Globe, Building2, UserCircle } from "lucide-react"
+import { Bot, Loader2, Plus, Globe, Building2, UserCircle, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Dialog,
   DialogContent,
@@ -14,9 +16,12 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { useChatAgents, useChatSessions, useNewConversation, chatKeys } from "@/hooks/use-chat"
 import { useChatStore } from "@/stores/chat-store"
+import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { api } from "@/lib/api-client"
 import { ensureChatRuntimeForAgent } from "@/lib/chat/runtime-options"
+import { chatAgentActivityKey } from "@/stores/chat-store"
 import { useT } from "@/stores/language-store"
 import type { ChatAgentInfo } from "@/types/chat"
 
@@ -28,6 +33,7 @@ const CATEGORY_ICONS = {
 
 export function ChatAgentList() {
   const t = useT()
+  const currentUser = useAuthStore((s) => s.user)
   const { data: agents, isLoading } = useChatAgents()
   const { data: sessions } = useChatSessions()
   const selectedAgent = useChatStore((s) => s.selectedAgent)
@@ -35,14 +41,19 @@ export function ChatAgentList() {
   const setSelectedAgent = useChatStore((s) => s.setSelectedAgent)
   const setSelectedRuntime = useChatStore((s) => s.setSelectedRuntime)
   const clearMessages = useChatStore((s) => s.clearMessages)
+  const agentActivities = useChatStore((s) => s.agentActivities)
+  const clearAgentActivity = useChatStore((s) => s.clearAgentActivity)
   const qc = useQueryClient()
   const newConversation = useNewConversation()
   const [confirmAgent, setConfirmAgent] = useState<ChatAgentInfo | null>(null)
+  const [renameAgent, setRenameAgent] = useState<ChatAgentInfo | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [renaming, setRenaming] = useState(false)
+  const canRenameAgents = currentUser?.role === "SYSTEM_ADMIN"
 
   function handleSelect(agent: ChatAgentInfo) {
     const isSameAgent =
-      selectedAgent?.instanceId === agent.instanceId &&
-      selectedAgent?.agentId === agent.agentId
+      selectedAgent?.instanceId === agent.instanceId && selectedAgent?.agentId === agent.agentId
 
     if (!isSameAgent) {
       clearMessages()
@@ -53,6 +64,51 @@ export function ChatAgentList() {
     }
     qc.invalidateQueries({ queryKey: chatKeys.sessions() })
     setSelectedAgent(agent)
+    clearAgentActivity(agent.instanceId, agent.agentId)
+  }
+
+  function openRenameDialog(agent: ChatAgentInfo) {
+    setRenameAgent(agent)
+    setRenameValue(agent.agentName)
+  }
+
+  async function handleRenameSubmit() {
+    if (!renameAgent) return
+    const trimmed = renameValue.trim()
+    if (!trimmed || trimmed === renameAgent.agentName) return
+    setRenaming(true)
+    try {
+      await api.put<{ status: string; agentId: string }>(
+        `/api/v1/agents/${encodeURIComponent(`${renameAgent.instanceId}:${renameAgent.agentId}`)}`,
+        { name: trimmed },
+      )
+      qc.setQueryData<{ agents: ChatAgentInfo[] }>(chatKeys.agents(), (old) =>
+        old
+          ? {
+              agents: old.agents.map((agent) =>
+                agent.instanceId === renameAgent.instanceId && agent.agentId === renameAgent.agentId
+                  ? { ...agent, agentName: trimmed }
+                  : agent,
+              ),
+            }
+          : old,
+      )
+      if (
+        selectedAgent?.instanceId === renameAgent.instanceId &&
+        selectedAgent.agentId === renameAgent.agentId
+      ) {
+        setSelectedAgent({ ...selectedAgent, agentName: trimmed })
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.agents() })
+      qc.invalidateQueries({ queryKey: chatKeys.sessions() })
+      setRenameAgent(null)
+      toast.success(t("chat.agentRenamed"))
+    } catch (err) {
+      const data = (err as { data?: { error?: string } })?.data
+      toast.error(data?.error ?? t("chat.agentRenameFailed"))
+    } finally {
+      setRenaming(false)
+    }
   }
 
   function handleNewConversation() {
@@ -67,10 +123,10 @@ export function ChatAgentList() {
           setSelectedRuntime(runtime)
           useChatStore.getState().setActiveSessionId(data.session.id)
           setConfirmAgent(null)
-          toast.success(t('chat.newConversationCreated'))
+          toast.success(t("chat.newConversationCreated"))
         },
         onError: () => {
-          toast.error(t('chat.newConversationFailed'))
+          toast.error(t("chat.newConversationFailed"))
         },
       },
     )
@@ -85,11 +141,7 @@ export function ChatAgentList() {
   }
 
   if (!agents || agents.length === 0) {
-    return (
-      <p className="text-muted-foreground px-2 py-3 text-xs">
-        {t('chat.noAgents')}
-      </p>
-    )
+    return <p className="text-muted-foreground px-2 py-3 text-xs">{t("chat.noAgents")}</p>
   }
 
   // Group agents by instance
@@ -99,6 +151,11 @@ export function ChatAgentList() {
     list.push(agent)
     grouped.set(agent.instanceId, list)
   }
+  const runningAgentKeys = new Set(
+    (sessions ?? [])
+      .filter((session) => session.isActive)
+      .map((session) => chatAgentActivityKey(session.instanceId, session.agentId)),
+  )
 
   return (
     <>
@@ -112,44 +169,84 @@ export function ChatAgentList() {
               const isSelected =
                 selectedAgent?.instanceId === agent.instanceId &&
                 selectedAgent?.agentId === agent.agentId
+              const activityKey = chatAgentActivityKey(agent.instanceId, agent.agentId)
+              const activity = agentActivities[activityKey]
+              const isRunning = activity?.state === "running" || runningAgentKeys.has(activityKey)
               return (
                 <div
                   key={`${agent.instanceId}:${agent.agentId}`}
                   role="button"
                   tabIndex={0}
                   className={cn(
-                    "flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                    "group flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                     isSelected
                       ? "bg-secondary text-secondary-foreground"
                       : "hover:bg-accent hover:text-accent-foreground",
                   )}
                   onClick={() => handleSelect(agent)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleSelect(agent) }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") handleSelect(agent)
+                  }}
                 >
                   <Bot className="size-4 shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{agent.agentName}</span>
-                  {agent.category && agent.category !== "DEFAULT" && (() => {
-                    const Icon = CATEGORY_ICONS[agent.category]
-                    return <span className="shrink-0" aria-label={agent.category === "DEPARTMENT" ? t('chat.department') : t('chat.personal')}><Icon className="size-3 text-muted-foreground/60" /></span>
-                  })()}
-                  {agent.status === "active" && (
-                    <span className="relative ml-1 flex size-1.5 shrink-0" title={t('chat.onlineStatus')}>
-                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-400 opacity-75" />
-                      <span className="relative inline-flex size-1.5 rounded-full bg-green-500" />
-                    </span>
+                  {agent.category &&
+                    agent.category !== "DEFAULT" &&
+                    (() => {
+                      const Icon = CATEGORY_ICONS[agent.category]
+                      return (
+                        <span
+                          className="shrink-0"
+                          aria-label={
+                            agent.category === "DEPARTMENT"
+                              ? t("chat.department")
+                              : t("chat.personal")
+                          }
+                        >
+                          <Icon className="size-3 text-muted-foreground/60" />
+                        </span>
+                      )
+                    })()}
+                  <AgentStatusIndicator
+                    isOnline={agent.status === "active"}
+                    isRunning={isRunning}
+                    activity={activity}
+                    labels={{
+                      online: t("chat.onlineStatus"),
+                      running: t("chat.agentRunningStatus"),
+                      unread: t("chat.agentUnreadStatus"),
+                      error: t("chat.agentErrorStatus"),
+                    }}
+                  />
+                  {canRenameAgents && (
+                    <button
+                      type="button"
+                      className={cn(
+                        "ml-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-gray-400 transition-opacity hover:bg-gray-100 hover:text-gray-700 focus-visible:opacity-100",
+                        isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                      )}
+                      title={t("chat.renameAgent")}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openRenameDialog(agent)
+                      }}
+                    >
+                      <Pencil className="size-3" />
+                    </button>
                   )}
-                  <span
-                    role="button"
-                    tabIndex={-1}
+                  <button
+                    type="button"
                     className="ml-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                    title={t('chat.newConversation')}
+                    title={t("chat.newConversation")}
+                    onKeyDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation()
                       setConfirmAgent(agent)
                     }}
                   >
-                    +
-                  </span>
+                    <Plus className="size-3" />
+                  </button>
                 </div>
               )
             })}
@@ -160,27 +257,120 @@ export function ChatAgentList() {
       <Dialog open={!!confirmAgent} onOpenChange={(open) => !open && setConfirmAgent(null)}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>{t('chat.newConversationTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('chat.newConversationDesc')}
-            </DialogDescription>
+            <DialogTitle>{t("chat.newConversationTitle")}</DialogTitle>
+            <DialogDescription>{t("chat.newConversationDesc")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmAgent(null)}>
-              {t('cancel')}
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleNewConversation} disabled={newConversation.isPending}>
+              {newConversation.isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
+              {t("chat.confirmCreate")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!renameAgent} onOpenChange={(open) => !open && setRenameAgent(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t("chat.renameAgentTitle")}</DialogTitle>
+            <DialogDescription>
+              {renameAgent
+                ? t("chat.renameAgentDesc", { name: renameAgent.agentName })
+                : t("chat.renameAgentDesc", { name: "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label className="text-[13px] font-medium">{t("chat.agentName")}</Label>
+            <Input
+              value={renameValue}
+              maxLength={80}
+              placeholder={t("chat.agentNamePlaceholder")}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  void handleRenameSubmit()
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameAgent(null)} disabled={renaming}>
+              {t("cancel")}
             </Button>
             <Button
-              onClick={handleNewConversation}
-              disabled={newConversation.isPending}
+              onClick={handleRenameSubmit}
+              disabled={
+                renaming || !renameValue.trim() || renameValue.trim() === renameAgent?.agentName
+              }
             >
-              {newConversation.isPending && (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              )}
-              {t('chat.confirmCreate')}
+              {renaming && <Loader2 className="mr-2 size-4 animate-spin" />}
+              {t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   )
+}
+
+function AgentStatusIndicator({
+  isOnline,
+  isRunning,
+  activity,
+  labels,
+}: {
+  isOnline: boolean
+  isRunning: boolean
+  activity?: { state: "running" | "done" | "error"; unreadCount: number }
+  labels: { online: string; running: string; unread: string; error: string }
+}) {
+  if (isRunning) {
+    return (
+      <span
+        className="relative ml-1 flex size-4 shrink-0 items-center justify-center"
+        title={labels.running}
+      >
+        <span className="absolute inset-0 rounded-full border border-green-300 border-t-green-600 animate-spin" />
+        <span className="size-1.5 rounded-full bg-green-500" />
+      </span>
+    )
+  }
+
+  if (activity?.state === "error") {
+    return (
+      <span
+        className="ml-1 flex size-4 shrink-0 items-center justify-center rounded-full bg-red-500 text-[9px] font-semibold leading-none text-white"
+        title={labels.error}
+      >
+        {activity.unreadCount}
+      </span>
+    )
+  }
+
+  if (activity?.state === "done") {
+    return (
+      <span
+        className="ml-1 flex size-4 shrink-0 items-center justify-center rounded-full bg-green-500 text-[9px] font-semibold leading-none text-white"
+        title={labels.unread}
+      >
+        {activity.unreadCount}
+      </span>
+    )
+  }
+
+  if (isOnline) {
+    return (
+      <span className="relative ml-1 flex size-1.5 shrink-0" title={labels.online}>
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-400 opacity-75" />
+        <span className="relative inline-flex size-1.5 rounded-full bg-green-500" />
+      </span>
+    )
+  }
+
+  return null
 }

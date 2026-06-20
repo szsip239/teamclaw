@@ -18,6 +18,17 @@ import type { ChatRuntime } from '@/lib/chat/runtime'
 
 const PI_CONNECTION_LOST_ERROR = 'Pi agent connection lost'
 
+export type ChatAgentActivityState = 'running' | 'done' | 'error'
+
+export interface ChatAgentActivity {
+  state: ChatAgentActivityState
+  unreadCount: number
+}
+
+export function chatAgentActivityKey(instanceId: string, agentId: string): string {
+  return `${instanceId}:${agentId}`
+}
+
 function displayStreamError(error: string): string {
   return error === PI_CONNECTION_LOST_ERROR ? translate('chat.piConnectionLost') : error
 }
@@ -66,6 +77,13 @@ interface ChatState {
   // (e.g. user switched away and came back while the agent was still generating)
   remoteStreaming: boolean
   setRemoteStreaming: (v: boolean) => void
+
+  // Local per-agent activity indicators for the chat sidebar.
+  agentActivities: Record<string, ChatAgentActivity>
+  markAgentRunning: (instanceId: string, agentId: string) => void
+  markAgentDone: (instanceId: string, agentId: string) => void
+  markAgentError: (instanceId: string, agentId: string) => void
+  clearAgentActivity: (instanceId: string, agentId: string) => void
 
   // Send message action
   sendMessage: (
@@ -186,7 +204,13 @@ async function reconcileQueuedFromHistory(activeSessionId: string) {
     if (responsesArrived > 0) {
       const newPending = Math.max(0, pendingQueuedRuns - responsesArrived)
       updates.pendingQueuedRuns = newPending
-      if (newPending === 0) updates.remoteStreaming = false
+      if (newPending === 0) {
+        updates.remoteStreaming = false
+        const selectedAgent = useChatStore.getState().selectedAgent
+        if (selectedAgent) {
+          useChatStore.getState().markAgentDone(selectedAgent.instanceId, selectedAgent.agentId)
+        }
+      }
     }
     if (Object.keys(updates).length > 0) useChatStore.setState(updates)
   } catch {
@@ -333,6 +357,10 @@ async function syncFromHistory(
           updates.pendingQueuedRuns = newPending
           if (newPending === 0) {
             updates.remoteStreaming = false
+            const selectedAgent = useChatStore.getState().selectedAgent
+            if (selectedAgent) {
+              useChatStore.getState().markAgentDone(selectedAgent.instanceId, selectedAgent.agentId)
+            }
           }
         }
         if (Object.keys(updates).length > 0) set(updates)
@@ -473,8 +501,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
   remoteStreaming: false,
   setRemoteStreaming: (v) => set({ remoteStreaming: v }),
 
+  agentActivities: {},
+  markAgentRunning: (instanceId, agentId) =>
+    set((s) => ({
+      agentActivities: {
+        ...s.agentActivities,
+        [chatAgentActivityKey(instanceId, agentId)]: { state: 'running', unreadCount: 0 },
+      },
+    })),
+  markAgentDone: (instanceId, agentId) =>
+    set((s) => ({
+      agentActivities: {
+        ...s.agentActivities,
+        [chatAgentActivityKey(instanceId, agentId)]: { state: 'done', unreadCount: 1 },
+      },
+    })),
+  markAgentError: (instanceId, agentId) =>
+    set((s) => ({
+      agentActivities: {
+        ...s.agentActivities,
+        [chatAgentActivityKey(instanceId, agentId)]: { state: 'error', unreadCount: 1 },
+      },
+    })),
+  clearAgentActivity: (instanceId, agentId) =>
+    set((s) => {
+      const key = chatAgentActivityKey(instanceId, agentId)
+      if (!s.agentActivities[key]) return {}
+      const next = { ...s.agentActivities }
+      delete next[key]
+      return { agentActivities: next }
+    }),
+
   sendMessage: async (instanceId, agentId, runtime, message, sessionId, attachments) => {
-    const { addUserMessage } = get()
+    const { addUserMessage, markAgentRunning } = get()
+    markAgentRunning(instanceId, agentId)
     // Capture session ID at start — may be updated by the 'session' SSE event
     // when the API creates a new session (activeSessionId was null)
     let capturedSessionId = get().activeSessionId
@@ -516,6 +576,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const streamStartedAt = Date.now()
     const PROGRESS_POLL_INTERVAL = 5_000
     const CONFIRMED_FALLBACK_MS = 15_000
+    let sawAssistantError = false
     const progressTimer = setInterval(() => {
       const sid = capturedSessionId || get().activeSessionId
       const canPoll = gatewayConfirmed || Date.now() - streamStartedAt > CONFIRMED_FALLBACK_MS
@@ -581,6 +642,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }))
             break
           case 'error':
+            sawAssistantError = true
             get().setAssistantError(displayStreamError(event.error))
             break
           case 'done':
@@ -591,6 +653,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if ((err as Error).name !== 'AbortError') {
         const errorMessage = (err as Error).message || 'Failed to send message'
         const displayError = displayStreamError(errorMessage)
+        sawAssistantError = true
         get().setAssistantError(displayError)
         toast.error(runtime === 'pi' ? translate('chat.piUnavailable') : displayError)
       }
@@ -648,12 +711,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch {
         /* non-fatal */
       }
+
+      if (controller.signal.aborted) {
+        get().clearAgentActivity(instanceId, agentId)
+      } else if (sawAssistantError || finalStreaming?.error) {
+        get().markAgentError(instanceId, agentId)
+      } else if (hasQueued) {
+        get().markAgentRunning(instanceId, agentId)
+      } else {
+        get().markAgentDone(instanceId, agentId)
+      }
     }
   },
 
   queueMessage: (runtime, message, attachments) => {
     const { selectedAgent } = get()
     if (!selectedAgent) return
+    get().markAgentRunning(selectedAgent.instanceId, selectedAgent.agentId)
 
     // Add to queuedMessages (NOT messages[]) — survives syncFromHistory overwrites
     const uiAttachments: ChatAttachment[] | undefined = attachments?.map((a) => ({

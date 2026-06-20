@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs'
 import path from 'path'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { chatAgentActivityKey, useChatStore } from './chat-store'
 
 const source = readFileSync(path.resolve('src/stores/chat-store.ts'), 'utf-8')
 
@@ -39,5 +40,36 @@ describe('chat store stream errors', () => {
   it('maps pi connection loss to a translated message', () => {
     expect(source).toContain('chat.piConnectionLost')
     expect(source).toContain('Pi agent connection lost')
+  })
+})
+
+describe('chat store agent activity indicators', () => {
+  beforeEach(() => {
+    useChatStore.setState({ agentActivities: {} })
+  })
+
+  it('tracks running, done, error, and cleared agent activity states', () => {
+    const key = chatAgentActivityKey('inst-1', 'main')
+
+    useChatStore.getState().markAgentRunning('inst-1', 'main')
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'running',
+      unreadCount: 0,
+    })
+
+    useChatStore.getState().markAgentDone('inst-1', 'main')
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'done',
+      unreadCount: 1,
+    })
+
+    useChatStore.getState().markAgentError('inst-1', 'main')
+    expect(useChatStore.getState().agentActivities[key]).toEqual({
+      state: 'error',
+      unreadCount: 1,
+    })
+
+    useChatStore.getState().clearAgentActivity('inst-1', 'main')
+    expect(useChatStore.getState().agentActivities[key]).toBeUndefined()
   })
 })
