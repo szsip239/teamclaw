@@ -12,6 +12,8 @@ import { InstanceActionsDropdown } from "./instance-actions-dropdown"
 import { Bot, Clock, ExternalLink, MessageSquare, Radio } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api-client"
+import { instanceSupportsPiRuntime } from "@/lib/chat/runtime"
+import { PI_CODING_AGENT_VERSION } from "@/lib/chat/pi-version"
 import { useT } from "@/stores/language-store"
 import type { InstanceResponse } from "@/types/instance"
 
@@ -92,6 +94,11 @@ function getVersionDisplay(instance: InstanceResponse): string | null {
   return instance.version || null
 }
 
+function getPiVersionDisplay(instance: InstanceResponse): string | null {
+  if (!instanceSupportsPiRuntime(instance.dockerConfig)) return null
+  return PI_CODING_AGENT_VERSION
+}
+
 export function InstanceTableRow({
   instance,
   index,
@@ -109,6 +116,7 @@ export function InstanceTableRow({
   const sessionCount = getSessionCount(instance.healthData)
   const channelCount = getChannelCount(instance.healthData)
   const versionDisplay = getVersionDisplay(instance)
+  const piVersionDisplay = getPiVersionDisplay(instance)
   const isOnline = instance.status === "ONLINE"
 
   const dimText = "text-muted-foreground/40 text-xs"
@@ -176,9 +184,16 @@ export function InstanceTableRow({
 
       {/* Version */}
       <TableCell className="py-3">
-        <span className="text-muted-foreground font-mono text-xs">
-          {versionDisplay || "—"}
-        </span>
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground font-mono text-xs leading-none">
+            {versionDisplay || "—"}
+          </span>
+          {piVersionDisplay && (
+            <span className="text-muted-foreground/60 font-mono text-[11px] leading-none">
+              {t('instance.piVersionLabel', { version: piVersionDisplay })}
+            </span>
+          )}
+        </div>
       </TableCell>
 
       {/* Last health check */}

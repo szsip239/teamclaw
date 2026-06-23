@@ -203,6 +203,7 @@ const en: Record<TranslationKey, string> = {
   'instance.tableStatus': 'Status',
   'instance.tableSessions': 'Sessions',
   'instance.tableVersion': 'Version',
+  'instance.piVersionLabel': 'Pi {version}',
   'instance.tableLastCheck': 'Last Check',
   'instance.tableConsole': 'Console',
   'instance.tableConnectionAddr': 'Connection',
