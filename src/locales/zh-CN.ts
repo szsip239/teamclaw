@@ -199,6 +199,7 @@ const zhCN = {
   'instance.tableStatus': '状态',
   'instance.tableSessions': '会话',
   'instance.tableVersion': '版本',
+  'instance.ocVersionLabel': 'OC {version}',
   'instance.piVersionLabel': 'Pi {version}',
   'instance.tableLastCheck': '最近检查',
   'instance.tableConsole': '控制台',

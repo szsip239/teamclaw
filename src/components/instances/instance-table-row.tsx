@@ -120,6 +120,7 @@ export function InstanceTableRow({
   const isOnline = instance.status === "ONLINE"
 
   const dimText = "text-muted-foreground/40 text-xs"
+  const versionTextClass = "text-muted-foreground font-mono text-xs leading-none"
 
   return (
     <motion.tr
@@ -185,11 +186,11 @@ export function InstanceTableRow({
       {/* Version */}
       <TableCell className="py-3">
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground font-mono text-xs leading-none">
-            {versionDisplay || "—"}
+          <span className={versionTextClass}>
+            {t('instance.ocVersionLabel', { version: versionDisplay || "—" })}
           </span>
           {piVersionDisplay && (
-            <span className="text-muted-foreground/60 font-mono text-[11px] leading-none">
+            <span className={versionTextClass}>
               {t('instance.piVersionLabel', { version: piVersionDisplay })}
             </span>
           )}
