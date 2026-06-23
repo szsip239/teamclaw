@@ -22,6 +22,16 @@ describe('pi runtime gateway wiring', () => {
         { inDockerNetwork: false },
       ),
     ).toBe('ws://127.0.0.1:18791')
+
+    expect(
+      resolvePiGatewayUrl(
+        {
+          containerName: null,
+          dockerConfig: { hostPiPort: 18790 },
+        },
+        { inDockerNetwork: true },
+      ),
+    ).toBe('ws://host.docker.internal:18790')
   })
 
   it('builds pi chat.send params with cwd and attachments', () => {

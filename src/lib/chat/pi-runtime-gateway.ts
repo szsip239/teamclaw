@@ -28,7 +28,8 @@ export function resolvePiGatewayUrl(
   if (!hostPiPort) {
     throw new Error('Pi runtime is not enabled for this instance')
   }
-  return `ws://127.0.0.1:${hostPiPort}`
+  const host = inDockerNetwork ? 'host.docker.internal' : '127.0.0.1'
+  return `ws://${host}:${hostPiPort}`
 }
 
 export function buildPiChatSendParams(params: {
