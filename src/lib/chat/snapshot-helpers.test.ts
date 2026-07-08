@@ -42,6 +42,7 @@ vi.mock('@/lib/chat/image-helpers', () => ({
 import {
   appendLiveMessages,
   archiveSession,
+  buildSnapshotData,
   chatMessagesSemanticallyMatch,
   MAX_LIVE_MESSAGES,
   mergeLiveMessagesAppendOnly,
@@ -587,6 +588,96 @@ describe('live snapshot append-only merge', () => {
     })
   })
 
+  it('collapses repeated model-failure prompts when saving terminal stream errors', async () => {
+    const client = {
+      request: vi.fn().mockResolvedValue({
+        sessionId: 'gw-1',
+        messages: [
+          user('你是否有精读skill'),
+          {
+            role: 'assistant',
+            content: 'The agent run failed before producing a reply.',
+            stopReason: 'error',
+          },
+          user('你是否有精读skill'),
+          {
+            role: 'assistant',
+            content: 'The agent run failed before producing a reply.',
+            stopReason: 'error',
+          },
+          user('你是否有精读skill'),
+          {
+            role: 'assistant',
+            content: 'LLM request failed.',
+            stopReason: 'error',
+          },
+        ] satisfies ChatHistoryMessage[],
+      }),
+    }
+
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      gwSessionId: 'gw-1',
+      liveMessages: [],
+    })
+
+    await saveLiveSnapshot(
+      'chat-1',
+      client as never,
+      'agent:a:tc:u',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'LLM request failed.',
+    )
+
+    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const liveMessages = updateArg.data.liveMessages as ChatMessage[]
+
+    expect(
+      liveMessages.filter(
+        (message) => message.role === 'user' && message.content === '你是否有精读skill',
+      ),
+    ).toHaveLength(1)
+    expect(liveMessages.filter((message) => message.role === 'assistant')).toHaveLength(1)
+    expect(liveMessages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'LLM request failed.',
+      stopReason: 'error',
+      isFinal: true,
+    })
+  })
+
+  it('collapses repeated model-failure prompts when archiving snapshots', () => {
+    const { snapshotData } = buildSnapshotData('chat-1', [
+      user('你是否有精读skill'),
+      {
+        role: 'assistant',
+        content: 'The agent run failed before producing a reply.',
+        stopReason: 'error',
+      },
+      user('你是否有精读skill'),
+      {
+        role: 'assistant',
+        content: 'LLM request failed.',
+        stopReason: 'error',
+      },
+    ])
+
+    expect(
+      snapshotData.filter(
+        (message) => message.role === 'user' && message.content === '你是否有精读skill',
+      ),
+    ).toHaveLength(1)
+    expect(snapshotData.filter((message) => message.role === 'assistant')).toHaveLength(1)
+    expect(snapshotData.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'LLM request failed.',
+    })
+  })
+
   it('archives sessions with the unified 500 history limit', async () => {
     const client = {
       request: vi
@@ -1101,5 +1192,61 @@ status: failed
     expect(messages.some((message) => message.role === 'assistant' && message.content === '')).toBe(
       false,
     )
+  })
+
+  it('collapses generic model-failure retry attempts for OpenClaw and Pi histories', () => {
+    const messages = transformToLiveMessages([
+      {
+        role: 'user',
+        content: '你是否有精读skill',
+        timestamp: 1781881312245,
+      },
+      {
+        role: 'assistant',
+        content: 'The agent run failed before producing a reply.',
+        stopReason: 'error',
+        timestamp: 1781881312669,
+      },
+      {
+        role: 'user',
+        content: '你是否有精读skill',
+        timestamp: 1781881312245,
+      },
+      {
+        role: 'assistant',
+        content: '[assistant turn failed before producing content]',
+        stopReason: 'error',
+        timestamp: 1781881359840,
+      },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: '你是否有精读skill' }],
+        timestamp: 1781881403591,
+      },
+      {
+        role: 'custom_message',
+        content: 'The agent run failed before producing a reply.',
+      } as unknown as ChatHistoryMessage,
+      {
+        role: 'assistant',
+        content: 'LLM request failed.',
+        stopReason: 'error',
+        timestamp: 1781881403599,
+      },
+    ])
+
+    expect(
+      messages.filter(
+        (message) => message.role === 'user' && message.content === '你是否有精读skill',
+      ),
+    ).toHaveLength(1)
+    expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(1)
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'LLM request failed.',
+      stopReason: 'error',
+      isFinal: true,
+    })
   })
 })

@@ -190,9 +190,37 @@ function rawAssistantVisibleText(message: ChatHistoryMessage): string {
   return splitThinkingFallback(thinking).text.trim()
 }
 
+function genericModelFailureErrorFromText(text: string): string | undefined {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  const lower = normalized.toLowerCase()
+  if (!lower) return undefined
+
+  if (lower === 'llm request failed' || lower === 'llm request failed.') {
+    return 'LLM request failed.'
+  }
+
+  if (
+    lower === 'the agent run failed before producing a reply' ||
+    lower === 'the agent run failed before producing a reply.' ||
+    lower === '[assistant turn failed before producing content]'
+  ) {
+    return 'The agent run failed before producing a reply.'
+  }
+
+  return undefined
+}
+
+function genericModelFailureErrorFromMessage(message: ChatHistoryMessage): string | undefined {
+  return genericModelFailureErrorFromText(
+    stripFinalTags(stripMediaReferences(extractText(message.content))),
+  )
+}
+
 function rawMessageHasDeliverableContent(message: ChatHistoryMessage): boolean {
   if (message.role === 'assistant') {
-    return !!rawAssistantVisibleText(message) || rawMessageHasToolCall(message)
+    if (rawMessageHasToolCall(message)) return true
+    const text = rawAssistantVisibleText(message)
+    return !!text && !genericModelFailureErrorFromText(text)
   }
   return message.role === 'toolResult' || message.role === 'command'
 }
@@ -359,8 +387,9 @@ export function buildSnapshotData(
   let orderIndex = 0
   const snapshotData: Prisma.ChatMessageSnapshotCreateManyInput[] = []
   let lastUserMessage: string | null = null
+  const { messages: displayRawMessages } = filterOpenClawInternalContextMessages(rawMessages)
 
-  for (const msg of rawMessages) {
+  for (const msg of filterRetryDuplicateUserMessages(displayRawMessages)) {
     if (msg.role === 'user') {
       const text = stripRagContextForDisplay(stripUserMetadata(extractText(msg.content)))
       const cb = extractContentBlocks(msg.content)
@@ -696,6 +725,12 @@ export function transformToLiveMessages(
         }
       }
 
+      const genericFailureError = genericModelFailureErrorFromText(text)
+      if (genericFailureError) {
+        text = ''
+        thinking = ''
+      }
+
       result.push({
         id,
         role: 'assistant',
@@ -703,13 +738,20 @@ export function transformToLiveMessages(
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(thinking ? { thinking } : {}),
         ...(parsed.toolCalls ? { toolCalls: parsed.toolCalls } : {}),
-        ...(parsed.stopReason
+        ...(genericFailureError
           ? {
               messageSeq: parsed.messageSeq,
-              stopReason: parsed.stopReason,
-              isFinal: parsed.isFinal,
+              stopReason: parsed.stopReason ?? 'error',
+              isFinal: true,
+              error: genericFailureError,
             }
-          : { messageSeq }),
+          : parsed.stopReason
+            ? {
+                messageSeq: parsed.messageSeq,
+                stopReason: parsed.stopReason,
+                isFinal: parsed.isFinal,
+              }
+            : { messageSeq }),
         createdAt,
       })
     } else if (msg.role === 'toolResult') {
@@ -722,6 +764,25 @@ export function transformToLiveMessages(
         }
         last.toolCalls = completeToolCall(last.toolCalls, tc)
       }
+    } else if ((msg.role as string) === 'custom_message') {
+      const error = genericModelFailureErrorFromMessage(msg)
+      if (!error) continue
+      const context = { message: msg, messageSeq, role: 'assistant' as const }
+      const id = options.idForMessage?.(context) ?? randomUUID()
+      const createdAt =
+        gatewayMessageCreatedAt(msg) ??
+        options.fallbackCreatedAt?.(context) ??
+        new Date(fallbackBaseMs + messageSeq).toISOString()
+      result.push({
+        id,
+        role: 'assistant',
+        content: '',
+        error,
+        messageSeq,
+        stopReason: 'error',
+        isFinal: true,
+        createdAt,
+      })
     }
   }
 
