@@ -51,7 +51,7 @@
     "cmdk": "^1.1.1",
     "dockerode": "^4.0.9",
     "dotenv": "^17.2.4",
-    "echarts": "^6.0.0",
+    "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "fflate": "^0.8.2",
     "html2canvas": "^1.4.1",
@@ -115,6 +115,8 @@
     "tar": "^7.5.16",
     "qs": "^6.15.2",
     "ws": "^8.20.1",
-    "brace-expansion": "^5.0.6"
+    "brace-expansion": "^5.0.6",
+    "js-yaml": "^4.2.0",
+    "@babel/core": "8.0.0-rc.6"
   }
 }
