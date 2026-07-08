@@ -41,6 +41,7 @@ vi.mock('@/lib/chat/image-helpers', () => ({
 
 import {
   appendLiveMessages,
+  appendTerminalErrorFallback,
   archiveSession,
   buildSnapshotData,
   chatMessagesSemanticallyMatch,
@@ -502,7 +503,7 @@ describe('live snapshot append-only merge', () => {
       { name: 'image.png', mimeType: 'image/png', content: imageData },
     ])
 
-    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const updateArg = mocks.prisma.chatSession.update.mock.calls.at(-1)![0]
     const liveMessages = updateArg.data.liveMessages as ChatMessage[]
 
     expect(liveMessages[0].contentBlocks).toHaveLength(1)
@@ -533,7 +534,7 @@ describe('live snapshot append-only merge', () => {
       '文件已创建完成。\n\n[report.html](output/report.html)',
     )
 
-    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const updateArg = mocks.prisma.chatSession.update.mock.calls.at(-1)![0]
     const liveMessages = updateArg.data.liveMessages as ChatMessage[]
 
     expect(liveMessages.at(-1)?.content).toBe(
@@ -576,7 +577,7 @@ describe('live snapshot append-only merge', () => {
       'Agent failed before reply: non_deliverable_terminal_turn',
     )
 
-    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const updateArg = mocks.prisma.chatSession.update.mock.calls.at(-1)![0]
     const liveMessages = updateArg.data.liveMessages as ChatMessage[]
 
     expect(liveMessages.at(-1)).toMatchObject({
@@ -632,7 +633,7 @@ describe('live snapshot append-only merge', () => {
       'LLM request failed.',
     )
 
-    const updateArg = mocks.prisma.chatSession.update.mock.calls[0][0]
+    const updateArg = mocks.prisma.chatSession.update.mock.calls.at(-1)![0]
     const liveMessages = updateArg.data.liveMessages as ChatMessage[]
 
     expect(
@@ -1250,6 +1251,45 @@ status: failed
     })
   })
 
+  it('shows one Pi assistant error from stopReason=error history messages', () => {
+    const messages = transformToLiveMessages([
+      user('你的模型？'),
+      {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'LLM request failed.',
+      } satisfies ChatHistoryMessage,
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'LLM request failed.',
+      stopReason: 'error',
+      isFinal: true,
+    })
+  })
+
+  it('archives one Pi assistant error from stopReason=error history messages', () => {
+    const { snapshotData } = buildSnapshotData('chat-1', [
+      user('你的模型？'),
+      {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'LLM request failed.',
+      } satisfies ChatHistoryMessage,
+    ])
+
+    expect(snapshotData).toHaveLength(2)
+    expect(snapshotData[1]).toMatchObject({
+      role: 'assistant',
+      content: 'LLM request failed.',
+    })
+  })
+
   it('keeps one visible custom_message failure after duplicate retry attempts', () => {
     const messages = transformToLiveMessages([
       user('你是否有精读skill'),
@@ -1327,6 +1367,61 @@ status: failed
     expect(snapshotData[1]).toMatchObject({
       role: 'assistant',
       content: 'LLM request failed.',
+    })
+  })
+
+  it('appends a terminal error fallback without duplicating the latest user', async () => {
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({
+      liveMessages: [chatMessage('user', '你的模型？')],
+    })
+
+    await appendTerminalErrorFallback('chat-1', {
+      userContent: '你的模型？',
+      runtime: 'pi',
+      error: 'LLM request failed.',
+      userCreatedAt: '2026-05-28T00:00:00.000Z',
+    })
+
+    const updateArg = mocks.prisma.chatSession.update.mock.calls.at(-1)![0]
+    const liveMessages = updateArg.data.liveMessages as ChatMessage[]
+
+    expect(liveMessages.filter((message) => message.role === 'user')).toHaveLength(1)
+    expect(liveMessages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'LLM request failed.',
+      runtime: 'pi',
+      stopReason: 'error',
+      isFinal: true,
+    })
+  })
+
+  it('appends user and terminal error fallback when Pi history is empty', async () => {
+    mocks.prisma.chatSession.findUnique.mockResolvedValue({ liveMessages: [] })
+
+    await appendTerminalErrorFallback('chat-1', {
+      userContent: '你的模型？',
+      runtime: 'pi',
+      error: 'Pi agent connection lost',
+      userCreatedAt: '2026-05-28T00:00:00.000Z',
+    })
+
+    const updateArg = mocks.prisma.chatSession.update.mock.calls.at(-1)![0]
+    const liveMessages = updateArg.data.liveMessages as ChatMessage[]
+
+    expect(liveMessages).toHaveLength(2)
+    expect(liveMessages[0]).toMatchObject({
+      role: 'user',
+      content: '你的模型？',
+      runtime: 'pi',
+    })
+    expect(liveMessages[1]).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'Pi agent connection lost',
+      runtime: 'pi',
+      stopReason: 'error',
+      isFinal: true,
     })
   })
 })

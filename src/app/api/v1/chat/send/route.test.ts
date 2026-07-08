@@ -40,6 +40,17 @@ describe('chat send post-run cleanup', () => {
     expect(abortHandler).toContain('void saveSnapshotThenFinish()')
     expect(piDisconnectHandler).toContain('void saveSnapshotThenFinish()')
   })
+
+  it('persists background chat.send startup failures before closing the stream', () => {
+    const startupCatch = source.slice(
+      source.indexOf('})().catch((err) => {'),
+      source.indexOf('  return new Response(readable', source.indexOf('})().catch((err) => {')),
+    )
+
+    expect(startupCatch).toContain('terminalErrorMessage =')
+    expect(startupCatch).toContain('void saveSnapshotThenFinish()')
+    expect(startupCatch).not.toContain('cleanup()')
+  })
 })
 
 describe('chat send runtime guardrails', () => {

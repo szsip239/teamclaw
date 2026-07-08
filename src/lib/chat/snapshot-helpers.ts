@@ -211,9 +211,17 @@ function genericModelFailureErrorFromText(text: string): string | undefined {
 }
 
 function genericModelFailureErrorFromMessage(message: ChatHistoryMessage): string | undefined {
-  return genericModelFailureErrorFromText(
+  const contentError = genericModelFailureErrorFromText(
     stripFinalTags(stripMediaReferences(extractText(message.content))),
   )
+  if (contentError) return contentError
+
+  if (message.role !== 'assistant' || message.stopReason !== 'error') return undefined
+  const errorMessage = message.errorMessage?.trim()
+  if (errorMessage) return genericModelFailureErrorFromText(errorMessage) ?? errorMessage
+
+  const visibleText = rawAssistantVisibleText(message)
+  return visibleText ? undefined : 'The agent run failed before producing a reply.'
 }
 
 function rawMessageHasDeliverableContent(message: ChatHistoryMessage): boolean {
@@ -428,6 +436,11 @@ export function buildSnapshotData(
           text = split.text
           thinking = split.thinking
         }
+      }
+      const genericFailureError = genericModelFailureErrorFromMessage(msg)
+      if (genericFailureError) {
+        text = genericFailureError
+        thinking = ''
       }
       if (parsed.stopReason && parsed.stopReason !== 'stop' && parsed.toolCalls?.length && text) {
         thinking = text + (thinking ? '\n\n' + thinking : '')
@@ -742,7 +755,8 @@ export function transformToLiveMessages(
         }
       }
 
-      const genericFailureError = genericModelFailureErrorFromText(text)
+      const genericFailureError =
+        genericModelFailureErrorFromText(text) ?? genericModelFailureErrorFromMessage(msg)
       if (genericFailureError) {
         text = ''
         thinking = ''
@@ -1346,7 +1360,7 @@ export async function saveLiveSnapshot(
   capturedToolInputs?: { toolName: string; toolInput: unknown }[],
   assistantContentOverride?: string,
   assistantErrorOverride?: string,
-): Promise<void> {
+): Promise<boolean> {
   const rawResult = await client.request(
     'chat.history',
     { sessionKey, limit: LIVE_HISTORY_LIMIT },
@@ -1354,7 +1368,7 @@ export async function saveLiveSnapshot(
   )
   const historyResult = rawResult as ChatHistoryResult
   const rawMessages = historyResult.messages ?? []
-  if (rawMessages.length === 0) return
+  if (rawMessages.length === 0) return false
 
   let liveMessages = transformToLiveMessages(rawMessages)
   replaceLastAssistantMessageContent(liveMessages, assistantContentOverride)
@@ -1444,6 +1458,7 @@ export async function saveLiveSnapshot(
 
     await writeLiveMessages(chatSessionId, liveMessages, gwSessionId, archiveMessages)
   })
+  return true
 }
 
 /**
@@ -1654,6 +1669,71 @@ export async function appendLiveMessages(
       ? (session.liveMessages as unknown as ChatMessage[])
       : []
     const liveMessages = [...existingLive.map(cloneMessage), ...messages.map(cloneMessage)]
+    dedupeMessageContentBlocks(liveMessages)
+    stampImageIds(liveMessages)
+    await prisma.chatSession.update({
+      where: { id: chatSessionId },
+      data: { liveMessages: liveMessages as unknown as Prisma.InputJsonValue },
+    })
+  })
+}
+
+export async function appendTerminalErrorFallback(
+  chatSessionId: string,
+  params: {
+    userContent: string
+    runtime?: ChatRuntime
+    error: string
+    userCreatedAt?: string
+  },
+): Promise<void> {
+  const error = params.error.trim()
+  if (!error) return
+
+  await withSessionSnapshotLock(chatSessionId, async () => {
+    const session = await prisma.chatSession.findUnique({
+      where: { id: chatSessionId },
+      select: { liveMessages: true },
+    })
+    const existingLive = Array.isArray(session?.liveMessages)
+      ? (session.liveMessages as unknown as ChatMessage[]).map(cloneMessage)
+      : []
+
+    const lastUserIdx = existingLive.findLastIndex((message) => message.role === 'user')
+    const latestUserMatches =
+      lastUserIdx >= 0 && existingLive[lastUserIdx].content === params.userContent
+    const afterLastUser = lastUserIdx >= 0 ? existingLive.slice(lastUserIdx + 1) : []
+    if (
+      latestUserMatches &&
+      afterLastUser.some((message) => message.role === 'assistant' && message.error === error)
+    ) {
+      return
+    }
+
+    const liveMessages = [...existingLive]
+    if (!latestUserMatches) {
+      liveMessages.push({
+        id: randomUUID(),
+        role: 'user',
+        content: params.userContent,
+        ...(params.runtime ? { runtime: params.runtime } : {}),
+        messageSeq: liveMessages.length,
+        createdAt: params.userCreatedAt ?? new Date().toISOString(),
+      })
+    }
+
+    liveMessages.push({
+      id: randomUUID(),
+      role: 'assistant',
+      content: '',
+      error,
+      ...(params.runtime ? { runtime: params.runtime } : {}),
+      messageSeq: liveMessages.length,
+      stopReason: 'error',
+      isFinal: true,
+      createdAt: new Date().toISOString(),
+    })
+
     dedupeMessageContentBlocks(liveMessages)
     stampImageIds(liveMessages)
     await prisma.chatSession.update({

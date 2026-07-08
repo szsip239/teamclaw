@@ -25,7 +25,12 @@ import {
 } from '@/lib/session-files/artifacts'
 import type { SessionOutputSnapshot } from '@/lib/session-files/artifacts'
 import * as hostFileOps from '@/lib/session-files/host-file-ops'
-import { appendLiveMessages, archiveSession, saveLiveSnapshot } from '@/lib/chat/snapshot-helpers'
+import {
+  appendLiveMessages,
+  appendTerminalErrorFallback,
+  archiveSession,
+  saveLiveSnapshot,
+} from '@/lib/chat/snapshot-helpers'
 import { finalizeAssistantArtifacts } from '@/lib/chat/artifact-finalizer'
 import {
   buildChatRuntimeSessionKey,
@@ -526,6 +531,15 @@ export async function POST(req: NextRequest) {
     ])
   }
 
+  async function appendFallbackErrorLiveMessages(error: string): Promise<void> {
+    await appendTerminalErrorFallback(chatSessionId, {
+      userContent: message,
+      runtime,
+      error,
+      userCreatedAt: runStartedAt.toISOString(),
+    })
+  }
+
   async function saveSnapshotThenFinish() {
     if (finishStarted) return
     finishStarted = true
@@ -533,7 +547,7 @@ export async function POST(req: NextRequest) {
 
     const assistantContentOverride = await normalizeAndEmitArtifactLinks()
     try {
-      await saveLiveSnapshot(
+      const snapshotSaved = await saveLiveSnapshot(
         chatSessionId,
         client!,
         sessionKey,
@@ -544,6 +558,9 @@ export async function POST(req: NextRequest) {
         assistantContentOverride,
         terminalErrorMessage ?? undefined,
       )
+      if (!snapshotSaved && terminalErrorMessage) {
+        await appendFallbackErrorLiveMessages(terminalErrorMessage)
+      }
     } catch (err) {
       console.error('[live-snapshot] Save failed:', err)
       if (assistantContentOverride) {
@@ -551,6 +568,13 @@ export async function POST(req: NextRequest) {
           await appendFallbackArtifactLiveMessages(assistantContentOverride)
         } catch (fallbackErr) {
           console.error('[live-snapshot] Fallback save failed:', fallbackErr)
+        }
+      }
+      if (terminalErrorMessage) {
+        try {
+          await appendFallbackErrorLiveMessages(terminalErrorMessage)
+        } catch (fallbackErr) {
+          console.error('[live-snapshot] Error fallback save failed:', fallbackErr)
         }
       }
     }
@@ -1000,8 +1024,9 @@ export async function POST(req: NextRequest) {
     // progress polling for any tool events that may have been missed.
     write({ type: 'confirmed' })
   })().catch((err) => {
-    write({ type: 'error', error: (err as Error).message || 'Failed to send message' })
-    cleanup()
+    terminalErrorMessage = (err as Error).message || 'Failed to send message'
+    write({ type: 'error', error: terminalErrorMessage })
+    void saveSnapshotThenFinish()
   })
 
   return new Response(readable, {
