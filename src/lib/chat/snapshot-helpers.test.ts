@@ -1249,4 +1249,84 @@ status: failed
       isFinal: true,
     })
   })
+
+  it('keeps one visible custom_message failure after duplicate retry attempts', () => {
+    const messages = transformToLiveMessages([
+      user('你是否有精读skill'),
+      {
+        role: 'assistant',
+        content: '',
+        stopReason: 'error',
+      },
+      user('你是否有精读skill'),
+      {
+        role: 'custom_message',
+        content: 'LLM request failed.',
+      } as unknown as ChatHistoryMessage,
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toMatchObject({
+      role: 'user',
+      content: '你是否有精读skill',
+    })
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '',
+      error: 'LLM request failed.',
+      stopReason: 'error',
+      isFinal: true,
+    })
+  })
+
+  it('keeps a generic failure before the next distinct user turn', () => {
+    const messages = transformToLiveMessages([
+      user('你的模型？'),
+      {
+        role: 'custom_message',
+        content: 'The agent run failed before producing a reply.',
+      } as unknown as ChatHistoryMessage,
+      user('继续'),
+      {
+        role: 'assistant',
+        content: '当前模型：deepseek-r1',
+        stopReason: 'stop',
+      },
+    ])
+
+    expect(messages.map((message) => [message.role, message.content, message.error ?? null])).toEqual(
+      [
+        ['user', '你的模型？', null],
+        ['assistant', '', 'The agent run failed before producing a reply.'],
+        ['user', '继续', null],
+        ['assistant', '当前模型：deepseek-r1', null],
+      ],
+    )
+  })
+
+  it('archives one visible custom_message failure after duplicate retry attempts', () => {
+    const { snapshotData } = buildSnapshotData('chat-1', [
+      user('你是否有精读skill'),
+      {
+        role: 'assistant',
+        content: '',
+        stopReason: 'error',
+      },
+      user('你是否有精读skill'),
+      {
+        role: 'custom_message',
+        content: 'LLM request failed.',
+      } as unknown as ChatHistoryMessage,
+    ])
+
+    expect(snapshotData).toHaveLength(2)
+    expect(snapshotData[0]).toMatchObject({
+      role: 'user',
+      content: '你是否有精读skill',
+    })
+    expect(snapshotData[1]).toMatchObject({
+      role: 'assistant',
+      content: 'LLM request failed.',
+    })
+  })
 })

@@ -228,11 +228,9 @@ function rawMessageHasDeliverableContent(message: ChatHistoryMessage): boolean {
 /**
  * OpenClaw may append internal visible-answer retry attempts to chat.history.
  * Those retries can repeat the same user prompt when the model only produced
- * hidden reasoning and no deliverable content. Collapse them for display and
- * live snapshots so one user send does not appear as multiple user bubbles.
- * Reasoning-only assistant messages from those failed attempts are also
- * suppressed unless they are the terminal message, where they become the
- * visible "failed before reply" error.
+ * hidden reasoning and no deliverable content. Normalize them for display and
+ * live snapshots so one user send is followed by one terminal failure message,
+ * not repeated user/error bubbles.
  */
 export function filterRetryDuplicateUserMessages(
   rawMessages: ChatHistoryMessage[],
@@ -250,6 +248,12 @@ export function filterRetryDuplicateUserMessages(
         skippingDuplicateAttempt = true
         continue
       }
+      if (
+        pendingNonDeliverableAssistant &&
+        genericModelFailureErrorFromMessage(pendingNonDeliverableAssistant)
+      ) {
+        filtered.push(pendingNonDeliverableAssistant)
+      }
       pendingNonDeliverableAssistant = null
       skippingDuplicateAttempt = false
       filtered.push(message)
@@ -259,7 +263,8 @@ export function filterRetryDuplicateUserMessages(
     }
 
     const hasDeliverable = rawMessageHasDeliverableContent(message)
-    if (message.role === 'assistant' && !hasDeliverable) {
+    const isGenericFailure = !!genericModelFailureErrorFromMessage(message)
+    if (isGenericFailure || (message.role === 'assistant' && !hasDeliverable)) {
       pendingNonDeliverableAssistant = message
       continue
     }
@@ -452,6 +457,18 @@ export function buildSnapshotData(
           toolOutput: extractText(msg.content),
         }) as unknown as Prisma.InputJsonValue
       }
+    } else if ((msg.role as string) === 'custom_message') {
+      const error = genericModelFailureErrorFromMessage(msg)
+      if (!error) continue
+      const createdAt = gatewayMessageCreatedAt(msg)
+      snapshotData.push({
+        chatSessionId,
+        batchId,
+        orderIndex: orderIndex++,
+        role: 'assistant',
+        content: error,
+        ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
+      })
     }
   }
 
