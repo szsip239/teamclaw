@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chat-store'
 import { useT } from '@/stores/language-store'
 import { useChatModel } from '@/hooks/use-chat'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { latestUserTurnHasFinalAssistant } from '@/lib/chat/message-assembly'
 import { agentSupportsChatRuntime } from '@/lib/chat/runtime-options'
 import { cn } from '@/lib/utils'
 import type { ChatRuntime } from '@/lib/chat/runtime'
@@ -108,6 +109,8 @@ export function ChatInput() {
   const selectedRuntime = useChatStore((s) => s.selectedRuntime)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const remoteStreaming = useChatStore((s) => s.remoteStreaming)
+  const latestTurnComplete = useChatStore((s) => latestUserTurnHasFinalAssistant(s.messages))
+  const setRemoteStreaming = useChatStore((s) => s.setRemoteStreaming)
   const abortChat = useChatStore((s) => s.abortChat)
   const sendMessage = useChatStore((s) => s.sendMessage)
   const queueMessage = useChatStore((s) => s.queueMessage)
@@ -125,10 +128,12 @@ export function ChatInput() {
     setInput('')
     setPendingFiles([])
 
-    if (isStreaming || remoteStreaming) {
+    const shouldQueue = isStreaming || (remoteStreaming && !latestTurnComplete)
+    if (shouldQueue) {
       // Agent is running — queue the message (gateway handles serialization)
       queueMessage(selectedRuntime, message, attachments)
     } else {
+      if (remoteStreaming) setRemoteStreaming(false)
       sendMessage(
         selectedAgent.instanceId,
         selectedAgent.agentId,
@@ -154,6 +159,8 @@ export function ChatInput() {
     selectedRuntime,
     isStreaming,
     remoteStreaming,
+    latestTurnComplete,
+    setRemoteStreaming,
     sendMessage,
     queueMessage,
     activeSessionId,

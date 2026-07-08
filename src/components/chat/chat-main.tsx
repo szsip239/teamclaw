@@ -9,6 +9,7 @@ import { ChatMessageList } from './chat-message-list'
 import { ChatInput } from './chat-input'
 import { ChatWelcome } from './chat-welcome'
 import {
+  assistantCompletesTurnAfter,
   assembleHistoryMessages,
   latestUserTurnHasFinalAssistant,
 } from '@/lib/chat/message-assembly'
@@ -131,7 +132,7 @@ export function ChatMain() {
           for (const q of store.queuedMessages) {
             const idx = assembled.findIndex((m) => m.role === 'user' && m.content === q.content)
             if (idx === -1) continue
-            if (assembled.slice(idx + 1).some((m) => m.role === 'assistant' && m.content)) {
+            if (assistantCompletesTurnAfter(assembled, idx)) {
               responsesArrived++
             }
           }

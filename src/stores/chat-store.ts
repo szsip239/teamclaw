@@ -1,7 +1,11 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { streamChat } from '@/lib/chat-stream'
-import { assembleFromResponse, latestUserTurnHasFinalAssistant } from '@/lib/chat/message-assembly'
+import {
+  assembleFromResponse,
+  assistantCompletesTurnAfter,
+  latestUserTurnHasFinalAssistant,
+} from '@/lib/chat/message-assembly'
 import { attachKbSourcesToLatestAssistant } from '@/lib/chat/kb-sources'
 import { ensureChatRuntimeForAgent } from '@/lib/chat/runtime-options'
 import { translate } from '@/stores/language-store'
@@ -175,7 +179,10 @@ async function reconcileQueuedFromHistory(activeSessionId: string) {
 
     // Lightweight extraction — avoid full assembleFromResponse for polling.
     // We only need user message contents and whether assistants follow them.
-    const historyMsgs: Pick<ChatMessage, 'role' | 'content' | 'isFinal'>[] = []
+    const historyMsgs: Pick<
+      ChatMessage,
+      'role' | 'content' | 'isFinal' | 'error' | 'stopReason'
+    >[] = []
     for (const batch of data.snapshots ?? []) {
       for (const m of batch.messages) historyMsgs.push(m)
     }
@@ -190,7 +197,7 @@ async function reconcileQueuedFromHistory(activeSessionId: string) {
     for (const q of queuedMessages) {
       const idx = historyMsgs.findIndex((m) => m.role === 'user' && m.content === q.content)
       if (idx === -1) continue
-      if (historyMsgs.slice(idx + 1).some((m) => m.role === 'assistant' && m.content)) {
+      if (assistantCompletesTurnAfter(historyMsgs, idx)) {
         responsesArrived++
       }
     }
@@ -342,7 +349,7 @@ async function syncFromHistory(
         for (const q of queuedMessages) {
           const idx = assembled.findIndex((m) => m.role === 'user' && m.content === q.content)
           if (idx === -1) continue
-          if (assembled.slice(idx + 1).some((m) => m.role === 'assistant' && m.content)) {
+          if (assistantCompletesTurnAfter(assembled, idx)) {
             responsesArrived++
           }
         }
@@ -750,10 +757,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         historySynced = await syncFromHistory(capturedSessionId, set)
       }
 
-      const hasQueued =
-        get().pendingQueuedRuns > 0 && !latestUserTurnHasFinalAssistant(get().messages)
-
       const finalStreaming = get().streamingMessage
+      const runFailed = sawAssistantError || !!finalStreaming?.error
+      const hasQueued =
+        !runFailed &&
+        get().pendingQueuedRuns > 0 &&
+        !latestUserTurnHasFinalAssistant(get().messages)
+
       const finalKbSources = finalStreaming?.kbSources ?? []
       if (historySynced) {
         // Clear streamingMessage FIRST so the stage reply unmounts before
@@ -763,6 +773,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messages: attachKbSourcesToLatestAssistant(s.messages, finalKbSources),
           isStreaming: false,
           remoteStreaming: hasQueued,
+          ...(runFailed ? { queuedMessages: [], pendingQueuedRuns: 0 } : {}),
           abortController: null,
         }))
       } else if (finalStreaming) {
@@ -771,6 +782,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
+          ...(runFailed ? { queuedMessages: [], pendingQueuedRuns: 0 } : {}),
           abortController: null,
         }))
       } else {
@@ -778,6 +790,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           streamingMessage: null,
           isStreaming: false,
           remoteStreaming: hasQueued,
+          ...(runFailed ? { queuedMessages: [], pendingQueuedRuns: 0 } : {}),
           abortController: null,
         })
       }

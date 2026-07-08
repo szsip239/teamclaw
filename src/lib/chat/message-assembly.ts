@@ -57,15 +57,27 @@ export function assembleFromResponse(data: ChatHistoryResponse): ChatMessage[] {
   )
 }
 
+export function assistantMessageCompletesTurn(
+  message: Pick<ChatMessage, 'role' | 'content' | 'isFinal' | 'error' | 'stopReason'>,
+): boolean {
+  if (message.role !== 'assistant') return false
+  if (message.isFinal === true) return true
+  if (message.stopReason === 'error') return true
+  return message.isFinal !== false && (!!message.content || !!message.error)
+}
+
+export function assistantCompletesTurnAfter(
+  messages: Pick<ChatMessage, 'role' | 'content' | 'isFinal' | 'error' | 'stopReason'>[],
+  index: number,
+): boolean {
+  return messages.slice(index + 1).some(assistantMessageCompletesTurn)
+}
+
 export function latestUserTurnHasFinalAssistant(
-  messages: Pick<ChatMessage, 'role' | 'content' | 'isFinal'>[],
+  messages: Pick<ChatMessage, 'role' | 'content' | 'isFinal' | 'error' | 'stopReason'>[],
 ): boolean {
   const lastUserIdx = messages.findLastIndex((message) => message.role === 'user')
   if (lastUserIdx === -1) return false
 
-  return messages.slice(lastUserIdx + 1).some((message) => {
-    if (message.role !== 'assistant') return false
-    if (message.isFinal === true) return true
-    return message.isFinal !== false && !!message.content
-  })
+  return assistantCompletesTurnAfter(messages, lastUserIdx)
 }

@@ -26,6 +26,31 @@ describe('latestUserTurnHasFinalAssistant', () => {
     ).toBe(true)
   })
 
+  it('treats a failed assistant response as completed even without content', () => {
+    expect(
+      latestUserTurnHasFinalAssistant([
+        message('user', 'bad model'),
+        message('assistant', '', {
+          isFinal: true,
+          stopReason: 'error',
+          error: 'LLM request failed.',
+        }),
+      ]),
+    ).toBe(true)
+  })
+
+  it('treats an error stop reason as completed even when isFinal is missing', () => {
+    expect(
+      latestUserTurnHasFinalAssistant([
+        message('user', 'bad model'),
+        message('assistant', '', {
+          stopReason: 'error',
+          error: 'LLM request failed.',
+        }),
+      ]),
+    ).toBe(true)
+  })
+
   it('does not treat a staged toolUse response as completed', () => {
     expect(
       latestUserTurnHasFinalAssistant([

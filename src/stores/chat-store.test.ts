@@ -41,6 +41,18 @@ describe('chat store stream errors', () => {
     expect(source).toContain('chat.piConnectionLost')
     expect(source).toContain('Pi agent connection lost')
   })
+
+  it('treats assistant error turns as queue completion candidates', () => {
+    expect(source).toContain('assistantCompletesTurnAfter(historyMsgs, idx)')
+    expect(source).toContain('assistantCompletesTurnAfter(assembled, idx)')
+    expect(source).not.toContain("m.role === 'assistant' && m.content")
+  })
+
+  it('clears queued state after a failed foreground run', () => {
+    expect(source).toContain('const runFailed = sawAssistantError || !!finalStreaming?.error')
+    expect(source).toContain('!runFailed &&')
+    expect(source).toContain('queuedMessages: [], pendingQueuedRuns: 0')
+  })
 })
 
 describe('chat store agent activity indicators', () => {

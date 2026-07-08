@@ -25,6 +25,12 @@ describe('Chat runtime controls', () => {
     expect(inputSource).not.toContain("[{t('chat.runtimePi')}]")
   })
 
+  it('does not keep queueing when remote streaming is already completed', () => {
+    expect(inputSource).toContain('latestUserTurnHasFinalAssistant')
+    expect(inputSource).toContain('remoteStreaming && !latestTurnComplete')
+    expect(inputSource).toContain('if (remoteStreaming) setRemoteStreaming(false)')
+  })
+
   it('uses the approved robot image assets instead of hand-drawn runtime svg', () => {
     expect(iconSource).toContain('/icons/runtime-pi-robot.png?v=')
     expect(iconSource).toContain('/icons/runtime-normal-robot.png?v=')
