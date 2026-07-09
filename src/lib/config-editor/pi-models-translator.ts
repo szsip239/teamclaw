@@ -3,6 +3,26 @@ import { TEAMCLAW_DEFAULT_THINKING_LEVEL, type TeamClawThinkingLevel } from './t
 
 type PiModelEntry = ProviderEntry['models'][number]
 
+const PI_COMPAT_KEYS = new Set([
+  'supportsDeveloperRole',
+  'supportsEagerToolInputStreaming',
+  'supportsLongCacheRetention',
+  'supportsReasoningEffort',
+  'supportsStore',
+  'supportsStrictMode',
+  'supportsUsageInStreaming',
+  'maxTokensField',
+  'requiresAssistantAfterToolResult',
+  'requiresReasoningContentOnAssistantMessages',
+  'requiresThinkingAsText',
+  'requiresToolResultName',
+  'thinkingFormat',
+  'cacheControlFormat',
+  'openRouterRouting',
+  'vercelGatewayRouting',
+  'sendSessionIdHeader',
+])
+
 export interface PiProviderEntry {
   baseUrl: string
   apiKey: string
@@ -45,10 +65,32 @@ export function toPiProviderEntry(entry: ProviderEntry): PiProviderEntry {
     apiKey: entry.apiKey,
     api: mapProviderApiToPiApi(entry.api),
     models: entry.models.map((model) => {
-      const { api: _api, ...rest } = model
-      return rest
+      const { api: _api, compat, cost, ...rest } = model
+      const piCompat = sanitizePiCompat(compat)
+      return {
+        ...rest,
+        ...(cost ? { cost: normalizePiCost(cost) } : {}),
+        ...(piCompat ? { compat: piCompat } : {}),
+      }
     }),
   }
+}
+
+function normalizePiCost(cost: NonNullable<PiModelEntry['cost']>): NonNullable<PiModelEntry['cost']> {
+  return {
+    input: cost.input,
+    output: cost.output,
+    cacheRead: cost.cacheRead ?? 0,
+    cacheWrite: cost.cacheWrite ?? 0,
+  }
+}
+
+function sanitizePiCompat(compat: PiModelEntry['compat']): PiModelEntry['compat'] | undefined {
+  if (!compat) return undefined
+  const result = Object.fromEntries(
+    Object.entries(compat).filter(([key]) => PI_COMPAT_KEYS.has(key)),
+  ) as NonNullable<PiModelEntry['compat']>
+  return Object.keys(result).length > 0 ? result : undefined
 }
 
 export function buildPiModelsPatch(

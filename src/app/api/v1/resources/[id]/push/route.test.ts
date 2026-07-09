@@ -51,7 +51,12 @@ import { POST } from './route'
 const thinkingMetadata = {
   reasoning: true,
   compat: { supportedReasoningEfforts: ['low', 'medium', 'xhigh'] },
-  thinkingLevelMap: { off: null, minimal: null, high: null },
+  thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'xhigh' },
+}
+
+const piThinkingMetadata = {
+  reasoning: true,
+  thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'xhigh' },
 }
 
 function createRequest(body: Record<string, unknown> = {}) {
@@ -148,7 +153,7 @@ describe('resource model push route pi sync', () => {
               {
                 id: 'claude-sonnet-4-20250514',
                 name: 'Claude Sonnet 4',
-                ...thinkingMetadata,
+                ...piThinkingMetadata,
               },
             ],
           },
@@ -211,7 +216,7 @@ describe('resource model push route pi sync', () => {
               {
                 id: 'claude-sonnet-4-20250514',
                 name: 'Claude Sonnet 4',
-                ...thinkingMetadata,
+                ...piThinkingMetadata,
               },
             ],
           }),

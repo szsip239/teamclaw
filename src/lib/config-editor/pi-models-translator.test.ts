@@ -121,4 +121,46 @@ describe('pi models translator', () => {
       thinkingLevelMap: { high: 'high', xhigh: 'max' },
     })
   })
+
+  it('normalizes incomplete OpenClaw cost objects for Pi schema validation', () => {
+    const entry: ProviderEntry = {
+      ...providerEntry,
+      models: [
+        {
+          id: 'MiniMax-M3',
+          name: 'MiniMax-M3',
+          reasoning: true,
+          cost: { input: 0.3, output: 1.2, cacheRead: 0.06 },
+        },
+      ],
+    }
+
+    expect(toPiProviderEntry(entry).models[0]?.cost).toEqual({
+      input: 0.3,
+      output: 1.2,
+      cacheRead: 0.06,
+      cacheWrite: 0,
+    })
+  })
+
+  it('drops OpenClaw-only compatibility hints from Pi model config', () => {
+    const entry: ProviderEntry = {
+      ...providerEntry,
+      models: [
+        {
+          id: 'MiniMax-M3',
+          name: 'MiniMax-M3',
+          reasoning: true,
+          compat: {
+            supportedReasoningEfforts: ['low', 'medium', 'xhigh'],
+            supportsEagerToolInputStreaming: false,
+          },
+        },
+      ],
+    }
+
+    expect(toPiProviderEntry(entry).models[0]?.compat).toEqual({
+      supportsEagerToolInputStreaming: false,
+    })
+  })
 })

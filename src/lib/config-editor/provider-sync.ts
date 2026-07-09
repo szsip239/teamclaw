@@ -126,7 +126,10 @@ function buildTeamClawThinkingLevelMap(
   }
   return {
     ...next,
-    ...TEAMCLAW_THINKING_LEVEL_MAP,
+    off: TEAMCLAW_THINKING_LEVEL_MAP.off,
+    minimal: TEAMCLAW_THINKING_LEVEL_MAP.minimal,
+    high: TEAMCLAW_THINKING_LEVEL_MAP.high,
+    xhigh: next.xhigh ?? TEAMCLAW_THINKING_LEVEL_MAP.xhigh,
   }
 }
 

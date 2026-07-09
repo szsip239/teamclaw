@@ -48,7 +48,12 @@ const findManyMock = prisma.resource.findMany as unknown as Mock
 const thinkingMetadata = {
   reasoning: true,
   compat: { supportedReasoningEfforts: ['low', 'medium', 'xhigh'] },
-  thinkingLevelMap: { off: null, minimal: null, high: null },
+  thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'xhigh' },
+}
+
+const piThinkingMetadata = {
+  reasoning: true,
+  thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'xhigh' },
 }
 
 describe('provider sync OpenClaw provider mapping', () => {
@@ -328,7 +333,7 @@ describe('provider sync OpenClaw provider mapping', () => {
               {
                 id: 'claude-sonnet-4-20250514',
                 name: 'Claude Sonnet 4',
-                ...thinkingMetadata,
+                ...piThinkingMetadata,
               },
             ],
           },
