@@ -119,3 +119,7 @@ drafts/
 config.toml
 .baked-package.json
 scripts/poc-ws-direct.ts
+
+# Generated deployment markers
+REVISION
+BUILD_INFO.json
