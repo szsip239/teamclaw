@@ -98,7 +98,7 @@ docker compose -f docker-compose.prod.yml logs -f app
 docker compose -f docker-compose.prod.yml --profile nginx up -d --build
 ```
 
-如果目标主机已有其他反向代理占用 `80/443`，不要直接启用 TeamClaw 的 nginx profile。应改用现有反向代理转发到 TeamClaw app 端口，或设置不冲突的 `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`。维护者排查生产问题前，应先确认当前生产运行在哪台主机，不要默认本机 Docker stack 就是生产环境。
+如果目标主机已有其他反向代理占用 `80/443`，不要直接启用 TeamClaw 的 nginx profile。应改用现有反向代理转发到 TeamClaw app 端口，或设置不冲突的 `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`。
 
 ### 本地开发
 
@@ -288,7 +288,7 @@ For Nginx HTTPS, place certificates under `nginx/cert/`, configure `NGINX_*` in 
 docker compose -f docker-compose.prod.yml --profile nginx up -d --build
 ```
 
-If another reverse proxy already owns `80/443` on the target host, do not enable TeamClaw's nginx profile with default ports. Route the existing proxy to the TeamClaw app port, or set non-conflicting `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`. Maintainers should confirm which host is production before debugging live behavior; do not assume a local Docker stack is production.
+If another reverse proxy already owns `80/443` on the target host, do not enable TeamClaw's nginx profile with default ports. Route the existing proxy to the TeamClaw app port, or set non-conflicting `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`.
 
 ### Local Development
 
