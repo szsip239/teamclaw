@@ -161,6 +161,73 @@ export function gatewayMessageCreatedAt(message: ChatHistoryMessage): string | u
   return parseGatewayMessageTime(message.timestamp) ?? parseGatewayMessageTime(message.createdAt)
 }
 
+function createdAtBoundaryMs(createdAt: Date | string | undefined | null): number | undefined {
+  if (!createdAt) return undefined
+  const time = createdAt instanceof Date ? createdAt.getTime() : Date.parse(createdAt)
+  return Number.isNaN(time) ? undefined : time - 2_000
+}
+
+function validCreatedAtMs(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : time
+}
+
+function stripLeadingRuntimeResetMessages(messages: ChatMessage[]): ChatMessage[] {
+  let start = 0
+  while (start < messages.length) {
+    const user = messages[start]
+    if (user.role !== 'user' || user.content.trim() !== '/new') break
+
+    start += 1
+    const assistant = messages[start]
+    if (
+      assistant?.role === 'assistant' &&
+      /new session started/i.test(assistant.content) &&
+      assistant.stopReason !== 'error'
+    ) {
+      start += 1
+    }
+  }
+
+  return start === 0 ? messages : messages.slice(start)
+}
+
+export function trimGatewayMessagesBeforeCreatedAt(
+  messages: ChatHistoryMessage[],
+  createdAt: Date | string | undefined | null,
+): ChatHistoryMessage[] {
+  const boundaryMs = createdAtBoundaryMs(createdAt)
+  if (boundaryMs === undefined || messages.length === 0) return messages
+
+  const firstInSession = messages.findIndex((message) => {
+    const created = gatewayMessageCreatedAt(message)
+    const time = validCreatedAtMs(created)
+    return time === undefined || time >= boundaryMs
+  })
+
+  if (firstInSession === -1) return []
+  return firstInSession === 0 ? messages : messages.slice(firstInSession)
+}
+
+export function trimChatMessagesBeforeCreatedAt(
+  messages: ChatMessage[],
+  createdAt: Date | string | undefined | null,
+): ChatMessage[] {
+  const boundaryMs = createdAtBoundaryMs(createdAt)
+  if (messages.length === 0) return messages
+  if (boundaryMs === undefined) return stripLeadingRuntimeResetMessages(messages)
+
+  const firstInSession = messages.findIndex((message) => {
+    const time = validCreatedAtMs(message.createdAt)
+    return time === undefined || time >= boundaryMs
+  })
+
+  if (firstInSession === -1) return []
+  const scoped = firstInSession === 0 ? messages : messages.slice(firstInSession)
+  return stripLeadingRuntimeResetMessages(scoped)
+}
+
 /**
  * Strip local file references from assistant text.
  * These paths are useful to the runtime but should not participate in display
@@ -574,10 +641,13 @@ export async function archiveSession(
   // and stored in liveMessages, but chat.history strips inline image blocks).
   const session = await prisma.chatSession.findUnique({
     where: { id: sessionId },
-    select: { liveMessages: true },
+    select: { createdAt: true, liveMessages: true },
   })
   const liveMessages = Array.isArray(session?.liveMessages)
-    ? (session.liveMessages as unknown as ChatMessage[])
+    ? trimChatMessagesBeforeCreatedAt(
+        session.liveMessages as unknown as ChatMessage[],
+        session.createdAt,
+      )
     : null
 
   // Fetch history from gateway (may fail if gateway is offline)
@@ -588,7 +658,10 @@ export async function archiveSession(
       limit: LIVE_HISTORY_LIMIT,
     })
     const historyResult = rawResult as ChatHistoryResult
-    rawMessages = historyResult.messages ?? []
+    rawMessages = trimGatewayMessagesBeforeCreatedAt(
+      historyResult.messages ?? [],
+      session?.createdAt,
+    )
   } catch {
     // Gateway offline — continue with DB operations
   }
@@ -1361,13 +1434,20 @@ export async function saveLiveSnapshot(
   assistantContentOverride?: string,
   assistantErrorOverride?: string,
 ): Promise<boolean> {
+  const sessionMeta = await prisma.chatSession.findUnique({
+    where: { id: chatSessionId },
+    select: { createdAt: true },
+  })
   const rawResult = await client.request(
     'chat.history',
     { sessionKey, limit: LIVE_HISTORY_LIMIT },
     10_000,
   )
   const historyResult = rawResult as ChatHistoryResult
-  const rawMessages = historyResult.messages ?? []
+  const rawMessages = trimGatewayMessagesBeforeCreatedAt(
+    historyResult.messages ?? [],
+    sessionMeta?.createdAt,
+  )
   if (rawMessages.length === 0) return false
 
   let liveMessages = transformToLiveMessages(rawMessages)
@@ -1431,10 +1511,13 @@ export async function saveLiveSnapshot(
   await withSessionSnapshotLock(chatSessionId, async () => {
     const session = await prisma.chatSession.findUnique({
       where: { id: chatSessionId },
-      select: { gwSessionId: true, liveMessages: true },
+      select: { createdAt: true, gwSessionId: true, liveMessages: true },
     })
     const existingLive = Array.isArray(session?.liveMessages)
-      ? (session.liveMessages as unknown as ChatMessage[])
+      ? trimChatMessagesBeforeCreatedAt(
+          session.liveMessages as unknown as ChatMessage[],
+          session.createdAt,
+        )
       : []
     const archiveMessages: ChatMessage[] = []
 

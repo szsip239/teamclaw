@@ -8,6 +8,7 @@ import {
 } from '@/lib/chat/message-assembly'
 import { attachKbSourcesToLatestAssistant } from '@/lib/chat/kb-sources'
 import { ensureChatRuntimeForAgent } from '@/lib/chat/runtime-options'
+import { createClientId } from '@/lib/client-id'
 import { translate } from '@/stores/language-store'
 import type {
   ChatAgentInfo,
@@ -415,7 +416,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   addUserMessage: (content, attachments, runtime) => {
     const msg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: createClientId('chat-user'),
       role: 'user',
       content,
       runtime,
@@ -621,7 +622,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 2. Create assistant placeholder as streamingMessage (not in messages[])
     const assistantMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: createClientId('chat-assistant'),
       role: 'assistant',
       content: '',
       runtime,
@@ -833,7 +834,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       dataUrl: a.dataUrl,
     }))
     const queuedMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: createClientId('chat-queued'),
       role: 'user',
       content: message,
       runtime,

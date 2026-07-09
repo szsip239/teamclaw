@@ -8,6 +8,7 @@ import {
   mergeToolInputs,
   shouldUseLiveMessagesFallback,
   markNonDeliverableTerminalTurn,
+  trimChatMessagesBeforeCreatedAt,
   transformToLiveMessages,
   trimCurrentMessagesOverlappingSnapshot,
 } from '@/lib/chat/snapshot-helpers'
@@ -241,7 +242,10 @@ export const GET = withAuth(
               10_000,
             )
             const historyResult = rawResult as ChatHistoryResult
-            const msgs = transformMessages(historyResult.messages ?? [])
+            const msgs = trimChatMessagesBeforeCreatedAt(
+              transformMessages(historyResult.messages ?? []),
+              runtimeSession.createdAt,
+            )
             let cachedLive: ChatMessage[] | null = null
 
             // Merge image contentBlocks from liveMessages (captured during SSE streaming).
@@ -250,7 +254,7 @@ export const GET = withAuth(
             if (runtimeSession.liveMessages) {
               const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
               if (Array.isArray(cached)) {
-                cachedLive = cached
+                cachedLive = trimChatMessagesBeforeCreatedAt(cached, runtimeSession.createdAt)
               }
             }
 
@@ -312,8 +316,12 @@ export const GET = withAuth(
               if (runtimeSession.liveMessages) {
                 const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
                 if (Array.isArray(cached)) {
+                  const scopedCached = trimChatMessagesBeforeCreatedAt(
+                    cached,
+                    runtimeSession.createdAt,
+                  )
                   currentMessages.push(
-                    ...withRuntimeMessageMetadata(cached, {
+                    ...withRuntimeMessageMetadata(scopedCached, {
                       sourceSessionId: runtimeSession.id,
                       runtime,
                       baseTimeMs: baseTime,
@@ -333,8 +341,9 @@ export const GET = withAuth(
           if (runtimeSession.liveMessages) {
             const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
             if (Array.isArray(cached)) {
+              const scopedCached = trimChatMessagesBeforeCreatedAt(cached, runtimeSession.createdAt)
               currentMessages.push(
-                ...withRuntimeMessageMetadata(cached, {
+                ...withRuntimeMessageMetadata(scopedCached, {
                   sourceSessionId: runtimeSession.id,
                   runtime: fromDbChatRuntime(runtimeSession.runtime),
                   baseTimeMs: new Date(
@@ -353,8 +362,9 @@ export const GET = withAuth(
         if (runtimeSession.liveMessages) {
           const cached = runtimeSession.liveMessages as unknown as ChatMessage[]
           if (Array.isArray(cached)) {
+            const scopedCached = trimChatMessagesBeforeCreatedAt(cached, runtimeSession.createdAt)
             currentMessages.push(
-              ...withRuntimeMessageMetadata(cached, {
+              ...withRuntimeMessageMetadata(scopedCached, {
                 sourceSessionId: runtimeSession.id,
                 runtime: fromDbChatRuntime(runtimeSession.runtime),
                 baseTimeMs: new Date(

@@ -50,7 +50,9 @@ import {
   mergeToolCalls,
   saveLiveSnapshot,
   shouldUseLiveMessagesFallback,
+  trimChatMessagesBeforeCreatedAt,
   trimCurrentMessagesOverlappingSnapshot,
+  trimGatewayMessagesBeforeCreatedAt,
   transformToLiveMessages,
 } from './snapshot-helpers'
 
@@ -172,6 +174,72 @@ describe('live snapshot append-only merge', () => {
     expect(shouldUseLiveMessagesFallback(gatewayTail, cached, true)).toBe(true)
     expect(shouldUseLiveMessagesFallback(gatewayTail, cached, false)).toBe(false)
     expect(shouldUseLiveMessagesFallback(cached, cached, true)).toBe(false)
+  })
+
+  it('trims gateway history that predates the TeamClaw session boundary', () => {
+    const messages: ChatHistoryMessage[] = [
+      {
+        role: 'user',
+        content: 'old prompt',
+        createdAt: '2026-06-25T07:07:33.000Z',
+      },
+      {
+        role: 'assistant',
+        content: 'old answer',
+        createdAt: '2026-06-25T07:07:34.000Z',
+      },
+      {
+        role: 'user',
+        content: 'new prompt',
+        createdAt: '2026-07-09T06:03:49.000Z',
+      },
+    ]
+
+    const scoped = trimGatewayMessagesBeforeCreatedAt(
+      messages,
+      new Date('2026-07-09T06:03:48.791Z'),
+    )
+
+    expect(scoped.map((message) => message.content)).toEqual(['new prompt'])
+  })
+
+  it('trims cached live messages that predate the TeamClaw session boundary', () => {
+    const cached = [
+      chatMessage('user', 'old prompt', { createdAt: '2026-06-25T07:07:33.000Z' }),
+      chatMessage('assistant', 'old answer', { createdAt: '2026-06-25T07:07:34.000Z' }),
+      chatMessage('user', 'new prompt', { createdAt: '2026-07-09T06:03:49.000Z' }),
+    ]
+
+    const scoped = trimChatMessagesBeforeCreatedAt(
+      cached,
+      new Date('2026-07-09T06:03:48.791Z'),
+    )
+
+    expect(scoped.map((message) => message.content)).toEqual(['new prompt'])
+  })
+
+  it('removes leading runtime reset messages from current TeamClaw history', () => {
+    const cached = [
+      chatMessage('user', '/new', { createdAt: '2026-07-09T06:30:00.000Z' }),
+      chatMessage('assistant', '✅ New session started.', {
+        createdAt: '2026-07-09T06:30:01.000Z',
+        isFinal: true,
+        stopReason: 'stop',
+      }),
+      chatMessage('user', '请只回复 OK', { createdAt: '2026-07-09T06:30:02.000Z' }),
+      chatMessage('assistant', 'OK', {
+        createdAt: '2026-07-09T06:30:03.000Z',
+        isFinal: true,
+        stopReason: 'stop',
+      }),
+    ]
+
+    const scoped = trimChatMessagesBeforeCreatedAt(
+      cached,
+      new Date('2026-07-09T06:30:00.000Z'),
+    )
+
+    expect(scoped.map((message) => message.content)).toEqual(['请只回复 OK', 'OK'])
   })
 
   it('preserves live timestamps when gateway history is the same length', () => {

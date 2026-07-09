@@ -5,6 +5,7 @@ import mermaid from 'mermaid'
 import { useTheme } from 'next-themes'
 import { AlertTriangle, Code2 } from 'lucide-react'
 import { useT } from '@/stores/language-store'
+import { createClientId } from '@/lib/client-id'
 
 // Global render queue — mermaid.render() uses global DOM state
 // and cannot run concurrently without corruption
@@ -46,7 +47,7 @@ export const ChatMermaidBlock = memo(function ChatMermaidBlock({ code }: ChatMer
 
   useEffect(() => {
     const currentRender = ++renderIdRef.current
-    const id = 'mermaid-' + crypto.randomUUID()
+    const id = createClientId('mermaid')
 
     enqueueMermaidRender(id, code, resolvedTheme ?? 'light')
       .then((renderedSvg) => {
