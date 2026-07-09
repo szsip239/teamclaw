@@ -119,9 +119,3 @@ drafts/
 config.toml
 .baked-package.json
 scripts/poc-ws-direct.ts
-
-# Local deployment targets and generated revision markers
-/.deploy/
-/scripts/deploy-*.local.sh
-REVISION
-BUILD_INFO.json
