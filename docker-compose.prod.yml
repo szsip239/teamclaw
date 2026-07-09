@@ -1,5 +1,6 @@
 services:
   init:
+    image: '${TEAMCLAW_IMAGE_NAMESPACE:-teamclaw}-init:${TEAMCLAW_IMAGE_TAG:-latest}'
     build:
       context: .
       dockerfile: Dockerfile
@@ -21,9 +22,12 @@ services:
     restart: 'no'
 
   app:
+    image: '${TEAMCLAW_IMAGE_NAMESPACE:-teamclaw}-app:${TEAMCLAW_IMAGE_TAG:-latest}'
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TEAMCLAW_BUILD_REVISION: '${TEAMCLAW_BUILD_REVISION:-unknown}'
     container_name: teamclaw-app
     restart: unless-stopped
     ports:
@@ -84,6 +88,7 @@ services:
       - rag-output:/app/ingestion_output
 
   rag:
+    image: '${TEAMCLAW_IMAGE_NAMESPACE:-teamclaw}-rag:${TEAMCLAW_IMAGE_TAG:-latest}'
     build:
       context: ./rag-service
       dockerfile: Dockerfile

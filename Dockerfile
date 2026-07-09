@@ -38,8 +38,11 @@ CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts"]
 FROM node:20-alpine AS runner
 WORKDIR /app
 
+ARG TEAMCLAW_BUILD_REVISION=unknown
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV TEAMCLAW_BUILD_REVISION=$TEAMCLAW_BUILD_REVISION
+LABEL org.opencontainers.image.revision=$TEAMCLAW_BUILD_REVISION
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 -G nodejs nextjs && \
