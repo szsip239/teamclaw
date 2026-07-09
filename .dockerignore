@@ -3,6 +3,7 @@ node_modules
 .next
 .git
 .claude
+.deploy
 .teamclaw
 .env
 .env.local
@@ -13,5 +14,7 @@ docs/screenshots/
 !README.md
 CLAUDE.md
 scripts/debug-*.ts
+# Local deployment tooling is excluded
+REVISION
 coverage/
 .DS_Store
