@@ -4,6 +4,40 @@ All notable changes since `v0.3.0` (2026-03-30).
 
 ---
 
+## v0.7.0 (2026-07-11)
+
+> Minor release focused on reliable multi-runtime conversations, Pi runtime operations, fresh-install schema completeness, and traceable production builds.
+
+### Chat Reliability
+
+- Normalized OpenClaw and Pi model failures into one user message followed by one visible terminal error, removing repeated prompts and duplicate failure bubbles.
+- Persisted terminal Pi/OpenClaw errors even when gateway history or snapshot saving is unavailable, so failed turns remain visible after refresh.
+- Treated assistant errors as completed turns and cleared failed queued runs, preventing stale loading indicators and queued-message replays.
+- Scoped shared gateway history to the current TeamClaw session creation time and removed leading runtime reset messages, preventing older conversations from leaking into newly created sessions.
+- Added a browser-compatible client ID fallback for environments where `crypto.randomUUID()` is unavailable.
+
+### Pi Runtime and Models
+
+- Routed Pi wrapper connections through `host.docker.internal` when TeamClaw runs inside Docker and Pi runs on the host.
+- Added `OC` and `Pi` version labels to the instance table for Pi-enabled instances.
+- Normalized Pi model compatibility fields and token-cost defaults before resource pushes, avoiding unsupported OpenClaw-only fields in Pi configuration.
+- Preserved provider-specific `xhigh` thinking mappings while keeping TeamClaw's standard thinking-level defaults.
+
+### Database and Operations
+
+- Added missing baseline migrations for knowledge bases, regulation pending updates, and Chat/Resource/Instance schema alignment so fresh databases can migrate cleanly.
+- Added commit-tagged `app`, `init`, and `rag` images and exposed the app build revision from `/api/health`.
+- Documented reverse-proxy port conflicts for hosts where another service already owns `80/443`.
+- Updated ECharts to `6.1.0` and refreshed the frontend dependency lockfile.
+
+### Upgrade Notes
+
+- Run `npx prisma migrate deploy` (or the production `init` migration path) before starting the updated app.
+- Existing database and runtime volumes are preserved; this release does not rotate credentials or recreate OpenClaw/Pi instances.
+- Pi-enabled Docker deployments must allow the app container to resolve `host.docker.internal` when the Pi wrapper is exposed on a host port.
+
+---
+
 ## v0.6.2 (2026-06-21)
 
 > Patch release: removes reusable demo credentials from the published setup path and makes fresh deployments generate their own database, RAG, and initial admin secrets.
