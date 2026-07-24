@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth, withPermission, param, type AuthContext } from '@/lib/middleware/auth'
 import { isKbVisible } from '@/lib/knowledge-base/permissions'
+import { openUploadedFile } from '@/lib/knowledge-base/file-storage'
 
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:8000'
 
@@ -40,7 +41,27 @@ export const GET = withAuth(
       headers: rangeHeader ? { Range: rangeHeader } : undefined,
     })
     if (!res.ok) {
-      return NextResponse.json({ error: 'Source PDF not archived' }, { status: 404 })
+      const uploaded = await openUploadedFile(kbId, doc.fileName, rangeHeader)
+      if (!uploaded) {
+        return NextResponse.json({ error: 'Source PDF not found' }, { status: 404 })
+      }
+
+      const fallbackHeaders = new Headers({
+        ...cacheHeaders,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': String(uploaded.size),
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${encodeURIComponent(doc.fileName)}"`,
+        'X-Content-Type-Options': 'nosniff',
+      })
+      if (uploaded.contentRange) {
+        fallbackHeaders.set('Content-Range', uploaded.contentRange)
+      }
+
+      return new NextResponse(uploaded.body, {
+        status: uploaded.status,
+        headers: fallbackHeaders,
+      })
     }
 
     const headers = new Headers({

@@ -1,5 +1,7 @@
-import { writeFile, mkdir, rm, stat } from 'fs/promises'
-import { join } from 'path'
+import { createReadStream } from 'node:fs'
+import { writeFile, mkdir, rm, stat } from 'node:fs/promises'
+import { Readable } from 'node:stream'
+import { dirname, join, resolve, sep } from 'node:path'
 
 const KB_DATA_DIR = process.env.NODE_ENV === 'production'
   ? '/app/data/knowledge-bases'
@@ -22,15 +24,107 @@ export function toContainerPath(hostPath: string): string {
 
 /** Save an uploaded file to the KB storage directory. Returns the absolute file path. */
 export async function saveUploadedFile(kbId: string, fileName: string, buffer: Buffer): Promise<string> {
-  const dir = join(KB_DATA_DIR, kbId, 'uploads')
+  const filePath = resolveUploadedFilePath(kbId, fileName)
+  const dir = dirname(filePath)
   await mkdir(dir, { recursive: true })
-
-  // Sanitize filename — prevent path traversal
-  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
-  const filePath = join(dir, safe)
 
   await writeFile(filePath, buffer)
   return filePath
+}
+
+export function sanitizeUploadedFileName(fileName: string): string {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
+}
+
+/** Resolve the persisted upload that is retained independently of RAG artifacts. */
+export function resolveUploadedFilePath(
+  kbId: string,
+  fileName: string,
+  storageRoot = KB_DATA_DIR,
+): string {
+  const root = resolve(storageRoot)
+  const uploadDir = resolve(root, kbId, 'uploads')
+  const filePath = resolve(uploadDir, sanitizeUploadedFileName(fileName))
+
+  if (
+    (uploadDir !== root && !uploadDir.startsWith(`${root}${sep}`)) ||
+    !filePath.startsWith(`${uploadDir}${sep}`)
+  ) {
+    throw new Error('Path traversal detected')
+  }
+  return filePath
+}
+
+export interface OpenedUploadedFile {
+  body: ReadableStream<Uint8Array>
+  status: 200 | 206
+  size: number
+  totalSize: number
+  contentRange: string | null
+}
+
+/**
+ * Open the original upload as a stream. This is the durable fallback when a
+ * migrated or pruned RAG artifact volume no longer contains source.pdf.
+ */
+export async function openUploadedFile(
+  kbId: string,
+  fileName: string,
+  rangeHeader: string | null,
+  storageRoot = KB_DATA_DIR,
+): Promise<OpenedUploadedFile | null> {
+  const filePath = resolveUploadedFilePath(kbId, fileName, storageRoot)
+  let fileStat
+  try {
+    fileStat = await stat(filePath)
+  } catch {
+    return null
+  }
+  if (!fileStat.isFile()) return null
+
+  const range = parseByteRange(rangeHeader, fileStat.size)
+  const stream = range
+    ? createReadStream(filePath, { start: range.start, end: range.end })
+    : createReadStream(filePath)
+
+  return {
+    body: Readable.toWeb(stream) as ReadableStream<Uint8Array>,
+    status: range ? 206 : 200,
+    size: range ? range.end - range.start + 1 : fileStat.size,
+    totalSize: fileStat.size,
+    contentRange: range ? `bytes ${range.start}-${range.end}/${fileStat.size}` : null,
+  }
+}
+
+function parseByteRange(
+  rangeHeader: string | null,
+  totalSize: number,
+): { start: number; end: number } | null {
+  if (!rangeHeader || totalSize <= 0) return null
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim())
+  if (!match || (!match[1] && !match[2])) return null
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2])
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null
+    return {
+      start: Math.max(0, totalSize - suffixLength),
+      end: totalSize - 1,
+    }
+  }
+
+  const start = Number(match[1])
+  const requestedEnd = match[2] ? Number(match[2]) : totalSize - 1
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(requestedEnd) ||
+    start < 0 ||
+    start >= totalSize ||
+    requestedEnd < start
+  ) {
+    return null
+  }
+  return { start, end: Math.min(requestedEnd, totalSize - 1) }
 }
 
 /** Get the file size in bytes. */
