@@ -29,6 +29,15 @@ function fixGoogleProviderBaseUrl(providerId: string, baseUrl: string, apiType?:
   return baseUrl
 }
 
+function requiresSystemPromptRole(baseUrl: string, apiType?: string): boolean {
+  if (apiType !== 'openai-completions') return false
+  try {
+    return new URL(baseUrl).hostname === 'ark.cn-beijing.volces.com'
+  } catch {
+    return false
+  }
+}
+
 export function resolveOpenClawProviderId(
   providerId: string,
   resourceConfig?: ResourceConfig | null,
@@ -191,6 +200,9 @@ export function buildProviderEntryFromResource(resource: ProviderResource): {
       modelEntry.reasoning = true
       modelEntry.compat = {
         ...(m.compat ?? {}),
+        ...(requiresSystemPromptRole(baseUrl, apiType)
+          ? { supportsDeveloperRole: false }
+          : {}),
         supportedReasoningEfforts: [...TEAMCLAW_THINKING_LEVELS],
       }
       modelEntry.thinkingLevelMap = buildTeamClawThinkingLevelMap(m.thinkingLevelMap)

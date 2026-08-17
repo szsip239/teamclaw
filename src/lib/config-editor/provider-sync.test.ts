@@ -51,6 +51,14 @@ const thinkingMetadata = {
   thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'xhigh' },
 }
 
+const volcengineThinkingMetadata = {
+  ...thinkingMetadata,
+  compat: {
+    ...thinkingMetadata.compat,
+    supportsDeveloperRole: false,
+  },
+}
+
 const piThinkingMetadata = {
   reasoning: true,
   thinkingLevelMap: { off: null, minimal: null, high: null, xhigh: 'xhigh' },
@@ -112,7 +120,7 @@ describe('provider sync OpenClaw provider mapping', () => {
           id: 'ark-code-latest',
           name: 'Ark Coding Plan',
           api: 'openai-completions',
-          ...thinkingMetadata,
+          ...volcengineThinkingMetadata,
         },
       ],
     })
@@ -143,7 +151,7 @@ describe('provider sync OpenClaw provider mapping', () => {
           id: 'doubao-seed-2.0-code',
           name: 'Doubao Seed 2.0 Code',
           api: 'openai-completions',
-          ...thinkingMetadata,
+          ...volcengineThinkingMetadata,
         },
       ],
     })
@@ -198,7 +206,7 @@ describe('provider sync OpenClaw provider mapping', () => {
             id: 'doubao-seed-2.0-pro',
             name: 'Doubao Seed 2.0 Pro',
             api: 'openai-completions',
-            ...thinkingMetadata,
+            ...volcengineThinkingMetadata,
           },
         ],
       },
