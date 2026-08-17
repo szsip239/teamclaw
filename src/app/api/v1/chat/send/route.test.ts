@@ -65,4 +65,15 @@ describe('chat send runtime guardrails', () => {
     expect(source).toContain('Pi agent connection lost')
     expect(source).not.toContain('Pi runtime is not implemented yet')
   })
+
+  it('clears an orphaned runtime context before first use in a visible conversation', () => {
+    const targetResolution = source.slice(
+      source.indexOf('// --- Resolve visible conversation group'),
+      source.indexOf('// --- Find or create ChatSession'),
+    )
+
+    expect(targetResolution).toContain('if (!targetRuntimeSession)')
+    expect(targetResolution).toContain('isActive: true')
+    expect(targetResolution).toContain("client.request('sessions.delete', { key: sessionKey })")
+  })
 })

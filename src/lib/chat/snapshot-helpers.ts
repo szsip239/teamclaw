@@ -424,14 +424,6 @@ export function markNonDeliverableTerminalTurn(
   if (lastUserIdx === -1) return
 
   const afterLastUser = messages.slice(lastUserIdx + 1)
-  if (
-    afterLastUser.some(
-      (message) => message.role === 'assistant' && (message.error || message.content),
-    )
-  ) {
-    return
-  }
-
   const lastAssistant = [...afterLastUser].reverse().find((message) => message.role === 'assistant')
   if (!lastAssistant) return
   if (lastAssistant.stopReason !== 'length') return

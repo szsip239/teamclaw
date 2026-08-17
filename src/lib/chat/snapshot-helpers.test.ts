@@ -1214,6 +1214,42 @@ status: failed
     })
   })
 
+  it('marks a length-limited terminal turn as failed after visible staged progress', () => {
+    const messages = transformToLiveMessages([
+      user('生成企业递单方案'),
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '正在检索公开市场信息。' },
+          {
+            type: 'toolCall',
+            name: 'web_search',
+            arguments: { query: '企业研报' },
+          },
+        ],
+        stopReason: 'toolUse',
+      },
+      {
+        role: 'toolResult',
+        toolName: 'web_search',
+        content: '检索完成',
+      },
+      {
+        role: 'assistant',
+        content: '资料已齐全，正在生成完整方案。',
+        stopReason: 'length',
+      },
+    ])
+
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '资料已齐全，正在生成完整方案。',
+      error: 'Agent failed before reply: incomplete terminal response (stopReason=length)',
+      stopReason: 'length',
+      isFinal: true,
+    })
+  })
+
   it('drops non-terminal hidden retry assistant attempts before a later user turn', () => {
     const messages = transformToLiveMessages([
       {

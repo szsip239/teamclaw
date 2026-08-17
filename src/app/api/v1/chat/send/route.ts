@@ -312,7 +312,36 @@ export async function POST(req: NextRequest) {
                 OR: [{ id: conversationGroupId }, { conversationGroupId }],
               },
             })
-      if (targetRuntimeSession && !targetRuntimeSession.isActive) {
+      if (!targetRuntimeSession) {
+        // Runtime gateway keys are shared across visible conversations. A runtime
+        // first introduced into this group must not continue an orphaned context
+        // left by an older DB session (notably a Pi session with a pinned model).
+        const activeRuntimeSession = await prisma.chatSession.findFirst({
+          where: {
+            userId: user.id,
+            instanceId,
+            agentId,
+            runtime: dbRuntime,
+            isActive: true,
+          },
+        })
+        if (activeRuntimeSession) {
+          await archiveSession(
+            activeRuntimeSession.id,
+            instanceId,
+            agentId,
+            user.id,
+            client,
+            {
+              runtime,
+              triggerMemoryDump: runtime === 'openclaw',
+              waitForNewCompletion: runtime === 'openclaw',
+            },
+          )
+        } else {
+          await client.request('sessions.delete', { key: sessionKey })
+        }
+      } else if (!targetRuntimeSession.isActive) {
         await switchActiveSession(user.id, instanceId, agentId, targetRuntimeSession.id)
       }
     }
